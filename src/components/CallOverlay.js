@@ -172,13 +172,32 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
             if (partnerVideo.current) partnerVideo.current.srcObject = currentStream;
         });
 
+        if (p._pc) {
+            p._pc.oniceconnectionstatechange = () => {
+                const state = p._pc.iceConnectionState;
+                if (state === 'disconnected' || state === 'failed') {
+                    setConnectionStatus("Connection Unstable...");
+                    showToast("Network connection unstable", "error");
+                }
+                if (state === 'connected' || state === 'completed') {
+                    setConnectionStatus("Connected");
+                }
+            };
+        }
+
         setPeer(p);
     };
 
     const endCall = async () => {
         if (activeCall.id) {
             try {
-                await deleteDoc(doc(db, "calls", activeCall.id));
+                // If I am the caller and status is still 'offering', it means it was a missed call for the target
+                if (!isIncoming && activeCall.status === 'offering') {
+                    await updateDoc(doc(db, "calls", activeCall.id), { status: 'missed' });
+                } else {
+                    // Otherwise just delete/end it
+                    await deleteDoc(doc(db, "calls", activeCall.id));
+                }
             } catch (e) { console.error(e); }
         }
         onClose();

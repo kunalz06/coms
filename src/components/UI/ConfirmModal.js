@@ -14,8 +14,8 @@ export default function ConfirmModal({ isOpen, message, onConfirm, onCancel }) {
                 <h3 className={styles.title}>Are you sure?</h3>
                 <p className={styles.message}>{message}</p>
                 <div className={styles.actions}>
-                    <button onClick={onCancel} className={styles.cancelBtn}>Cancel</button>
-                    <button onClick={onConfirm} className={styles.confirmBtn}>Confirm</button>
+                    <button onClick={onCancel} className="btn btn-ghost">Cancel</button>
+                    <button onClick={onConfirm} className="btn btn-primary">Confirm</button>
                 </div>
             </div>
         </div>

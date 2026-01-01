@@ -1,19 +1,18 @@
 :root {
-  --background: #0a0a0a;
-  --surface: #121212;
-  --surface-hover: #1e1e1e;
-  --primary: #0070f3;
-  --primary-glow: rgba(0, 112, 243, 0.4);
-  --secondary: #7928ca;
+  --background: #050505;
+  --surface: #101010;
+  --surface-hover: #1a1a1a;
+  --primary: #2F80ED;
+  --primary-glow: rgba(47, 128, 237, 0.4);
+  --secondary: #7055fd;
   --text-primary: #ffffff;
-  --text-secondary: #a1a1a1;
-  --border: #333333;
-  --success: #00bc7d;
-  --error: #ff4444;
-  --radius: 20px;
+  --text-secondary: #94a3b8;
+  --border: #222222;
+  --success: #22c55e;
+  --error: #ef4444;
+  --radius: 24px;
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-weight-normal: 500;
-  /* Bolder base text */
   --font-weight-bold: 700;
 }
 
@@ -35,6 +34,8 @@ body {
   color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.015em;
+  line-height: 1.6;
 }
 
 a {
@@ -127,5 +128,33 @@ a {
 .btn-ghost:hover {
   background: rgba(255, 255, 255, 0.1);
   color: white;
+  transform: translateY(-1px);
+}
+
+.btn-sm {
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+  border-radius: 10px;
+}
+
+.btn-icon {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-success {
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.btn-success:hover {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.3);
   transform: translateY(-1px);
 }

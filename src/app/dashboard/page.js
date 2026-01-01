@@ -16,20 +16,39 @@ export default function Dashboard() {
   const [incomingCall, setIncomingCall] = useState(null);
   const [outgoingCallTarget, setOutgoingCallTarget] = useState(null);
 
-  // Listen for Incoming Calls
+  // Listen for Incoming Calls & Missed Calls
   useEffect(() => {
     if (!user) return;
     const q = query(
       collection(db, "calls"),
       where("targetId", "==", user.uid),
-      where("status", "==", "offering"),
-      limit(1)
+      where("status", "in", ["offering", "missed"]),
+      limit(10) // Allow multiple checks
     );
-    const unsub = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        const doc = snap.docs[0];
-        setIncomingCall({ id: doc.id, ...doc.data() });
-      }
+    const unsub = onSnapshot(q, async (snap) => {
+      snap.docChanges().forEach(async (change) => {
+        if (change.type === "added" || change.type === "modified") {
+          const data = change.doc.data();
+          if (data.status === 'offering') {
+            setIncomingCall({ id: change.doc.id, ...data });
+            if (document.hidden) {
+              const { NotificationService } = await import("@/lib/notifications");
+              NotificationService.send("Incoming Call", { body: `${data.callerName} is calling...`, tag: 'call' });
+            }
+          }
+          if (data.status === 'missed') {
+            // Notification
+            const { NotificationService } = await import("@/lib/notifications");
+            NotificationService.send("Missed Call", { body: `You missed a call from ${data.callerName}`, tag: 'missed-call' });
+            // Cleanup
+            deleteDoc(change.doc.ref);
+            setIncomingCall(prev => (prev?.id === change.doc.id ? null : prev));
+          }
+        }
+        if (change.type === "removed") {
+          setIncomingCall(prev => (prev?.id === change.doc.id ? null : prev));
+        }
+      });
     });
     return () => unsub();
   }, [user]);

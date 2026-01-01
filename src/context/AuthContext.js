@@ -65,9 +65,16 @@ export const AuthProvider = ({ children }) => {
     };
 
     const updateUserProfile = async (data) => {
-        // data: { displayName, photoURL }
-        await updateProfile(user, data);
-        // Also update Firestore
+        // Separate Auth fields from Firestore fields
+        const authUpdates = {};
+        if (data.displayName !== undefined) authUpdates.displayName = data.displayName;
+        if (data.photoURL !== undefined) authUpdates.photoURL = data.photoURL;
+
+        if (Object.keys(authUpdates).length > 0) {
+            await updateProfile(user, authUpdates);
+        }
+
+        // Update all data to Firestore
         await updateDoc(doc(db, "users", user.uid), data);
     };
 

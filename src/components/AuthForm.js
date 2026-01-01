@@ -146,7 +146,8 @@ export default function AuthForm() {
                 <button
                     type="submit"
                     disabled={loading}
-                    className={styles.button}
+                    className="btn btn-primary"
+                    style={{ marginTop: '1.5rem' }}
                 >
                     {loading ? (
                         <Loader2 className="w-5 h-5 animate-spin" />
