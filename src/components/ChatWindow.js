@@ -376,8 +376,15 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
                     </div>
                     <div>
                         <h3 className={styles.headerTitle}>{otherUser.displayName}</h3>
-                        <span className={clsx(styles.headerStatus, isInCall && "text-red-400", isOnline && "text-green-400")}>
+                        <span className={clsx(
+                            styles.headerStatus,
+                            statusText === 'In a call' && "text-red-400",
+                            statusText === 'Online' && "text-green-400",
+                            statusText === 'Idle' && "text-yellow-400",
+                            statusText === 'Offline' && "text-slate-400"
+                        )}>
                             {isOnline && !isInCall && <span className={styles.pulsingDot}></span>}
+                            {statusText === 'Idle' && <span className="w-2 h-2 rounded-full bg-yellow-400 mr-1"></span>}
                             {statusText}
                         </span>
                     </div>
