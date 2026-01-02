@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { db } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, arrayUnion, getDocs, where, arrayRemove, deleteDoc } from "firebase/firestore";
+// import { db } from "@/lib/firebase"; // Removed
+// import { collection, onSnapshot... } from "firebase/firestore"; // Removed
 import { supabase } from "@/lib/supabase";
 import { decompressText, decompressJSON } from "@/lib/compression";
 import { Send, Paperclip, Video, Phone, MoreVertical, Image as ImageIcon, File as FileIcon, UserPlus, X, ChevronLeft, Trash2, LogOut, Info, Shield, ShieldAlert, BadgeCheck, Eraser, Edit2, Check } from "lucide-react";
@@ -47,15 +47,33 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
     useEffect(() => {
         if (isGroup || !otherUserId) return;
 
-        const unsub = onSnapshot(doc(db, "users", otherUserId), (doc) => {
-            if (doc.exists()) {
-                const data = doc.data();
+        // Initial fetch
+        const fetchStatus = async () => {
+            const { data } = await supabase.from('users').select('status, last_seen').eq('id', otherUserId).single();
+            if (data) {
                 setOtherUserStatus(data.status || 'offline');
-                setOtherUserLastSeen(data.lastSeen);
+                setOtherUserLastSeen(new Date(data.last_seen)); // Convert to Date or keep string?
+                // Firestore timestamp has toMillis(), Supabase string/date doesn't. 
+                // We will handle data.last_seen as ISO string.
             }
-        });
+        };
+        fetchStatus();
 
-        return () => unsub();
+        const channel = supabase
+            .channel(`user_chat:${otherUserId}`)
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'users',
+                filter: `id=eq.${otherUserId}`
+            }, (payload) => {
+                const data = payload.new;
+                setOtherUserStatus(data.status || 'offline');
+                setOtherUserLastSeen(data.last_seen ? new Date(data.last_seen) : null);
+            })
+            .subscribe();
+
+        return () => supabase.removeChannel(channel);
     }, [isGroup, otherUserId]);
 
     const getStatusText = () => {
@@ -63,10 +81,11 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
             return `${chat.userIds?.length || 0} members`;
         }
 
-        // Calculate dynamic status based on time if needed, similar to Sidebar
         let status = otherUserStatus;
         if (status === 'online' && otherUserLastSeen) {
-            const diff = Date.now() - otherUserLastSeen.toMillis();
+            // Supabase ISO string / Date obj
+            const lastSeenTime = otherUserLastSeen instanceof Date ? otherUserLastSeen.getTime() : new Date(otherUserLastSeen).getTime();
+            const diff = Date.now() - lastSeenTime;
             if (diff > 5 * 60 * 1000) status = 'offline';
             else if (diff > 60 * 1000) status = 'idle';
         }
@@ -81,6 +100,20 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
     const isOnline = statusText === 'Online';
     const isInCall = statusText === 'In a call';
 
+    // Mark Read Logic
+    const markRead = async () => {
+        if (!chat?.id || !user) return;
+        try {
+            await fetch(`/api/chats/${chat.id}/read`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: user.uid })
+            });
+        } catch (e) {
+            console.error("Mark read failed", e);
+        }
+    };
+
     useEffect(() => {
         if (!chat?.id) return;
         setMessages([]);
@@ -93,6 +126,7 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
                 if (json.success) {
                     setMessages(json.data);
                     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+                    markRead(); // Mark read on load
                 }
             } catch (err) {
                 console.error("Failed to load messages", err);
@@ -105,12 +139,16 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
         const channel = supabase
             .channel(`chat:${chat.id}`)
             .on('postgres_changes', {
-                event: 'INSERT',
+                event: '*', // Listen to INSERT and UPDATE
                 schema: 'public',
                 table: 'messages',
                 filter: `chat_id=eq.${chat.id}`
             }, (payload) => {
                 const newMsg = payload.new;
+
+                // If it's incomplete (sometimes Supabase sends partials on updates? No, usually full row unless disabled)
+                if (!newMsg || !newMsg.id) return;
+
                 // Decompress incoming message
                 const decompressedMsg = {
                     id: newMsg.id,
@@ -126,11 +164,20 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
                     createdAt: newMsg.created_at, // ISO String
                     type: newMsg.file_url ? (newMsg.file_type || 'file') : 'text'
                 };
-                setMessages(prev => {
-                    if (prev.find(m => m.id === decompressedMsg.id)) return prev;
-                    return [...prev, decompressedMsg];
-                });
-                setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+
+                if (payload.eventType === 'INSERT') {
+                    setMessages(prev => {
+                        if (prev.find(m => m.id === decompressedMsg.id)) return prev;
+                        return [...prev, decompressedMsg];
+                    });
+                    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+                    // If I am active, mark this new message as read?
+                    // We can just call markRead() which handles all unread, or call per message.
+                    // Throttle optimization: call markRead()
+                    markRead();
+                } else if (payload.eventType === 'UPDATE') {
+                    setMessages(prev => prev.map(m => m.id === decompressedMsg.id ? decompressedMsg : m));
+                }
             })
             .subscribe();
 
