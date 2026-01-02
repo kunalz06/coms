@@ -585,23 +585,10 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
     );
 }
 
-// ... handleSearchMember ... inviteMember ... etc (keep existing)
-// I need to be careful not to overwrite the long "return" block without including the new tick rendering.
-// The previous tool call view showed me the structure. I will replace the return block to insert ticks.
-
-// Actually, I'll use multi_replace for safer edits if possible, but replace_file_content with context is fine.
-// Let's replace the messages mapping part specifically in the return.
-
-// Wait, the ReplacementContent above replaces sendMessage and handleFileUpload. 
-// It DOES NOT include the return block because I can't put the return block inside sendMessage.
-// I need to split this into chunks using multi_replace_file_content or careful replace calls.
-// The user wants ticks "in chat if user views a mesaage".
-// I'll do this in 2 steps:
-// 1. Add logic (sendMessage, useEffect, helper).
-// 2. Update render.
-
-// BUT I can't leave the file broken.
-// Let's use multi_replace to do both.
-
-return; // Just logic placeholder for thought process.
+// Helper to format time
+function formatTime(timestamp) {
+    if (!timestamp) return "";
+    const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
