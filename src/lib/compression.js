@@ -1,29 +1,37 @@
 
-import zlib from 'zlib';
+import pako from 'pako';
 
 /**
- * Compresses a string using Brotli and returns a Base64 string.
- * Uses maximum compression level (11).
+ * Compresses a string using pako (Deflate/Gzip) and returns a Base64 string.
+ * Uses maximum compression level (9).
+ * Universal (works in Browser and Node.js).
  * @param {string} text - The input string.
  * @returns {string} - The compressed Base64 string.
  */
 export function compressText(text) {
     if (!text) return '';
     try {
-        const buffer = zlib.brotliCompressSync(Buffer.from(text), {
-            params: {
-                [zlib.constants.BROTLI_PARAM_QUALITY]: zlib.constants.BROTLI_MAX_QUALITY,
-            },
-        });
-        return buffer.toString('base64');
+        // Convert string to Uint8Array/Buffer
+        const textEncoder = new TextEncoder();
+        const inputBuffer = textEncoder.encode(text);
+
+        // Compress
+        const compressedBuffer = pako.deflate(inputBuffer, { level: 9 });
+
+        // Convert to Base64
+        // In Node, Buffer.from works. In Browser, we can use btoa or other methods, 
+        // but Next.js usually polyfills Buffer or we can use a universal method.
+        // For simplicity in Next.js environment, Buffer is available globally or via module.
+        // To be strictly isomorphic without Node Buffer:
+        return Buffer.from(compressedBuffer).toString('base64');
     } catch (e) {
         console.error('Compression error:', e);
-        return text; // Fallback or handle error
+        return text; // Fallback
     }
 }
 
 /**
- * Decompresses a Base64 encoded Brotli string back to a regular string.
+ * Decompresses a Base64 encoded Deflate string back to a regular string.
  * @param {string} compressedText - The compressed Base64 string.
  * @returns {string} - The decompressed string.
  */
@@ -31,16 +39,17 @@ export function decompressText(compressedText) {
     if (!compressedText) return '';
     try {
         const buffer = Buffer.from(compressedText, 'base64');
-        const decompressed = zlib.brotliDecompressSync(buffer);
-        return decompressed.toString('utf-8');
+        const decompressed = pako.inflate(buffer);
+        const textDecoder = new TextDecoder();
+        return textDecoder.decode(decompressed);
     } catch (e) {
-        // Assume failure means it wasn't compressed (backward compatibility for uncompressed messages)
+        // Assume failure means it wasn't compressed (backward compatibility)
         return compressedText;
     }
 }
 
 /**
- * Compresses a JSON object/array into a Base64 Brotli string.
+ * Compresses a JSON object/array into a Base64 string.
  * @param {any} data - The JSON data.
  * @returns {string} - Compressed string.
  */
@@ -56,7 +65,7 @@ export function compressJSON(data) {
 }
 
 /**
- * Decompresses a Base64 Brotli string into a JSON object/array.
+ * Decompresses a Base64 string into a JSON object/array.
  * @param {string} compressedData - The compressed string.
  * @returns {any} - The parsed JSON data.
  */
