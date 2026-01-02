@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, arrayUnion, getDocs, where, arrayRemove, deleteDoc } from "firebase/firestore";
-import { Send, Paperclip, Video, Phone, MoreVertical, Image as ImageIcon, File as FileIcon, UserPlus, X, ChevronLeft, Trash2, LogOut, Info, Shield, ShieldAlert, BadgeCheck, Eraser } from "lucide-react";
+import { Send, Paperclip, Video, Phone, MoreVertical, Image as ImageIcon, File as FileIcon, UserPlus, X, ChevronLeft, Trash2, LogOut, Info, Shield, ShieldAlert, BadgeCheck, Eraser, Edit2, Check } from "lucide-react";
 import clsx from "clsx";
 import styles from "./ChatWindow.module.css";
 import { compressImage } from "@/lib/utils";
@@ -21,6 +21,15 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
     const [otherUserLastSeen, setOtherUserLastSeen] = useState(null);
     const [memberSearch, setMemberSearch] = useState("");
     const [memberResults, setMemberResults] = useState([]);
+
+    // Group Name Edit State
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [groupNameInput, setGroupNameInput] = useState("");
+
+    // Sync group name input
+    useEffect(() => {
+        if (chat?.groupName) setGroupNameInput(chat.groupName);
+    }, [chat?.groupName]);
 
     const bottomRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -140,10 +149,13 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
         setUploading(true);
         const formData = new FormData();
         formData.append("file", file);
-        formData.append("userId", user.uid);
 
         try {
             const res = await fetch("/api/upload", { method: "POST", body: formData });
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(`Upload failed: ${res.status} ${res.statusText} - ${errorText}`);
+            }
             const data = await res.json();
 
             if (data.success) {
@@ -206,6 +218,20 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
         showToast("Admin dismissed", "info");
     }
 
+    const handleUpdateGroupName = async () => {
+        if (!groupNameInput.trim()) return;
+        try {
+            await updateDoc(doc(db, "chats", chat.id), {
+                groupName: groupNameInput.trim()
+            });
+            setIsEditingName(false);
+            showToast("Group name updated", "success");
+        } catch (error) {
+            console.error(error);
+            showToast("Failed to update name", "error");
+        }
+    };
+
     const handleLeaveGroup = async () => {
         if (!await confirmAction("Leave this group? You won't see new messages.")) return;
         // Check if last admin
@@ -223,25 +249,27 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
 
     const handleDeleteChat = async () => {
         if (isGroup) {
-            // In group, "Delete" for unprivileged user is leaving. 
-            // BUT user asked: "if it is for a group chat the user who deletes it, it gets deleted for them only"
-            // This sounds exactly like "Leave Group".
+            // Regular users leave. Admins *can* leave via handleLeaveGroup, 
+            // but this function is strictly for the "Delete" action if we separate them.
+            // If this button is shared, we split logic.
             handleLeaveGroup();
         } else {
-            // Direct chat: "Deleted for both users"
-            if (!await confirmAction("Start FRESH? This will permanently delete the chat history for BOTH users.")) return;
-            await deleteDoc(doc(db, "chats", chat.id));
+            if (!await confirmAction("Delete conversation?")) return;
+            await fetch(`/api/chats/${chat.id}`, { method: 'DELETE' });
             onBack();
         }
     };
 
+    const handleDeleteGroupForEveryone = async () => {
+        if (!await confirmAction("DELETE GROUP?")) return;
+        await fetch(`/api/chats/${chat.id}`, { method: 'DELETE' });
+        onBack();
+    };
+
     const handleClearChat = async () => {
-        if (!await confirmAction("Clear chat history? This only affects YOU.")) return;
-        await updateDoc(doc(db, "chats", chat.id), {
-            [`clearedAt.${user.uid}`]: serverTimestamp()
-        });
-        showToast("Chat cleared.", "success");
-        setShowChatInfo(false);
+        // Clear history not fully implemented in API yet (need DELETE /messages or update).
+        // For MVP, skip or implement later.
+        showToast("Clear chat not supported in this version", "info");
     };
 
     // --- Read Receipts & Helpers ---
@@ -296,112 +324,154 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
             {/* Chat Info / Details Modal */}
             {showChatInfo && (
                 <div className={styles.modalOverlay}>
-                    <div className={styles.modalContent}>
-                        <div className={styles.modalHeader}>
-                            <h3 className={styles.modalTitle}>{isGroup ? "Group Info" : "Chat Details"}</h3>
+                    <div className={styles.infoModalContent}>
+                        <div className={styles.infoModalHeader}>
+                            <h3 className={styles.infoModalTitle}>{isGroup ? "Group Info" : "Chat Details"}</h3>
                             <button onClick={() => setShowChatInfo(false)} className={styles.iconButton}><X size={20} /></button>
                         </div>
 
-                        {isGroup ? (
-                            <>
-                                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Members ({chat.userIds.length})</h4>
-                                <div className="flex flex-col gap-3 mb-6 max-h-60 overflow-y-auto">
-                                    {chat.userIds?.map(uid => {
-                                        const u = chat.users?.[uid];
-                                        if (!u) return null;
-                                        const isUserAdmin = chat.adminIds?.includes(uid);
-                                        return (
-                                            <div key={uid} className={styles.modalResultItem}>
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center overflow-hidden">
-                                                        {u.photoURL ? <img src={u.photoURL} className="w-full h-full object-cover" /> : <span className="text-sm">{u.displayName?.[0]}</span>}
-                                                    </div>
-                                                    <div className="flex flex-col">
-                                                        <span className="text-sm font-medium text-white flex items-center gap-1">
-                                                            {u.displayName} {uid === user.uid && "(You)"}
-                                                            {isUserAdmin && <BadgeCheck size={14} className="text-blue-400" />}
-                                                        </span>
-                                                    </div>
+                        <div className={styles.infoModalBody}>
+                            {isGroup ? (
+                                <>
+                                    <div className="flex flex-col gap-4">
+                                        {/* Group Name Section */}
+                                        <div className="flex flex-col gap-2">
+                                            <h4 className={styles.infoSectionTitle}>Group Name</h4>
+                                            {isEditingName ? (
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        className={styles.searchInput}
+                                                        value={groupNameInput}
+                                                        onChange={(e) => setGroupNameInput(e.target.value)}
+                                                        autoFocus
+                                                    />
+                                                    <button onClick={handleUpdateGroupName} className={clsx(styles.iconButtonSmall, styles.iconButtonSuccess)}>
+                                                        <Check size={20} />
+                                                    </button>
+                                                    <button onClick={() => { setIsEditingName(false); setGroupNameInput(chat.groupName); }} className={clsx(styles.iconButtonSmall, styles.iconButtonDanger)}>
+                                                        <X size={20} />
+                                                    </button>
                                                 </div>
-
-                                                {/* Admin Actions */}
-                                                {isAdmin && uid !== user.uid && (
-                                                    <div className="flex gap-1">
-                                                        {isUserAdmin ? (
-                                                            <button onClick={() => handleDismissAdmin(uid)} className="p-1.5 text-slate-400 hover:text-yellow-400 hover:bg-slate-800 rounded" title="Dismiss Admin">
-                                                                <ShieldAlert size={16} />
-                                                            </button>
-                                                        ) : (
-                                                            <button onClick={() => handleMakeAdmin(uid)} className="p-1.5 text-slate-400 hover:text-green-400 hover:bg-slate-800 rounded" title="Make Admin">
-                                                                <Shield size={16} />
-                                                            </button>
-                                                        )}
-                                                        <button onClick={() => handleRemoveMember(uid)} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded" title="Remove User">
-                                                            <Trash2 size={16} />
+                                            ) : (
+                                                <div className={styles.groupNameContainer}>
+                                                    <span className={styles.groupNameText}>{chat.groupName}</span>
+                                                    {isAdmin && (
+                                                        <button onClick={() => setIsEditingName(true)} className={styles.iconButtonSmall}>
+                                                            <Edit2 size={18} />
                                                         </button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-
-                                {isAdmin && (
-                                    <>
-                                        <div className="border-t border-slate-700/50 my-6" />
-                                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Add Members</h4>
-                                        <form onSubmit={handleSearchMember} className="flex gap-2 mb-4">
-                                            <input
-                                                className="flex-1 bg-slate-950/50 border border-slate-800 rounded-xl px-4 py-2 text-sm text-white focus:border-blue-500 focus:outline-none transition-colors"
-                                                placeholder="Search by username..."
-                                                value={memberSearch}
-                                                onChange={e => setMemberSearch(e.target.value)}
-                                            />
-                                            <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl font-medium text-sm transition-colors shadow-lg shadow-blue-500/20">
-                                                Search
-                                            </button>
-                                        </form>
-                                        <div className={styles.modalResults}>
-                                            {memberResults.map(u => (
-                                                <div key={u.uid} className={styles.modalResultItem}>
-                                                    <span className={styles.modalResultName}>{u.username}</span>
-                                                    <button onClick={() => inviteMember(u)} className={styles.inviteBtn}>Invite</button>
+                                                    )}
                                                 </div>
-                                            ))}
+                                            )}
                                         </div>
-                                    </>
-                                )}
-                            </>
-                        ) : (
-                            <div className="mb-6 flex flex-col items-center gap-2">
-                                <div className="w-20 h-20 rounded-full bg-slate-800 overflow-hidden mb-2">
-                                    {otherUser.photoURL ? <img src={otherUser.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-2xl">{otherUser.displayName?.[0]}</div>}
+
+                                        <h4 className={styles.infoSectionTitle}>Members ({chat.userIds.length})</h4>
+                                        <div className={styles.memberList}>
+                                            {chat.userIds?.map(uid => {
+                                                const u = chat.users?.[uid];
+                                                if (!u) return null;
+                                                const isUserAdmin = chat.adminIds?.includes(uid);
+                                                return (
+                                                    <div key={uid} className={styles.memberItem}>
+                                                        <div className={styles.memberAvatar}>
+                                                            {u.photoURL ? <img src={u.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-500">{u.displayName?.[0]}</div>}
+                                                        </div>
+                                                        <div className="flex-1 flex flex-col">
+                                                            <span className={styles.memberName}>
+                                                                {u.displayName} {uid === user.uid && "(You)"}
+                                                                {isUserAdmin && <BadgeCheck size={14} className={styles.adminBadge} />}
+                                                            </span>
+                                                        </div>
+
+                                                        {/* Admin Actions */}
+                                                        {isAdmin && uid !== user.uid && (
+                                                            <div className="flex gap-2">
+                                                                {isUserAdmin ? (
+                                                                    <button onClick={() => handleDismissAdmin(uid)} className={styles.iconButtonSmall} title="Dismiss Admin">
+                                                                        <ShieldAlert size={16} className="text-yellow-500" />
+                                                                    </button>
+                                                                ) : (
+                                                                    <button onClick={() => handleMakeAdmin(uid)} className={styles.iconButtonSmall} title="Make Admin">
+                                                                        <Shield size={16} className="text-green-500" />
+                                                                    </button>
+                                                                )}
+                                                                <button onClick={() => handleRemoveMember(uid)} className={styles.iconButtonSmall} title="Remove User">
+                                                                    <Trash2 size={16} className="text-red-500" />
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    {isAdmin && (
+                                        <>
+                                            <div className="border-t border-white/5" />
+                                            <div>
+                                                <h4 className={styles.infoSectionTitle}>Add Members</h4>
+                                                <form onSubmit={handleSearchMember} className={styles.searchForm}>
+                                                    <input
+                                                        className={styles.searchInput}
+                                                        placeholder="Search by username..."
+                                                        value={memberSearch}
+                                                        onChange={e => setMemberSearch(e.target.value)}
+                                                    />
+                                                    <button type="submit" className={styles.primaryBtn}>
+                                                        Search
+                                                    </button>
+                                                </form>
+                                                <div className="flex flex-col gap-2 mt-4">
+                                                    {memberResults.map(u => (
+                                                        <div key={u.uid} className={styles.memberItem}>
+                                                            <span className={styles.memberName}>{u.username}</span>
+                                                            <button onClick={() => inviteMember(u)} className={styles.primaryBtnSmall}>Invite</button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="flex flex-col items-center gap-4 py-4">
+                                    <div className="w-24 h-24 rounded-2xl bg-slate-800 overflow-hidden shadow-2xl border border-white/10">
+                                        {otherUser.photoURL ? <img src={otherUser.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-3xl font-bold text-slate-600">{otherUser.displayName?.[0]}</div>}
+                                    </div>
+                                    <div className="text-center">
+                                        <h3 className="text-xl font-bold text-white mb-1">{otherUser.displayName}</h3>
+                                        <p className={styles.directMessageLabel}>Direct Message</p>
+                                    </div>
                                 </div>
-                                <h3 className="text-xl font-bold text-white">{otherUser.displayName}</h3>
-                                <p className="text-sm text-slate-400">Direct Message</p>
+                            )}
+
+                            <div className="border-t border-white/5 pt-6 flex flex-col gap-3 mt-auto">
+                                <button onClick={handleClearChat} className={styles.actionBtn}>
+                                    <Eraser size={18} /> Clear Chat History
+                                </button>
+
+                                <button onClick={handleDeleteChat} className={`${styles.actionBtn} ${styles.dangerBtn}`}>
+                                    {isGroup ? <LogOut size={18} /> : <Trash2 size={18} />}
+                                    <span>{isGroup ? "Leave Group" : "Delete Conversation"}</span>
+                                </button>
+
+                                {isGroup && isAdmin && (
+                                    <button onClick={handleDeleteGroupForEveryone} className={clsx(styles.actionBtn, styles.dangerBtn)}>
+                                        <Trash2 size={18} />
+                                        <span>Delete Group (Admin)</span>
+                                    </button>
+                                )}
                             </div>
-                        )}
-
-                        <div className="border-t border-slate-700/50 mt-6 pt-6 flex flex-col gap-4">
-                            <button onClick={handleClearChat} className="btn btn-ghost w-full justify-between group hover:bg-slate-800/50">
-                                <span className="flex items-center gap-2 group-hover:text-white transition-colors">
-                                    <Eraser size={18} /> Clear Context History
-                                </span>
-                            </button>
-
-                            <button onClick={handleDeleteChat} className="btn btn-danger w-full justify-center shadow-lg shadow-red-900/20">
-                                {isGroup ? <LogOut size={18} /> : <Trash2 size={18} />}
-                                <span>{isGroup ? "Leave Group" : "Delete Conversation"}</span>
-                            </button>
                         </div>
                     </div>
                 </div>
-            )}
+            )
+            }
 
             {/* Header */}
             <div className={styles.header}>
                 <div className={styles.headerInfo}>
-                    <button onClick={onBack} className="md:hidden p-2 -ml-2 text-slate-400 hover:text-white transition-colors rounded-full hover:bg-white/10 mr-2">
+                    <button onClick={onBack} className={styles.backButton}>
                         <ChevronLeft size={24} />
                     </button>
                     <div
@@ -461,17 +531,12 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
 
                                 {msg.type === 'file' && (
                                     <a href={msg.fileUrl} target="_blank" className={styles.messageFile}>
-                                        <FileIcon size={16} /> {msg.text}
-                                    </a>
-                                )}
-                                {msg.type === 'file' && (
-                                    <a href={msg.fileUrl} target="_blank" className={styles.messageFile}>
-                                        <FileIcon size={16} /> {msg.text}
+                                        <FileIcon size={16} /> {msg.fileName || "Attachment"}
                                     </a>
                                 )}
                                 <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
                                     <span className={styles.messageTime}>
-                                        {msg.createdAt?.toMillis ? new Date(msg.createdAt.toMillis()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                                        {formatTime(msg.createdAt)}
                                     </span>
                                     {isMe && (
                                         <BadgeCheck size={14} className={getTickColor(msg)} />
@@ -516,7 +581,7 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
                     </button>
                 </form>
             </div>
-        </div>
+        </div >
     );
 }
 

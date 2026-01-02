@@ -9,7 +9,7 @@ import {
     updatePassword
 } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { doc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, updateDoc, serverTimestamp, onSnapshot } from "firebase/firestore";
 
 const AuthContext = createContext({});
 
@@ -20,16 +20,33 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
-            if (user) {
-                setUser(user);
+        let firestoreUnsub = () => { };
+
+        const unsubscribe = onAuthStateChanged(auth, (authUser) => {
+            if (authUser) {
+                // User is signed in, now listen to their Firestore profile
+                firestoreUnsub = onSnapshot(doc(db, "users", authUser.uid), (docBox) => {
+                    if (docBox.exists()) {
+                        const data = docBox.data();
+                        // Merge Auth user + Firestore data
+                        setUser({ ...authUser, ...data });
+                    } else {
+                        // Fallback if doc doesn't exist yet (rare race condition on signup)
+                        setUser(authUser);
+                    }
+                    setLoading(false);
+                });
             } else {
                 setUser(null);
+                setLoading(false);
+                firestoreUnsub();
             }
-            setLoading(false);
         });
 
-        return () => unsubscribe();
+        return () => {
+            unsubscribe();
+            firestoreUnsub();
+        };
     }, []);
 
     const signup = async (email, password, username, photoURL = "") => {

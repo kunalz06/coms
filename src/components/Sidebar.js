@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, updateDoc, doc, arrayUnion, arrayRemove } from "firebase/firestore";
-import { Search, Plus, MessageSquare, LogOut, User as UserIcon, Users, Check, X, Camera, Lock, Save, Trash2, Bell, BellOff, Pin, PinOff } from "lucide-react";
+import { Search, Plus, MessageSquare, LogOut, User as UserIcon, Users, Check, X, Camera, Lock, Save, Trash2, Bell, BellOff, Pin, PinOff, ChevronLeft, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import styles from "./Sidebar.module.css";
 import { compressImage } from "@/lib/utils";
@@ -31,7 +31,7 @@ export default function Sidebar({ onSelectChat, activeChat }) {
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [editMode, setEditMode] = useState("general");
     const [profileData, setProfileData] = useState({ username: user?.displayName || "", photoURL: user?.photoURL || "", notificationsEnabled: false });
-    const [passwordData, setPasswordData] = useState({ newPassword: "", confirmPassword: "" });
+    const [passwordData, setPasswordData] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
     const [tempAvatar, setTempAvatar] = useState(null);
     const [tempAvatarPreview, setTempAvatarPreview] = useState(null);
 
@@ -66,8 +66,6 @@ export default function Sidebar({ onSelectChat, activeChat }) {
             showToast("Failed to update pin", "error");
         }
     };
-
-    // ... (keep handleAvatarChange, handleDeleteAvatar, handleUpdateProfile, handleUpdatePassword)
 
     const handleAvatarChange = async (e) => {
         const file = e.target.files[0];
@@ -131,39 +129,50 @@ export default function Sidebar({ onSelectChat, activeChat }) {
         }
     };
 
-    // Listen to User's Chats & Invites
+    // Poll User's Chats & Invites from MongoDB API
     useEffect(() => {
         if (!user) return;
 
-        const qChats = query(collection(db, "chats"), where("userIds", "array-contains", user.uid));
-        const qInvites = query(collection(db, "chats"), where("pendingUserIds", "array-contains", user.uid));
+        const fetchChats = async () => {
+            try {
+                const res = await fetch(`/api/chats?userId=${user.uid}`);
+                if (!res.ok) throw new Error(`Status: ${res.status}`);
 
-        const unsubChats = onSnapshot(qChats, (snapshot) => {
-            const chatList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            // Initial sort by lastUpdated, but render logic will handle pinning sort
-            // Actually let's just set raw list here and sort in render or memo
-            setChats(chatList);
-        });
+                const data = await res.json();
+                if (data.success) {
+                    const allChats = data.data;
+                    // Separate invites (where user is in pendingUserIds)
+                    const myChats = allChats.filter(c => c.userIds.includes(user.uid));
+                    const myInvites = allChats.filter(c => c.pendingUserIds?.includes(user.uid));
 
-        const unsubInvites = onSnapshot(qInvites, (snapshot) => {
-            setInvites(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
+                    // Client-side mapping to match old structure if needed, 
+                    // or just use directly. Mongoose returns _id, we need id.
+                    setChats(myChats.map(c => ({ ...c, id: c._id })));
+                    setInvites(myInvites.map(c => ({ ...c, id: c._id })));
+                }
+            } catch (err) {
+                console.error("Failed to fetch chats", err);
+            }
+        };
 
-        return () => { unsubChats(); unsubInvites(); };
+        fetchChats();
+        const interval = setInterval(fetchChats, 3000); // Poll every 3s
+        return () => clearInterval(interval);
     }, [user]);
 
-    // ... (keep real-time status listener)
+    // Presence Listener (Optimized: Only listen to online users)
     useEffect(() => {
-        const allUserIds = new Set();
-        chats.forEach(c => c.userIds.forEach(uid => allUserIds.add(uid)));
-        if (allUserIds.size === 0) return;
+        // Listening to ALL users is too heavy and hits quota (as seen in logs).
+        // Instead, we only listen for users who are nominally 'online'.
+        // This relies on users updating their status correctly.
 
-        const q = query(collection(db, "users"));
+        const q = query(collection(db, "users"), where("status", "in", ["online", "in-call"]));
 
         const unsub = onSnapshot(q, (snap) => {
             const statusMap = {};
             snap.docs.forEach(d => {
                 const data = d.data();
+                // Check timeout locally too
                 let finalStatus = data.status || 'offline';
                 if (data.status === 'online' && data.lastSeen) {
                     const diff = Date.now() - data.lastSeen.toMillis();
@@ -173,32 +182,45 @@ export default function Sidebar({ onSelectChat, activeChat }) {
                 statusMap[d.id] = finalStatus;
             });
             setUsersStatus(statusMap);
+        }, (error) => {
+            console.error("Presence listener error", error);
         });
 
         return () => unsub();
-    }, [chats]);
+    }, []);
 
-    const getStatusColor = (uid) => {
-        const s = usersStatus[uid] || 'offline';
-        if (s === 'in-call') return 'bg-red-500';
-        if (s === 'online') return 'bg-green-500';
-        if (s === 'idle') return 'bg-yellow-500';
-        return 'bg-slate-500';
-    };
-
-    // ... (keep handleSearch, startChat, createGroup - but verify if I should include them or if replace_file_content needs them to match contexts)
-    // I need to be safe. I will include them to match standard replacement if start/end lines are insufficient.
-    // The previously viewed file helps.
+    // ... Search Logic needs to check MongoDB or Firestore?
+    // User Discovery: "users" collection in Firestore is the source of truth for Auth profiles.
+    // So handleSearch stays Firestore.
 
     const handleSearch = async (e) => {
         e.preventDefault();
         if (!searchQuery.trim()) return;
-        const q = query(collection(db, "users"), where("username", "==", searchQuery));
-        const snap = await getDocs(q);
-        setSearchResults(snap.docs.map(d => d.data()));
+
+        try {
+            // Simple prefix search on displayName
+            const q = query(
+                collection(db, "users"),
+                where("displayName", ">=", searchQuery),
+                where("displayName", "<=", searchQuery + '\uf8ff')
+            );
+
+            const querySnapshot = await getDocs(q);
+            const results = [];
+            querySnapshot.forEach((doc) => {
+                if (doc.id !== user.uid) {
+                    results.push({ uid: doc.id, ...doc.data(), username: doc.data().displayName });
+                }
+            });
+            setSearchResults(results);
+        } catch (error) {
+            console.error("Error searching users:", error);
+            showToast("Search failed", "error");
+        }
     };
 
     const startChat = async (targetUser) => {
+        // Check existing in local state
         const existing = chats.find(c => c.userIds.includes(targetUser.uid) && c.type === 'direct');
         if (existing) {
             onSelectChat(existing);
@@ -206,206 +228,255 @@ export default function Sidebar({ onSelectChat, activeChat }) {
             return;
         }
 
-        const newChat = await addDoc(collection(db, "chats"), {
-            userIds: [user.uid, targetUser.uid],
-            users: {
-                [user.uid]: { displayName: user.displayName, photoURL: user.photoURL },
-                [targetUser.uid]: { displayName: targetUser.username, photoURL: targetUser.photoURL }
-            },
-            type: "direct",
-            lastUpdated: serverTimestamp(),
-            lastMessage: "Started a chat"
-        });
-
-        onSelectChat({
-            id: newChat.id,
-            userIds: [user.uid, targetUser.uid],
-            users: {
-                [user.uid]: { displayName: user.displayName, photoURL: user.photoURL },
-                [targetUser.uid]: { displayName: targetUser.username, photoURL: targetUser.photoURL }
-            },
-            type: "direct",
-            ...targetUser
-        });
-        setIsSearching(false);
+        // Create new via API
+        try {
+            const res = await fetch('/api/chats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userIds: [user.uid, targetUser.uid],
+                    users: {
+                        [user.uid]: { displayName: user.displayName, photoURL: user.photoURL },
+                        [targetUser.uid]: { displayName: targetUser.username, photoURL: targetUser.photoURL }
+                    },
+                    type: "direct",
+                    lastMessage: "Started a chat"
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                const newChat = { ...data.data, id: data.data._id };
+                onSelectChat({
+                    ...newChat,
+                    ...targetUser // Helper for Display?
+                });
+                // Manually update local state to avoid waiting for poll
+                setChats(prev => [newChat, ...prev]);
+                setIsSearching(false);
+            }
+        } catch (err) {
+            console.error(err);
+            showToast("Failed to start chat", "error");
+        }
     };
 
     const createGroup = async (e) => {
         e.preventDefault();
         if (!newGroupName.trim()) return;
 
-        const newChat = await addDoc(collection(db, "chats"), {
-            userIds: [user.uid],
-            pendingUserIds: [],
-            users: { [user.uid]: { displayName: user.displayName, photoURL: user.photoURL } },
-            type: "group",
-            groupName: newGroupName,
-            adminIds: [user.uid],
-            lastUpdated: serverTimestamp(),
-            lastMessage: "Group created"
-        });
-
-        setNewGroupName("");
-        setShowGroupModal(false);
-        onSelectChat({
-            id: newChat.id,
-            type: "group",
-            groupName: newGroupName,
-            userIds: [user.uid],
-            adminIds: [user.uid],
-            users: { [user.uid]: { displayName: user.displayName, photoURL: user.photoURL } }
-        });
+        try {
+            const res = await fetch('/api/chats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userIds: [user.uid],
+                    users: { [user.uid]: { displayName: user.displayName, photoURL: user.photoURL } },
+                    type: "group",
+                    groupName: newGroupName,
+                    adminIds: [user.uid],
+                    lastMessage: "Group created"
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                const newChat = { ...data.data, id: data.data._id };
+                setNewGroupName("");
+                setShowGroupModal(false);
+                onSelectChat(newChat);
+                setChats(prev => [newChat, ...prev]);
+            }
+        } catch (err) {
+            console.error(err);
+            showToast("Failed to create group", "error");
+        }
     };
 
-    // Sort Chats: Pinned > Last Updated
+    // Invites handling (Join/Decline) -> Use PATCH/DELETE API
+    const handleJoinGroup = async (chat) => {
+        try {
+            const updatedUsers = { ...chat.users, [user.uid]: { displayName: user.displayName, photoURL: user.photoURL } };
+            const res = await fetch(`/api/chats/${chat.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userIds: [...chat.userIds, user.uid],
+                    pendingUserIds: chat.pendingUserIds.filter(id => id !== user.uid),
+                    users: updatedUsers
+                })
+            });
+            if (res.ok) {
+                showToast("Joined group!", "success");
+                // State will update on next poll
+            }
+        } catch (err) { console.error(err); }
+    };
+
+    const handleDeclineGroup = async (chat) => {
+        try {
+            const res = await fetch(`/api/chats/${chat.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pendingUserIds: chat.pendingUserIds.filter(id => id !== user.uid)
+                })
+            });
+            if (res.ok) showToast("Declined invite", "info");
+        } catch (err) { console.error(err); }
+    };
+
+    // Replace the invite render logic with new handlers
+    // ...
+
+    // Sort Chats
     const sortedChats = [...chats].sort((a, b) => {
         const isPinnedA = pinnedChatIds.includes(a.id);
         const isPinnedB = pinnedChatIds.includes(b.id);
         if (isPinnedA && !isPinnedB) return -1;
         if (!isPinnedA && isPinnedB) return 1;
-        // Sort by time desc
-        return (b.lastUpdated?.toMillis() || 0) - (a.lastUpdated?.toMillis() || 0);
+        return new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0);
     });
 
     return (
         <aside className={styles.sidebar}>
-            {/* Profile Modal */}
-            {/* ... Modal Code ... */}
             {showProfileModal && (
                 <div className={styles.modalOverlay} style={{ zIndex: 60 }}>
-                    {/* ... (Keep Modal Content same as polished version) ... */}
-                    {/* To avoid huge replacement, I'll assume lines 258-382 are untouched if I start replacement lower? */}
-                    {/* Actually I am replacing the whole file's logic blocks basically. */}
-                    {/* Let's try to trust the previous logic or carefully replace just the logic part and then the render map part. */}
-                    <div className={styles.modalContent}>
-                        <div className={styles.modalHeader}>
-                            <h3 className={styles.modalTitle}>Profile Settings</h3>
-                            <button onClick={() => setShowProfileModal(false)} className={styles.iconButton}><X size={20} /></button>
+                    <div className={clsx(styles.modalContent, "relative")}>
+                        {/* Header */}
+                        <div className={styles.profileModalHeader}>
+                            {editMode === "general" ? (
+                                <h3 className={styles.profileTitle}>Settings</h3>
+                            ) : (
+                                <button type="button" onClick={() => setEditMode("general")} className={styles.backBtn}>
+                                    <ChevronLeft size={20} /> Back
+                                </button>
+                            )}
+                            <button onClick={() => setShowProfileModal(false)} className={styles.closeBtn}>
+                                <X size={24} />
+                            </button>
                         </div>
 
-                        <div className={styles.tabContainer}>
-                            <button onClick={() => setEditMode("general")} className={clsx(styles.tabBtn, editMode === 'general' && styles.tabBtnActive)}>General</button>
-                            <button onClick={() => setEditMode("security")} className={clsx(styles.tabBtn, editMode === 'security' && styles.tabBtnActive)}>Security</button>
-                        </div>
+                        <div className={styles.profileBody}>
+                            {editMode === "general" ? (
+                                <form onSubmit={handleUpdateProfile} className="flex flex-col gap-6 h-full">
 
-                        {editMode === "general" ? (
-                            <form onSubmit={handleUpdateProfile} className="flex flex-col gap-6">
-                                <div className="flex flex-col items-center gap-4">
-                                    <div className="relative group">
-                                        <div className="w-32 h-32 rounded-full bg-slate-800 border-4 border-slate-700/50 shadow-2xl flex items-center justify-center overflow-hidden mb-2">
-                                            <img src={tempAvatarPreview || profileData.photoURL || user?.photoURL} className="w-full h-full object-cover" />
+                                    {/* Avatar */}
+                                    <div className={styles.profileAvatarContainer}>
+                                        <div className={styles.avatarWrapper}>
+                                            <div className={styles.avatarSurface}>
+                                                <img src={tempAvatarPreview || profileData.photoURL || user?.photoURL} className="w-full h-full object-cover" />
+                                            </div>
+                                            <label className={styles.avatarEditBadge}>
+                                                <Camera size={20} />
+                                                <input type="file" hidden accept="image/*" onChange={handleAvatarChange} />
+                                            </label>
                                         </div>
-                                        <label className="absolute bottom-1 right-1 bg-blue-500 hover:bg-blue-600 text-white p-2.5 rounded-full cursor-pointer shadow-lg transition-transform hover:scale-110 active:scale-95 border-4 border-[#0f172a]">
-                                            <Camera size={18} />
-                                            <input type="file" hidden accept="image/*" onChange={handleAvatarChange} />
-                                        </label>
+                                        {/* Remove Photo Option */}
+                                        {(tempAvatar || profileData.photoURL) && (
+                                            <button type="button" onClick={handleDeleteAvatar} className={styles.removePhotoBtn}>
+                                                Remove picture
+                                            </button>
+                                        )}
                                     </div>
 
-                                    {(tempAvatar || profileData.photoURL) && (
-                                        <button
-                                            type="button"
-                                            onClick={handleDeleteAvatar}
-                                            className="btn btn-danger btn-sm px-4 py-2 rounded-full opacity-80 hover:opacity-100"
-                                        >
-                                            <Trash2 size={14} /> Remove Picture
+                                    {/* Inputs */}
+                                    <div className={styles.inputGroup}>
+                                        {/* Name */}
+                                        <div className={styles.textField}>
+                                            <input
+                                                className={styles.textInput}
+                                                value={profileData.username || ""}
+                                                onChange={e => setProfileData({ ...profileData, username: e.target.value })}
+                                                placeholder="Display Name"
+                                            />
+                                            <UserIcon size={20} className={styles.fieldIcon} />
+                                        </div>
+
+                                        {/* Change Password Trigger */}
+                                        <button type="button" onClick={() => setEditMode("security")} className={styles.passwordChangeBtn}>
+                                            <span>Password & Security</span>
+                                            <Lock size={20} className={styles.fieldIcon} />
                                         </button>
-                                    )}
-                                </div>
+                                    </div>
 
-                                <div className="flex flex-col gap-2 w-full text-center">
-                                    <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Display Name</label>
-                                    <input
-                                        className={styles.modalInput}
-                                        value={profileData.username}
-                                        onChange={e => setProfileData({ ...profileData, username: e.target.value })}
-                                        placeholder="Enter your name"
-                                        style={{ textAlign: 'center' }}
-                                    />
-                                </div>
-
-                                <button type="submit" className="btn btn-primary w-full shadow-lg shadow-blue-500/20 py-3 text-lg">
-                                    <Save size={18} /> Save Changes
-                                </button>
-
-                                <div className="w-full border-t border-slate-700/50 pt-4 mt-2">
-                                    <h4 className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-3 text-center">Preferences</h4>
+                                    {/* Toggle */}
                                     <button
                                         type="button"
                                         onClick={async () => {
                                             const newState = !profileData.notificationsEnabled;
                                             if (newState) {
                                                 const granted = await NotificationService.requestPermission();
-                                                if (!granted) {
-                                                    showToast("Permission denied", "error");
-                                                    return;
-                                                }
+                                                if (!granted) return showToast("Permission denied", "error");
                                             }
                                             setProfileData({ ...profileData, notificationsEnabled: newState });
                                             updateUserProfile({ notificationsEnabled: newState });
                                         }}
-                                        className={clsx(
-                                            "w-full flex items-center justify-between p-4 rounded-xl border transition-all duration-300",
-                                            profileData.notificationsEnabled
-                                                ? "bg-gradient-to-r from-blue-500/20 to-purple-500/20 border-blue-500/50 shadow-md shadow-blue-500/10"
-                                                : "bg-slate-800/50 border-slate-700 hover:border-slate-600 hover:bg-slate-800"
-                                        )}
+                                        className={clsx(styles.notificationToggle, profileData.notificationsEnabled && styles.active)}
                                     >
-                                        <div className="flex items-center gap-4">
-                                            <div className={clsx(
-                                                "p-2.5 rounded-xl transition-colors",
-                                                profileData.notificationsEnabled ? "bg-blue-500 text-white shadow-lg shadow-blue-500/30" : "bg-slate-700 text-slate-400"
-                                            )}>
-                                                {profileData.notificationsEnabled ? <Bell size={20} /> : <BellOff size={20} />}
-                                            </div>
-                                            <div className="text-left">
-                                                <div className={clsx("text-sm font-bold", profileData.notificationsEnabled ? "text-blue-100" : "text-slate-300")}>
-                                                    Notifications
-                                                </div>
-                                                <div className="text-[11px] font-medium text-slate-400 uppercase tracking-wide">
-                                                    {profileData.notificationsEnabled ? "On" : "Off"}
-                                                </div>
-                                            </div>
+                                        <div className="flex items-center gap-3">
+                                            {profileData.notificationsEnabled ? <Bell size={24} /> : <BellOff size={24} />}
+                                            <span className="font-medium">Notifications</span>
                                         </div>
-                                        <div className={clsx(
-                                            "w-12 h-7 rounded-full relative transition-all duration-300 border",
-                                            profileData.notificationsEnabled ? "bg-blue-500 border-blue-400" : "bg-slate-700 border-slate-600"
-                                        )}>
-                                            <div className={clsx(
-                                                "absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-300",
-                                                profileData.notificationsEnabled ? "translate-x-6" : "translate-x-1"
-                                            )} />
+                                        <div className={styles.toggleLabel}>
+                                            {profileData.notificationsEnabled ? "On" : "Off"}
                                         </div>
                                     </button>
-                                </div>
-                            </form>
-                        ) : (
-                            <form onSubmit={handleUpdatePassword} className="flex flex-col gap-4">
-                                {/* ... Keep Password Form ... */}
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-xs text-slate-400 uppercase font-bold">New Password</label>
-                                    <input
-                                        type="password"
-                                        className={styles.modalInput}
-                                        value={passwordData.newPassword}
-                                        onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                                    />
-                                </div>
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-xs text-slate-400 uppercase font-bold">Confirm Password</label>
-                                    <input
-                                        type="password"
-                                        className={styles.modalInput}
-                                        value={passwordData.confirmPassword}
-                                        onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                                    />
-                                </div>
-                                <button type="submit" className="btn btn-primary"><Lock size={16} /> Update Password</button>
-                            </form>
-                        )}
-                        <div className="border-t border-slate-700 mt-6 pt-4">
-                            <button onClick={logout} className="btn btn-danger">
-                                <LogOut size={18} /> Sign Out
-                            </button>
+
+                                    <div className="flex-1" />
+
+                                    {/* Footer */}
+                                    <div className={styles.settingsFooter}>
+                                        <button type="submit" className={styles.saveBtn}>
+                                            Save Changes
+                                        </button>
+                                        <button type="button" onClick={() => { setShowProfileModal(false); logout(); }} className={styles.logoutBtn}>
+                                            <LogOut size={18} /> Logout
+                                        </button>
+                                    </div>
+                                </form>
+                            ) : (
+                                <form onSubmit={handleUpdatePassword} className="flex flex-col gap-6 h-full">
+                                    <div className={styles.securityAlert}>
+                                        <AlertCircle size={24} />
+                                        <p>Make sure your new password is at least 6 characters long and secure.</p>
+                                    </div>
+
+                                    <div className={styles.inputGroup}>
+                                        <div className={styles.textField}>
+                                            <input
+                                                type="password"
+                                                className={styles.textInput}
+                                                value={passwordData.currentPassword || ""}
+                                                onChange={e => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+                                                placeholder="Current Password"
+                                            />
+                                        </div>
+                                        <div className={styles.textField}>
+                                            <input
+                                                type="password"
+                                                className={styles.textInput}
+                                                value={passwordData.newPassword || ""}
+                                                onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                                                placeholder="New Password"
+                                            />
+                                        </div>
+                                        <div className={styles.textField}>
+                                            <input
+                                                type="password"
+                                                className={styles.textInput}
+                                                value={passwordData.confirmPassword || ""}
+                                                onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                                                placeholder="Confirm Password"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-auto pt-4">
+                                        <button type="submit" className={clsx(styles.saveBtn, styles.fullWidthBtn)}>
+                                            Update Password
+                                        </button>
+                                    </div>
+                                </form>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -413,7 +484,7 @@ export default function Sidebar({ onSelectChat, activeChat }) {
 
             {/* Header */}
             <div className={styles.header}>
-                <div onClick={() => { setProfileData({ username: user?.displayName, photoURL: user?.photoURL }); setShowProfileModal(true); }} className={`${styles.userInfo} ${styles.clickableHeader}`}>
+                <div onClick={() => { setProfileData(prev => ({ ...prev, username: user?.displayName || "", photoURL: user?.photoURL || "" })); setShowProfileModal(true); }} className={`${styles.userInfo} ${styles.clickableHeader}`}>
                     <div className={styles.userAvatar}>
                         {user?.photoURL ? (
                             <img src={user.photoURL} alt="Profile" className={styles.avatarImg} />
@@ -435,7 +506,6 @@ export default function Sidebar({ onSelectChat, activeChat }) {
             {/* Search Mode or Chat List */}
             {isSearching ? (
                 <div className={styles.searchContainer}>
-                    {/* ... (Keep Search UI) ... */}
                     <form onSubmit={handleSearch} className={styles.searchForm}>
                         <Search className={styles.searchIcon} />
                         <input
@@ -466,7 +536,7 @@ export default function Sidebar({ onSelectChat, activeChat }) {
                 </div>
             ) : (
                 <div className={styles.chatList}>
-                    {/* Invites Section - Keep as is */}
+                    {/* Invites Section */}
                     {invites.length > 0 && (
                         <div className={styles.inviteSection}>
                             <h3 className={styles.inviteTitle}>Invites</h3>
@@ -475,19 +545,13 @@ export default function Sidebar({ onSelectChat, activeChat }) {
                                     <p className={styles.inviteName}>{chat.groupName || "Group Chat"}</p>
                                     <div className={styles.inviteActions}>
                                         <button
-                                            onClick={() => updateDoc(doc(db, "chats", chat.id), {
-                                                userIds: arrayUnion(user.uid),
-                                                pendingUserIds: arrayRemove(user.uid),
-                                                [`users.${user.uid}`]: { displayName: user.displayName, photoURL: user.photoURL }
-                                            })}
+                                            onClick={() => handleJoinGroup(chat)}
                                             className="btn btn-success btn-sm"
                                         >
                                             <Check size={12} /> Join
                                         </button>
                                         <button
-                                            onClick={() => updateDoc(doc(db, "chats", chat.id), {
-                                                pendingUserIds: arrayRemove(user.uid)
-                                            })}
+                                            onClick={() => handleDeclineGroup(chat)}
                                             className="btn btn-danger btn-sm"
                                         >
                                             <X size={12} /> Decline
@@ -520,9 +584,6 @@ export default function Sidebar({ onSelectChat, activeChat }) {
                             </button>
                         )}
                     </div>
-
-
-                    {/* Groups or Invites Logic Remained Above (not replacing) */}
 
                     {/* Pinned Section */}
                     {pinnedChatIds.length > 0 && (
@@ -571,8 +632,13 @@ export default function Sidebar({ onSelectChat, activeChat }) {
     );
 }
 
-// Subcomponent for cleaner code
 function ChatListItem({ chat, activeChat, onSelectChat, togglePin, user, pinnedChatIds, usersStatus }) {
+    // Fix Hydration Mismatch for Dates
+    const [isMounted, setIsMounted] = useState(false);
+    useEffect(() => {
+        setIsMounted(true);
+    }, []);
+
     const isPinned = pinnedChatIds.includes(chat.id);
     const isGroup = chat.type === 'group';
     let displayName = "User";
@@ -591,8 +657,6 @@ function ChatListItem({ chat, activeChat, onSelectChat, togglePin, user, pinnedC
         if (isGroup) return null;
         const otherUserId = chat.userIds.find(id => id !== user.uid);
         const s = usersStatus[otherUserId] || 'offline';
-        // Only show green dot for online, maybe red for call. 
-        // Offline/Idle we hide or subtle. 
         if (s === 'online') return <span className={clsx(styles.statusDot, "bg-green-500")}></span>;
         if (s === 'in-call') return <span className={clsx(styles.statusDot, "bg-red-500")}></span>;
         return null;
@@ -618,7 +682,7 @@ function ChatListItem({ chat, activeChat, onSelectChat, togglePin, user, pinnedC
                         {isPinned && <Pin size={12} className="inline ml-1 text-blue-400 rotate-45" />}
                     </h3>
                     <span className={styles.chatTime}>
-                        {chat.lastUpdated?.toMillis ? new Date(chat.lastUpdated.toMillis()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        {isMounted && chat.lastUpdated ? new Date(chat.lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                     </span>
                 </div>
                 <p className={styles.chatPreview}>

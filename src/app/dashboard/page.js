@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import ChatWindow from "@/components/ChatWindow";
 import CallOverlay from "@/components/CallOverlay";
-import { collection, query, where, onSnapshot, limit } from "firebase/firestore";
+import GroupCallOverlay from "@/components/GroupCallOverlay";
+import { collection, query, where, onSnapshot, limit, addDoc, serverTimestamp, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import styles from "./dashboard.module.css";
 
@@ -53,14 +54,42 @@ export default function Dashboard() {
     return () => unsub();
   }, [user]);
 
-  const startCall = () => {
+  const startCall = async () => {
     if (!activeChat || !activeChat.userIds) {
       console.error("Cannot start call: Invalid chat data", activeChat);
       return;
     }
-    // Find the other user in activeChat
+
+    if (activeChat.type === 'group') {
+      // Group Call Logic
+      // For distinct UI, we might trigger a different state or overlay
+      // Create a call room in Firestore
+      try {
+        const callDoc = await addDoc(collection(db, "calls"), {
+          chatId: activeChat.id,
+          hostId: user.uid,
+          hostName: user.displayName,
+          participants: [user.uid],
+          status: "active", // Group calls are "active" immediately, people join
+          type: "group",
+          createdAt: serverTimestamp()
+        });
+        // We'll use a specific state for group calls to render the Grid UI
+        setIncomingCall({
+          id: callDoc.id,
+          isGroup: true,
+          ...activeChat,
+          isHost: true // Current user started it
+        });
+      } catch (e) {
+        console.error("Failed to start group call", e);
+      }
+      return;
+    }
+
+    // Direct Call Logic (Existing 1:1)
     const targetId = activeChat.userIds.find(id => id !== user.uid);
-    if (!targetId) return; // Self-chat or empty group?
+    if (!targetId) return;
 
     const targetUser = activeChat.users?.[targetId] || { displayName: "User", photoURL: "" };
     setOutgoingCallTarget({ uid: targetId, ...targetUser });
@@ -112,13 +141,19 @@ export default function Dashboard() {
       </main>
 
       {/* Call Overlays */}
-      {incomingCall && (
+      {incomingCall && incomingCall.isGroup ? (
+        <GroupCallOverlay
+          activeCall={incomingCall}
+          onClose={() => setIncomingCall(null)}
+        />
+      ) : incomingCall && !incomingCall.isGroup ? (
         <CallOverlay
           activeCall={incomingCall}
           isIncoming={true}
           onClose={() => setIncomingCall(null)}
         />
-      )}
+      ) : null}
+
       {outgoingCallTarget && (
         <CallOverlay
           activeCall={outgoingCallTarget}

@@ -40,7 +40,7 @@ export const UIProvider = ({ children }) => {
     return (
         <UIContext.Provider value={{ showToast, confirmAction }}>
             {children}
-            <Toast toats={toasts} removeToast={removeToast} />
+            <Toast toasts={toasts} removeToast={removeToast} />
             <ConfirmModal
                 isOpen={confirmModal.isOpen}
                 message={confirmModal.message}

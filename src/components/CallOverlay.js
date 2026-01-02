@@ -237,7 +237,7 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
                                 )}
                             </div>
                             <h2 className={styles.statusText}>{connectionStatus}</h2>
-                            <p className="text-slate-400">{activeCall.displayName || "Unknown User"}</p>
+                            <p className={styles.partnerName}>{activeCall.displayName || "Unknown User"}</p>
                         </div>
                     )}
                 </div>

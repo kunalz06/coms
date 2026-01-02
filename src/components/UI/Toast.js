@@ -3,10 +3,10 @@ import { useEffect } from "react";
 import styles from "./Toast.module.css";
 import { CheckCircle, AlertCircle, Info, X } from "lucide-react";
 
-export default function Toast({ toats, removeToast }) {
+export default function Toast({ toasts, removeToast }) {
     return (
         <div className={styles.toastContainer}>
-            {toats.map(toast => (
+            {toasts.map(toast => (
                 <div key={toast.id} className={`${styles.toast} ${styles[toast.type]}`}>
                     {toast.type === 'success' && <CheckCircle size={20} className="text-green-400" />}
                     {toast.type === 'error' && <AlertCircle size={20} className="text-red-400" />}

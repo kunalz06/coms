@@ -1,52 +1,73 @@
+/* Material You V3 Snackbar */
+
 .toastContainer {
     position: fixed;
-    top: 24px;
-    right: 24px;
-    z-index: 1000;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
+    /* Tightly stacked */
+    z-index: 2000;
     pointer-events: none;
+    /* Let clicks pass through gaps */
+    width: auto;
+    align-items: center;
 }
 
 .toast {
     pointer-events: auto;
-    background: rgba(15, 23, 42, 0.9);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(12px);
-    color: white;
-    padding: 16px 20px;
-    border-radius: 16px;
-    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    background: var(--md-sys-color-inverse-surface);
+    color: var(--md-sys-color-inverse-on-surface);
+    /* For Dark Theme: surface is dark, inverse is light grey */
+
+    border: none;
+    padding: 14px 16px;
+    border-radius: 8px;
+    /* Extra Small Shape */
+    box-shadow: var(--shadow-3);
+
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
+
     min-width: 300px;
-    animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    font-size: 14px;
+    max-width: 480px;
+
+    animation: slideUp 0.3s var(--md-sys-motion-easing-emphasized);
+    font-size: 0.875rem;
+    /* Body Medium */
     font-weight: 500;
 }
 
-.success {
-    border-left: 4px solid #4ade80;
+/* Icon Colors - M3 Snackbars usually have an action button or icon */
+.icon {
+    flex-shrink: 0;
 }
 
-.error {
-    border-left: 4px solid #ef4444;
+.success .icon {
+    color: #4ade80;
+    /* Inverse Primary/Success */
 }
 
-.info {
-    border-left: 4px solid #3b82f6;
+.error .icon {
+    color: #f2b8b5;
+    /* Error Light */
 }
 
-@keyframes slideIn {
+.info .icon {
+    color: var(--md-sys-color-inverse-primary);
+}
+
+@keyframes slideUp {
     from {
         opacity: 0;
-        transform: translateX(100%);
+        transform: translateY(100%);
     }
 
     to {
         opacity: 1;
-        transform: translateX(0);
+        transform: translateY(0);
     }
 }

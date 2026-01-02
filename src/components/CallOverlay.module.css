@@ -1,3 +1,5 @@
+/* Material You V3 Expressive Call Overlay */
+
 .overlayContainer {
     position: fixed;
     inset: 0;
@@ -5,10 +7,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    animation: fadeIn 0.3s ease-out;
+    background: var(--md-sys-color-scrim);
+    /* 100% opaque scrim? no, usually translucent */
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    animation: fadeIn 0.3s var(--md-sys-motion-easing-emphasized);
 }
 
 .callCard {
@@ -16,11 +19,13 @@
     width: 100%;
     max-width: 1000px;
     aspect-ratio: 16/9;
-    background: #0f172a;
-    border-radius: 24px;
+    background: #000;
+    /* Video bg always black */
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    /* 28px */
     overflow: hidden;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(148, 163, 184, 0.1);
+    box-shadow: var(--shadow-3);
+    border: 1px solid var(--md-sys-color-outline-variant);
 }
 
 @media (max-width: 768px) {
@@ -45,16 +50,24 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
-    color: #94a3b8;
-    gap: 1.5rem;
+    background: var(--md-sys-color-surface-container-low);
+    color: var(--md-sys-color-on-surface-variant);
+    gap: 24px;
+}
+
+.partnerName {
+    font-size: 1.5rem;
+    /* Headline Small */
+    font-weight: 400;
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
 }
 
 .avatarRing {
     width: 120px;
     height: 120px;
     border-radius: 50%;
-    border: 4px solid rgba(59, 130, 246, 0.3);
+    border: 4px solid var(--md-sys-color-primary-container);
     padding: 4px;
     position: relative;
 }
@@ -65,7 +78,7 @@
     inset: -4px;
     border-radius: 50%;
     border: 4px solid transparent;
-    border-top-color: #3b82f6;
+    border-top-color: var(--md-sys-color-primary);
     animation: spin 2s linear infinite;
 }
 
@@ -74,34 +87,34 @@
     height: 100%;
     border-radius: 50%;
     object-fit: cover;
-    background: #334155;
+    background: var(--md-sys-color-surface-container-highest);
 }
 
 .statusText {
     font-size: 1.25rem;
     font-weight: 500;
-    color: #e2e8f0;
+    color: var(--md-sys-color-on-surface);
     animation: pulse 2s infinite;
 }
 
 .selfVideoWrapper {
     position: absolute;
-    top: 1.5rem;
-    right: 1.5rem;
+    top: 24px;
+    right: 24px;
     width: 200px;
     aspect-ratio: 16/9;
     background: #000;
-    border-radius: 16px;
+    border-radius: var(--md-sys-shape-corner-large);
     overflow: hidden;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    transition: all 0.3s ease;
+    box-shadow: var(--shadow-2);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: all 0.3s var(--md-sys-motion-easing-emphasized);
     cursor: grab;
 }
 
 .selfVideoWrapper:hover {
     transform: scale(1.05);
-    border-color: rgba(59, 130, 246, 0.5);
+    border-color: var(--md-sys-color-primary);
 }
 
 .selfVideo {
@@ -109,108 +122,116 @@
     height: 100%;
     object-fit: cover;
     transform: scaleX(-1);
-    /* Mirror self view */
 }
 
-/* Incoming Call Answer Overlay on Self View */
+/* Incoming Call Overlay */
 .answerOverlay {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 16px;
 }
 
 .answerBtn {
-    background: #22c55e;
-    color: white;
-    font-weight: 700;
-    padding: 0.5rem 1.5rem;
-    border-radius: 9999px;
+    background: #4ade80;
+    /* Success Green */
+    color: #052e16;
+    font-weight: 500;
+    padding: 12px 24px;
+    border-radius: var(--md-sys-shape-corner-full);
     border: none;
     cursor: pointer;
-    box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.3);
-    transition: transform 0.2s, background 0.2s;
+    box-shadow: var(--shadow-1);
+    transition: transform 0.2s;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 8px;
+    font-size: 1rem;
 }
 
 .answerBtn:hover {
-    background: #16a34a;
     transform: scale(1.05);
+    box-shadow: var(--shadow-2);
 }
 
 /* Controls Bar */
 .controlsBar {
     position: absolute;
-    bottom: 2rem;
+    bottom: 32px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 1rem 2rem;
-    background: rgba(15, 23, 42, 0.6);
-    backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 9999px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    gap: 16px;
+    padding: 16px 24px;
+    background: var(--md-sys-color-surface-container-high);
+    /* Or semi-transparent dark */
+    /* Let's use standard surface container for M3 feel, maybe slightly opaque if needed */
+    border-radius: var(--md-sys-shape-corner-full);
+    /* Pill */
+    box-shadow: var(--shadow-3);
     max-width: 90vw;
     flex-wrap: wrap;
     justify-content: center;
 }
 
 .controlBtn {
-    width: 3.5rem;
-    height: 3.5rem;
+    width: 56px;
+    height: 56px;
     border-radius: 50%;
     border: none;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s;
-    background: rgba(30, 41, 59, 0.8);
-    color: #e2e8f0;
+    transition: all 0.2s var(--md-sys-motion-easing-emphasized);
+    background: var(--md-sys-color-surface-container-highest);
+    /* Tonal */
+    color: var(--md-sys-color-on-surface-variant);
 }
 
 .controlBtn:hover {
-    background: rgba(51, 65, 85, 0.9);
-    transform: translateY(-2px);
+    background: var(--md-sys-color-on-surface-variant);
+    color: var(--md-sys-color-surface-container-highest);
+    /* Invert */
+    transform: translateY(-4px);
 }
 
 .controlBtn.active {
-    background: white;
-    color: #0f172a;
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
 }
 
 .controlBtn.danger {
-    background: rgba(239, 68, 68, 0.2);
-    color: #f87171;
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
 }
 
 .controlBtn.dangerActive {
-    background: #ef4444;
-    color: white;
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
 }
 
 .hangupBtn {
-    width: 4rem;
-    height: 4rem;
-    background: #ef4444;
-    color: white;
-    margin-left: 1rem;
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    width: 72px;
+    /* Prominent End Call */
+    height: 56px;
+    border-radius: var(--md-sys-shape-corner-full);
+    /* Pill shape for "End" */
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    margin-left: 16px;
+    box-shadow: var(--shadow-1);
 }
 
 .hangupBtn:hover {
-    background: #dc2626;
-    transform: translateY(-2px) scale(1.05);
+    transform: translateY(-4px) scale(1.05);
+    box-shadow: var(--shadow-2);
 }
 
 @keyframes spin {

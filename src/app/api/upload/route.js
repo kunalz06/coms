@@ -1,45 +1,46 @@
-import { NextResponse } from "next/server";
-import cloudinary from "@/lib/cloudinary";
+import { NextResponse } from 'next/server';
+import { v2 as cloudinary } from 'cloudinary';
 
-export async function POST(req) {
+// Configure Cloudinary
+cloudinary.config({
+    cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+export async function POST(request) {
     try {
-        const formData = await req.formData();
-        const file = formData.get("file");
+        const formData = await request.formData();
+        const file = formData.get('file');
 
         if (!file) {
-            return NextResponse.json({ error: "No file provided" }, { status: 400 });
+            return NextResponse.json({ success: false, error: 'No file uploaded' }, { status: 400 });
         }
 
-        // Convert file to buffer
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
-        // Upload to Cloudinary via stream
         const result = await new Promise((resolve, reject) => {
-            const uploadStream = cloudinary.uploader.upload_stream(
+            cloudinary.uploader.upload_stream(
                 {
-                    folder: "coms_avatars",
-                    resource_type: "auto",
+                    folder: "coms_uploads",
+                    resource_type: "auto" // Auto detect image/video/raw
                 },
                 (error, result) => {
                     if (error) reject(error);
                     else resolve(result);
                 }
-            );
-            uploadStream.end(buffer);
+            ).end(buffer);
         });
 
         return NextResponse.json({
             success: true,
             link: result.secure_url,
-            downloadLink: result.secure_url
+            type: result.resource_type
         });
 
     } catch (error) {
-        console.error("Cloudinary upload error:", error);
-        return NextResponse.json({
-            error: error.message || "Upload failed",
-            stack: error.stack
-        }, { status: 500 });
+        console.error("Upload error:", error);
+        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 }

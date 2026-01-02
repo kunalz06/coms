@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { User, Lock, Mail, ArrowRight, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import styles from "./AuthForm.module.css";
+import { motion } from "framer-motion";
 
 import { Camera } from "lucide-react"; // Import Camera icon
 
@@ -70,7 +71,12 @@ export default function AuthForm() {
     };
 
     return (
-        <div className={styles.container}>
+        <motion.div
+            className={styles.container}
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.2, 0, 0, 1] }} // Emphasized easing
+        >
             <div className={styles.header}>
                 <h1 className={styles.title}>Coms</h1>
                 <p className={styles.subtitle}>
@@ -171,6 +177,6 @@ export default function AuthForm() {
                     </button>
                 </p>
             </div>
-        </div>
+        </motion.div>
     );
 }

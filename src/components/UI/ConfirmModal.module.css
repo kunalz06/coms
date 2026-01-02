@@ -1,70 +1,128 @@
+/* Material You V3 Dialog (Confirm Modal) */
+
 .overlay {
     position: fixed;
     inset: 0;
     z-index: 2000;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(4px);
+    background: var(--md-sys-color-scrim);
+    /* 60% opacity handled by rgba usually, or use the variable if it includes alpha? 
+       Our variable is #000000, so we need opacity */
     display: flex;
-    align-items: center;
     justify-content: center;
-    padding: 1rem;
+    align-items: center;
+    padding: 16px;
     animation: fadeIn 0.2s ease-out;
 }
 
+/* We often use a wrapper or direct opacity on background */
+.overlay {
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+
 .modal {
-    background: rgba(30, 41, 59, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 2.5rem;
-    border-radius: 24px;
+    background: var(--md-sys-color-surface-container-high);
+    padding: 24px;
+    border-radius: 28px;
+    /* M3 Key spec: 28px for Dialogs */
     width: 100%;
-    max-width: 400px;
-    text-align: center;
-    box-shadow:
-        0 25px 50px -12px rgba(0, 0, 0, 0.7),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-        0 0 20px rgba(59, 130, 246, 0.15);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    transform: scale(0.95);
-    animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    max-width: 320px;
+    /* M3 Basic Dialog width */
+    text-align: left;
+    box-shadow: var(--shadow-3);
+    display: flex;
+    flex-direction: column;
+    animation: scaleUp 0.3s var(--md-sys-motion-easing-emphasized);
 }
 
 .iconWrapper {
-    width: 72px;
-    height: 72px;
-    border-radius: 50%;
-    background: rgba(250, 204, 21, 0.1);
-    border: 1px solid rgba(250, 204, 21, 0.2);
+    width: 48px;
+    height: 48px;
+    margin-bottom: 24px;
+    color: var(--md-sys-color-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 0 auto 1.5rem auto;
-    box-shadow: 0 0 15px rgba(250, 204, 21, 0.2);
 }
 
 .title {
     font-size: 1.5rem;
-    font-weight: 800;
-    margin-bottom: 0.75rem;
-    background: linear-gradient(to right, #fff, #fbbf24);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    /* Headline Small */
+    font-weight: 400;
+    margin: 0 0 16px;
+    color: var(--md-sys-color-on-surface);
 }
 
 .message {
-    color: #94a3b8;
-    margin-bottom: 2rem;
-    font-size: 0.95rem;
+    color: var(--md-sys-color-on-surface-variant);
+    margin-bottom: 24px;
+    font-size: 1rem;
+    /* Body Medium */
+    font-weight: 400;
+    line-height: 1.5;
 }
 
 .actions {
     display: flex;
-    gap: 1rem;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
-/* Buttons replaced by global .btn classes */
+/* Buttons */
+.btn {
+    padding: 0 24px;
+    height: 40px;
+    border-radius: 20px;
+    /* Pill */
+    font-size: 0.875rem;
+    /* Label Large */
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: background-color 0.2s;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
 
+.cancelBtn {
+    color: var(--md-sys-color-primary);
+}
+
+.cancelBtn:hover {
+    background: rgba(208, 188, 255, 0.08);
+    /* Primary Opacity */
+}
+
+.confirmBtn {
+    color: var(--md-sys-color-primary);
+}
+
+.confirmBtn:hover {
+    background: rgba(208, 188, 255, 0.08);
+}
+
+.confirmBtn.filled {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+}
+
+.confirmBtn.filled:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    box-shadow: var(--shadow-1);
+}
+
+.confirmBtn.danger {
+    color: var(--md-sys-color-error);
+}
+
+.confirmBtn.danger:hover {
+    background: rgba(242, 184, 181, 0.08);
+}
+
+/* Animations */
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -77,10 +135,12 @@
 
 @keyframes scaleUp {
     from {
-        transform: scale(0.95);
+        transform: scale(0.9);
+        opacity: 0;
     }
 
     to {
         transform: scale(1);
+        opacity: 1;
     }
 }

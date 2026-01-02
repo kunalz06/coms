@@ -1,21 +1,22 @@
 .container {
     width: 100%;
-    max-width: 440px;
-    padding: 3rem;
-    border-radius: 32px;
-    background: rgba(10, 10, 10, 0.7);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
-    animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-    color: #fff;
+    max-width: 400px;
+    /* Slightly narrower for mobile-first feel */
+    padding: 2.5rem;
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    /* 28px */
+    background: var(--md-sys-color-surface-container);
+    /* Elevation 1 */
+    box-shadow: var(--shadow-1);
+    color: var(--md-sys-color-on-surface);
+    /* Motion handled by Framer Motion in JS, but fallback: */
+    animation: fadeIn 0.6s var(--md-sys-motion-easing-emphasized);
 }
 
 .avatarContainer {
     display: flex;
     justify-content: center;
-    margin-bottom: 1rem;
+    margin-bottom: 24px;
 }
 
 .avatarLabel {
@@ -24,17 +25,18 @@
     width: 96px;
     height: 96px;
     border-radius: 50%;
-    background: #1e293b;
-    border: 2px solid #334155;
+    background: var(--md-sys-color-surface-container-highest);
+    border: none;
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    transition: border-color 0.2s;
+    transition: background-color 0.2s;
+    color: var(--md-sys-color-on-surface-variant);
 }
 
 .avatarLabel:hover {
-    border-color: #60a5fa;
+    background: var(--md-sys-color-surface-container-high);
 }
 
 .avatarImg {
@@ -46,7 +48,7 @@
 .avatarOverlay {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -59,38 +61,38 @@
 }
 
 .cameraIcon {
-    color: white;
-    width: 32px;
-    height: 32px;
+    color: var(--md-sys-color-inverse-on-surface);
+    width: 24px;
+    height: 24px;
 }
 
 .header {
     text-align: center;
-    margin-bottom: 2rem;
+    margin-bottom: 32px;
 }
 
 .title {
-    font-size: 2.5rem;
-    font-weight: 800;
-    margin-bottom: 0.5rem;
-    background: linear-gradient(135deg, #3b82f6, #a855f7);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    font-size: 2.25rem;
+    /* ~Display Small */
+    font-weight: 400;
+    /* Regular weight for M3 Display/Headline */
+    margin-bottom: 8px;
+    color: var(--md-sys-color-on-surface);
+    letter-spacing: -0.02em;
 }
 
 .subtitle {
-    color: #94a3b8;
-    font-size: 0.95rem;
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 1rem;
+    line-height: 1.5;
 }
 
 .error {
-    padding: 0.75rem;
-    margin-bottom: 1rem;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
-    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+    border-radius: var(--md-sys-shape-corner-medium);
     font-size: 0.875rem;
     text-align: center;
 }
@@ -98,66 +100,74 @@
 .form {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 16px;
 }
 
 .inputGroup {
     position: relative;
+    background: var(--md-sys-color-surface-container-highest);
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    /* Fully curved input fields */
+    padding: 0 16px 0 52px;
+    /* Left padding for icon */
+    height: 56px;
+    display: flex;
+    align-items: center;
+    transition: background-color 0.2s;
+}
+
+.inputGroup:focus-within {
+    /* Active State */
+    outline: 2px solid var(--md-sys-color-primary);
+    background: var(--md-sys-color-surface-container-highest);
 }
 
 .icon {
     position: absolute;
-    left: 1rem;
+    left: 16px;
     top: 50%;
     transform: translateY(-50%);
-    width: 20px;
-    height: 20px;
-    color: #64748b;
+    width: 24px;
+    height: 24px;
+    color: var(--md-sys-color-on-surface-variant);
     transition: color 0.2s;
 }
 
 .inputGroup:focus-within .icon {
-    color: #60a5fa;
+    color: var(--md-sys-color-primary);
 }
 
 .input {
     width: 100%;
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid #334155;
-    border-radius: 16px;
-    padding: 0.875rem 1rem 0.875rem 3rem;
-    /* Left padding for icon */
-    color: white;
+    height: 100%;
+    background: transparent;
+    border: none;
+    color: var(--md-sys-color-on-surface);
     font-size: 1rem;
     outline: none;
-    transition: all 0.2s;
+    padding: 0;
 }
 
 .input::placeholder {
-    color: #64748b;
+    color: var(--md-sys-color-on-surface-variant);
+    opacity: 0.8;
 }
-
-.input:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-}
-
-/* .button removed in favor of global .btn-primary */
 
 .footer {
-    margin-top: 1.5rem;
+    margin-top: 32px;
     text-align: center;
     font-size: 0.875rem;
-    color: #94a3b8;
+    color: var(--md-sys-color-on-surface-variant);
 }
 
 .link {
     background: none;
     border: none;
-    color: #60a5fa;
-    font-weight: 600;
+    color: var(--md-sys-color-primary);
+    font-weight: 500;
     cursor: pointer;
-    margin-left: 0.25rem;
+    margin-left: 4px;
+    padding: 0;
 }
 
 .link:hover {
@@ -167,11 +177,11 @@
 @keyframes fadeIn {
     from {
         opacity: 0;
-        transform: translateY(20px);
+        transform: scale(0.95);
     }
 
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: scale(1);
     }
 }
