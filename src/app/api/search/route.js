@@ -14,7 +14,7 @@ export async function GET(request) {
         const { data, error } = await supabase
             .from('users')
             .select('*')
-            .ilike('username', `%${query}%`)
+            .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
             .limit(20);
 
         if (error) throw error;
