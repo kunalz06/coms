@@ -270,34 +270,6 @@ export default function Sidebar({ onSelectChat, activeChat }) {
         return () => clearInterval(interval);
     }, [user]);
 
-    // Presence Listener (Optimized: Only listen to online users)
-    useEffect(() => {
-        // Listening to ALL users is too heavy and hits quota (as seen in logs).
-        // Instead, we only listen for users who are nominally 'online'.
-        // This relies on users updating their status correctly.
-
-        const q = query(collection(db, "users"), where("status", "in", ["online", "in-call"]));
-
-        const unsub = onSnapshot(q, (snap) => {
-            const statusMap = {};
-            snap.docs.forEach(d => {
-                const data = d.data();
-                // Check timeout locally too
-                let finalStatus = data.status || 'offline';
-                if (data.status === 'online' && data.lastSeen) {
-                    const diff = Date.now() - data.lastSeen.toMillis();
-                    if (diff > 5 * 60 * 1000) finalStatus = 'offline';
-                    else if (diff > 60 * 1000) finalStatus = 'idle';
-                }
-                statusMap[d.id] = finalStatus;
-            });
-            setUsersStatus(statusMap);
-        }, (error) => {
-            console.error("Presence listener error", error);
-        });
-
-        return () => unsub();
-    }, []);
 
     // ... Search Logic needs to check MongoDB or Firestore?
     // User Discovery: "users" collection in Firestore is the source of truth for Auth profiles.
