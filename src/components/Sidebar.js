@@ -1,8 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { db } from "@/lib/firebase";
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, updateDoc, doc, arrayUnion, arrayRemove } from "firebase/firestore";
+// import { db } from "@/lib/firebase"; // Removed
+// import { collection, query, where, onSnapshot ... } from "firebase/firestore"; // Removed
+import { supabase } from "@/lib/supabase";
 import { Search, Plus, MessageSquare, LogOut, User as UserIcon, Users, Check, X, Camera, Lock, Save, Trash2, Bell, BellOff, Pin, PinOff, ChevronLeft, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import styles from "./Sidebar.module.css";
@@ -38,14 +39,32 @@ export default function Sidebar({ onSelectChat, activeChat }) {
     // Listen to Current User Data (Real-time for Pinned Chats & Notifications)
     useEffect(() => {
         if (!user) return;
-        const unsub = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
-            if (docSnap.exists()) {
-                const d = docSnap.data();
-                setProfileData(prev => ({ ...prev, notificationsEnabled: d.notificationsEnabled ?? false }));
-                setPinnedChatIds(d.pinnedChatIds || []);
+
+        // Load initial
+        const fetchUserData = async () => {
+            const { data } = await supabase.from('users').select('*').eq('id', user.uid).single();
+            if (data) {
+                setProfileData(prev => ({ ...prev, notificationsEnabled: data.notifications_enabled ?? false }));
+                setPinnedChatIds(data.pinned_chat_ids || []);
             }
-        });
-        return () => unsub();
+        };
+        fetchUserData();
+
+        const channel = supabase
+            .channel(`user_sidebar:${user.uid}`)
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'users',
+                filter: `id=eq.${user.uid}`
+            }, (payload) => {
+                const d = payload.new;
+                setProfileData(prev => ({ ...prev, notificationsEnabled: d.notifications_enabled ?? false }));
+                setPinnedChatIds(d.pinned_chat_ids || []);
+            })
+            .subscribe();
+
+        return () => supabase.removeChannel(channel);
     }, [user]);
 
     // Presence State
@@ -56,14 +75,116 @@ export default function Sidebar({ onSelectChat, activeChat }) {
         if (!user) return;
 
         const isPinned = pinnedChatIds.includes(chatId);
+        const newPinned = isPinned ? pinnedChatIds.filter(id => id !== chatId) : [...pinnedChatIds, chatId];
+
         try {
-            await updateDoc(doc(db, "users", user.uid), {
-                pinnedChatIds: isPinned ? arrayRemove(chatId) : arrayUnion(chatId)
+            await fetch(`/api/users/${user.uid}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pinnedChatIds: newPinned })
             });
+            // State updates via Realtime listener
             showToast(isPinned ? "Chat unpinned" : "Chat pinned", "success");
         } catch (err) {
             console.error(err);
             showToast("Failed to update pin", "error");
+        }
+    };
+
+    // ... (Avatar/Profile/Password handlers remain mostly same, check if they use Firestore)
+    // handleAvatarChange uses compressImage (local)
+    // handleDeleteAvatar uses updateUserProfile (AuthContext -> API)
+    // handleUpdateProfile uses updateUserProfile (AuthContext -> API) + api/upload
+    // These are Safe.
+
+    // Poll User's Chats & Invites
+    useEffect(() => {
+        if (!user) return;
+
+        const fetchChats = async () => {
+            try {
+                const res = await fetch(`/api/chats?userId=${user.uid}`);
+                if (!res.ok) throw new Error(`Status: ${res.status}`);
+
+                const data = await res.json();
+                if (data.success) {
+                    const allChats = data.data;
+                    // Separate invites (where user is in pendingUserIds)
+                    const myChats = allChats.filter(c => c.userIds.includes(user.uid));
+                    const myInvites = allChats.filter(c => c.pendingUserIds?.includes(user.uid));
+
+                    // Mongoose/Supabase mapping
+                    setChats(myChats.map(c => ({ ...c, id: c._id || c.id })));
+                    setInvites(myInvites.map(c => ({ ...c, id: c._id || c.id })));
+                }
+            } catch (err) {
+                console.error("Failed to fetch chats", err);
+            }
+        };
+
+        fetchChats();
+        const interval = setInterval(fetchChats, 3000); // Poll every 3s
+        return () => clearInterval(interval);
+    }, [user]);
+
+    // Presence Listener (Supabase)
+    useEffect(() => {
+        // Listen to all user updates for status changes
+        // Optimization: In a real app with many users, this is heavy. 
+        // For now, list to all is acceptable or filter by friends.
+        const channel = supabase
+            .channel('online_users')
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'users'
+            }, (payload) => {
+                const d = payload.new;
+                setUsersStatus(prev => ({ ...prev, [d.id]: d.status || 'offline' }));
+            })
+            .subscribe();
+
+        // Initial fetch of online users?
+        const fetchOnline = async () => {
+            const { data } = await supabase.from('users').select('id, status').or('status.eq.online,status.eq.in-call');
+            if (data) {
+                const map = {};
+                data.forEach(u => map[u.id] = u.status);
+                setUsersStatus(map);
+            }
+        };
+        fetchOnline();
+
+        return () => supabase.removeChannel(channel);
+    }, []);
+
+    const handleSearch = async (e) => {
+        e.preventDefault();
+        if (!searchQuery.trim()) return;
+
+        try {
+            // Supabase ILIKE search
+            const { data, error } = await supabase
+                .from('users')
+                .select('*')
+                .ilike('username', `%${searchQuery}%`)
+                .limit(20);
+
+            if (error) throw error;
+
+            const results = data
+                .filter(d => d.id !== user.uid)
+                .map(d => ({
+                    uid: d.id,
+                    username: d.username || d.email, // Fallback
+                    photoURL: d.photo_url,
+                    ...d
+                }));
+
+            setSearchResults(results);
+        } catch (error) {
+            console.error("Error searching users:", error);
+            showToast("Search failed", "error");
         }
     };
 
@@ -193,31 +314,6 @@ export default function Sidebar({ onSelectChat, activeChat }) {
     // User Discovery: "users" collection in Firestore is the source of truth for Auth profiles.
     // So handleSearch stays Firestore.
 
-    const handleSearch = async (e) => {
-        e.preventDefault();
-        if (!searchQuery.trim()) return;
-
-        try {
-            // Simple prefix search on displayName
-            const q = query(
-                collection(db, "users"),
-                where("displayName", ">=", searchQuery),
-                where("displayName", "<=", searchQuery + '\uf8ff')
-            );
-
-            const querySnapshot = await getDocs(q);
-            const results = [];
-            querySnapshot.forEach((doc) => {
-                if (doc.id !== user.uid) {
-                    results.push({ uid: doc.id, ...doc.data(), username: doc.data().displayName });
-                }
-            });
-            setSearchResults(results);
-        } catch (error) {
-            console.error("Error searching users:", error);
-            showToast("Search failed", "error");
-        }
-    };
 
     const startChat = async (targetUser) => {
         // Check existing in local state
