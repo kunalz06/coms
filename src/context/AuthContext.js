@@ -25,15 +25,35 @@ export const AuthProvider = ({ children }) => {
         const unsubscribe = onAuthStateChanged(auth, (authUser) => {
             if (authUser) {
                 // User is signed in, now listen to their Firestore profile
-                firestoreUnsub = onSnapshot(doc(db, "users", authUser.uid), (docBox) => {
+                firestoreUnsub = onSnapshot(doc(db, "users", authUser.uid), async (docBox) => {
                     if (docBox.exists()) {
                         const data = docBox.data();
-                        // Merge Auth user + Firestore data
                         setUser({ ...authUser, ...data });
                     } else {
-                        // Fallback if doc doesn't exist yet (rare race condition on signup)
-                        setUser(authUser);
+                        // Document missing! Create it with defaults.
+                        const newUserData = {
+                            uid: authUser.uid,
+                            username: authUser.displayName || 'User',
+                            email: authUser.email,
+                            photoURL: authUser.photoURL || '',
+                            createdAt: new Date().toISOString(),
+                            friends: [],
+                            blocked: []
+                        };
+                        try {
+                            await setDoc(doc(db, "users", authUser.uid), newUserData);
+                            // Set user immediately
+                            setUser({ ...authUser, ...newUserData });
+                        } catch (err) {
+                            console.error("Failed to auto-create user doc:", err);
+                            setUser(authUser);
+                        }
                     }
+                    setLoading(false);
+                }, (error) => {
+                    console.error("Firestore snapshot error:", error);
+                    // Handle permission denied or other errors by setting basic auth user
+                    setUser(authUser);
                     setLoading(false);
                 });
             } else {
@@ -127,10 +147,11 @@ export const AuthProvider = ({ children }) => {
             try {
                 // We don't overwrite 'inCall' here, that should be managed by the call components/logic separately
                 // or we prioritize it in the UI display.
-                await updateDoc(doc(db, "users", user.uid), {
+                // Use setDoc with merge to ensure document exists
+                await setDoc(doc(db, "users", user.uid), {
                     lastSeen: serverTimestamp(),
                     status: currentStatus
-                });
+                }, { merge: true });
             } catch (e) {
                 console.error("Presence update failed", e);
             }
