@@ -163,25 +163,14 @@ export default function Sidebar({ onSelectChat, activeChat }) {
         if (!searchQuery.trim()) return;
 
         try {
-            // Supabase ILIKE search
-            const { data, error } = await supabase
-                .from('users')
-                .select('*')
-                .ilike('username', `%${searchQuery}%`)
-                .limit(20);
+            const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&userId=${user.uid}`);
+            const json = await res.json();
 
-            if (error) throw error;
-
-            const results = data
-                .filter(d => d.id !== user.uid)
-                .map(d => ({
-                    uid: d.id,
-                    username: d.username || d.email, // Fallback
-                    photoURL: d.photo_url,
-                    ...d
-                }));
-
-            setSearchResults(results);
+            if (json.success) {
+                setSearchResults(json.data);
+            } else {
+                showToast("Search failed", "error");
+            }
         } catch (error) {
             console.error("Error searching users:", error);
             showToast("Search failed", "error");
