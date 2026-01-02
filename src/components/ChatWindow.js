@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, arrayUnion, getDocs, where, arrayRemove, deleteDoc } from "firebase/firestore";
+import { supabase } from "@/lib/supabase";
+import { decompressText, decompressJSON } from "@/lib/compression";
 import { Send, Paperclip, Video, Phone, MoreVertical, Image as ImageIcon, File as FileIcon, UserPlus, X, ChevronLeft, Trash2, LogOut, Info, Shield, ShieldAlert, BadgeCheck, Eraser, Edit2, Check } from "lucide-react";
 import clsx from "clsx";
 import styles from "./ChatWindow.module.css";
@@ -81,26 +83,61 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
 
     useEffect(() => {
         if (!chat?.id) return;
+        setMessages([]);
 
-        // Subscribe to messages
-        const q = query(
-            collection(db, "chats", chat.id, "messages"),
-            orderBy("createdAt", "asc")
-        );
+        // 1. Fetch initial messages
+        const fetchMessages = async () => {
+            try {
+                const res = await fetch(`/api/chats/${chat.id}/messages`);
+                const json = await res.json();
+                if (json.success) {
+                    setMessages(json.data);
+                    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+                }
+            } catch (err) {
+                console.error("Failed to load messages", err);
+            }
+        };
 
-        const unsubscribe = onSnapshot(q, (snap) => {
-            const rawMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            // Filter cleared messages
-            const visibleMessages = rawMessages.filter(msg => {
-                const msgTime = msg.createdAt?.toMillis ? msg.createdAt.toMillis() : Date.now();
-                return msgTime > myClearedAt;
-            });
-            setMessages(visibleMessages);
-            setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-        });
+        fetchMessages();
 
-        return () => unsubscribe();
-    }, [chat?.id, myClearedAt]);
+        // 2. Subscribe to Realtime Updates
+        const channel = supabase
+            .channel(`chat:${chat.id}`)
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'messages',
+                filter: `chat_id=eq.${chat.id}`
+            }, (payload) => {
+                const newMsg = payload.new;
+                // Decompress incoming message
+                const decompressedMsg = {
+                    id: newMsg.id,
+                    chatId: newMsg.chat_id,
+                    senderId: newMsg.sender_id,
+                    senderName: decompressText(newMsg.sender_name),
+                    senderPhoto: newMsg.sender_photo,
+                    text: decompressText(newMsg.text),
+                    fileUrl: newMsg.file_url,
+                    fileType: newMsg.file_type,
+                    fileName: newMsg.file_name,
+                    readBy: newMsg.read_by || [],
+                    createdAt: newMsg.created_at, // ISO String
+                    type: newMsg.file_url ? (newMsg.file_type || 'file') : 'text'
+                };
+                setMessages(prev => {
+                    if (prev.find(m => m.id === decompressedMsg.id)) return prev;
+                    return [...prev, decompressedMsg];
+                });
+                setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [chat?.id]);
 
     const sendMessage = async (e) => {
         e.preventDefault();
@@ -109,18 +146,21 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
         const text = neuMessage;
         setNewMessage("");
 
-        await addDoc(collection(db, "chats", chat.id, "messages"), {
-            text,
-            senderId: user.uid,
-            createdAt: serverTimestamp(),
-            type: "text",
-            readBy: [user.uid]
-        });
-
-        await updateDoc(doc(db, "chats", chat.id), {
-            lastMessage: text,
-            lastUpdated: serverTimestamp()
-        });
+        try {
+            await fetch(`/api/chats/${chat.id}/messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text,
+                    senderId: user.uid,
+                    senderName: user.displayName,
+                    senderPhoto: user.photoURL
+                })
+            });
+        } catch (err) {
+            console.error("Failed to send", err);
+            showToast("Failed to send message", "error");
+        }
     };
 
     const handleFileUpload = async (e) => {
@@ -159,14 +199,18 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
             const data = await res.json();
 
             if (data.success) {
-                await addDoc(collection(db, "chats", chat.id, "messages"), {
-                    text: file.name,
-                    fileUrl: data.link,
-                    downloadUrl: data.downloadLink,
-                    senderId: user.uid,
-                    createdAt: serverTimestamp(),
-                    type: file.type.startsWith('image/') ? 'image' : 'file',
-                    readBy: [user.uid]
+                await fetch(`/api/chats/${chat.id}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: file.name,
+                        fileUrl: data.link || data.downloadLink,
+                        fileName: file.name,
+                        fileType: file.type.startsWith('image/') ? 'image' : 'file',
+                        senderId: user.uid,
+                        senderName: user.displayName,
+                        senderPhoto: user.photoURL
+                    })
                 });
             }
         } catch (err) {
@@ -186,8 +230,11 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
     };
 
     const inviteMember = async (targetUser) => {
-        await updateDoc(doc(db, "chats", chat.id), {
-            pendingUserIds: arrayUnion(targetUser.uid)
+        const newPending = [...(chat.pendingUserIds || []), targetUser.uid];
+        await fetch(`/api/chats/${chat.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pendingUserIds: newPending })
         });
         setMemberSearch("");
         setMemberResults([]);
@@ -196,24 +243,33 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
 
     const handleRemoveMember = async (targetUid) => {
         if (!await confirmAction("Remove this user?")) return;
-        await updateDoc(doc(db, "chats", chat.id), {
-            userIds: arrayRemove(targetUid),
-            adminIds: arrayRemove(targetUid) // Also remove admin status if exists
+        const newUserIds = chat.userIds.filter(id => id !== targetUid);
+        const newAdminIds = chat.adminIds.filter(id => id !== targetUid);
+        await fetch(`/api/chats/${chat.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userIds: newUserIds, adminIds: newAdminIds })
         });
     };
 
     const handleMakeAdmin = async (targetUid) => {
         if (!await confirmAction("Make this user an Admin?")) return;
-        await updateDoc(doc(db, "chats", chat.id), {
-            adminIds: arrayUnion(targetUid)
+        const newAdminIds = [...(chat.adminIds || []), targetUid];
+        await fetch(`/api/chats/${chat.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adminIds: newAdminIds })
         });
         showToast("Admin appointed", "success");
     }
 
     const handleDismissAdmin = async (targetUid) => {
         if (!await confirmAction("Dismiss as Admin?")) return;
-        await updateDoc(doc(db, "chats", chat.id), {
-            adminIds: arrayRemove(targetUid)
+        const newAdminIds = chat.adminIds.filter(id => id !== targetUid);
+        await fetch(`/api/chats/${chat.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adminIds: newAdminIds })
         });
         showToast("Admin dismissed", "info");
     }
@@ -221,8 +277,10 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
     const handleUpdateGroupName = async () => {
         if (!groupNameInput.trim()) return;
         try {
-            await updateDoc(doc(db, "chats", chat.id), {
-                groupName: groupNameInput.trim()
+            await fetch(`/api/chats/${chat.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ groupName: groupNameInput.trim() })
             });
             setIsEditingName(false);
             showToast("Group name updated", "success");
@@ -240,9 +298,12 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
             return;
         }
 
-        await updateDoc(doc(db, "chats", chat.id), {
-            userIds: arrayRemove(user.uid),
-            adminIds: arrayRemove(user.uid)
+        const newUserIds = chat.userIds.filter(id => id !== user.uid);
+        const newAdminIds = chat.adminIds.filter(id => id !== user.uid);
+        await fetch(`/api/chats/${chat.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userIds: newUserIds, adminIds: newAdminIds })
         });
         onBack();
     };
@@ -274,11 +335,8 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
 
     // --- Read Receipts & Helpers ---
     const markAsRead = async (unreadMsgs) => {
-        unreadMsgs.forEach(msg => {
-            updateDoc(doc(db, "chats", chat.id, "messages", msg.id), {
-                readBy: arrayUnion(user.uid)
-            }).catch(e => console.error(e));
-        });
+        // TODO: Implement Read Receipts via Supabase API
+        // unreadMsgs.forEach(msg => { ... });
     };
 
     useEffect(() => {

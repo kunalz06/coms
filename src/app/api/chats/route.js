@@ -54,11 +54,11 @@ export async function POST(request) {
             user_ids: body.userIds,
             type: body.type,
             group_name: compressText(body.groupName || ''),
-            admin_ids: body.adminIds,
+            admin_ids: body.adminIds || [],
             users: compressJSON(body.users || {}),
             last_message: compressText(body.lastMessage || ''),
             last_updated: body.lastUpdated || new Date(),
-            pending_user_ids: body.pendingUserIds
+            pending_user_ids: body.pendingUserIds || []
         };
 
         const { data, error } = await supabase
