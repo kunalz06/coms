@@ -1,5 +1,6 @@
 "use client";
 import { createContext, useContext, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { openDB } from "idb";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -37,8 +38,13 @@ export const StorageProvider = ({ children }) => {
     }, []);
 
     // Check Backup Policy & Init State on User Login
+    const pathname = usePathname();
+
     useEffect(() => {
         if (!user || !db) return;
+
+        // Only prompt for import if we are on the dashboard
+        if (!pathname?.startsWith('/dashboard')) return;
 
         const checkStorage = async () => {
             // Check if DB is empty
@@ -48,7 +54,7 @@ export const StorageProvider = ({ children }) => {
                 // New session or fresh browser: Ask to Import
                 setShowImportPrompt(true);
             } else {
-                // Existing data: Check 3-day backup policy
+                // ... existing logic ...
                 const lastBackup = localStorage.getItem("coms_last_backup");
                 if (lastBackup) {
                     const daysDiff = (Date.now() - parseInt(lastBackup)) / (1000 * 60 * 60 * 24);
@@ -56,7 +62,6 @@ export const StorageProvider = ({ children }) => {
                         setNeedsBackup(true);
                     }
                 } else {
-                    // If no record, set "now" as start time
                     localStorage.setItem("coms_last_backup", Date.now().toString());
                 }
             }
@@ -64,7 +69,7 @@ export const StorageProvider = ({ children }) => {
         };
 
         checkStorage();
-    }, [user, db]);
+    }, [user, db, pathname]);
 
     const addMessage = async (message) => {
         if (!db) return;

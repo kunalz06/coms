@@ -236,6 +236,24 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
         };
     }, [chat?.id]);
 
+    const typingTimeoutRef = useRef(null);
+
+    // Debounced Typing Emit
+    const handleTypingInput = (e) => {
+        setNewMessage(e.target.value);
+
+        if (socket && chat?.id) {
+            if (typingTimeoutRef.current) return; // Already emitting/cooldown
+
+            // Volatile emit for typing
+            socket.emit("typing_signal", { c: chat.id, s: user.uid, isTyping: true });
+
+            typingTimeoutRef.current = setTimeout(() => {
+                typingTimeoutRef.current = null;
+            }, 2000); // 2s Debounce
+        }
+    };
+
     const sendMessage = async (e) => {
         e.preventDefault();
         if (!neuMessage.trim()) return;
@@ -263,23 +281,21 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
 
         // Emit to Socket
         if (socket) {
+            // Minified keys: c=chatId, t=text, s=senderId, n=name, p=photo
             socket.emit("send_message", {
-                chatId: chat.id,
-                text,
-                senderId: user.uid,
-                senderName: user.displayName,
-                senderPhoto: user.photoURL
+                c: chat.id,
+                t: text,
+                s: user.uid,
+                n: user.displayName,
+                p: user.photoURL
             }, (ack) => {
-                if (ack.status === 'sent') {
-                    // Optionally update ID if server returned real one?
-                    // ack.msg contains the saved message from DB.
-                    // Ideally we update the tempId with ack.msg.id in IndexedDB and State.
-                    // For now, let's just log.
-                    console.log("Message Sent & Buffered", ack.msg.id);
+                if (ack && ack.status === 'sent') {
+                    // console.log("Message Sent & Buffered", ack.id);
                 }
             });
         } else {
-            showToast("Socket Disconnected. Message saved locally but not sent.", "error");
+            // Fallback or Toast
+            // showToast("Socket Disconnected...", "error");
         }
     };
 
