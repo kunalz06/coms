@@ -374,9 +374,21 @@
     padding: 32px;
     box-shadow: var(--shadow-3);
     animation: slideUp 0.3s var(--md-sys-motion-easing-emphasized);
+    /* Mobile Scroll Fix */
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
 }
 
-/* Profile Modal Styles */
+.profileBody {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    overflow-y: auto;
+    padding-right: 4px;
+    /* Space for scrollbar */
+}
+
 .profileModalHeader {
     display: flex;
     justify-content: space-between;
