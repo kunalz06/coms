@@ -24,6 +24,8 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
     const [connectionStatus, setConnectionStatus] = useState("Initializing...");
     const [showControls, setShowControls] = useState(true);
     const [facingMode, setFacingMode] = useState('user');
+    const [remoteStream, setRemoteStream] = useState(null);
+    const callListenerRef = useRef(null);
 
     useEffect(() => {
         // Auto-hide controls after 3 seconds of inactivity
@@ -74,6 +76,7 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
         return () => {
             if (stream) stream.getTracks().forEach(track => track.stop());
             if (peer) peer.destroy();
+            if (callListenerRef.current) callListenerRef.current(); // Unsub listener
             // Revert status to online
             updateDoc(doc(db, "users", user.uid), { status: 'online' });
         };
@@ -183,6 +186,18 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
 
         p.signal(JSON.parse(activeCall.offer));
         setPeer(p);
+
+        // Listen for call endings from the caller side
+        const unsub = onSnapshot(doc(db, "calls", activeCall.id), (snapshot) => {
+            if (!snapshot.exists()) {
+                // Call doc deleted -> Call ended
+                endCall();
+            } else {
+                const data = snapshot.data();
+                if (data?.status === 'ended') endCall();
+            }
+        });
+        callListenerRef.current = unsub;
     };
 
     const startCall = (currentStream) => {

@@ -24,10 +24,17 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
 
-    // Use environment variable for backend URL or smart default for localhost
+    // Use environment variable for backend URL or smart default for localhost/IP
+    // Fix: If accessing via IP (e.g. 192.168.x.x:3000), "localhost" check fails, and it defaults to origin (port 3000).
+    // Socket server is usually on 3001 in dev.
     let defaultUrl = window.location.origin;
     if (window.location.hostname === 'localhost') {
       defaultUrl = 'http://localhost:3001';
+    } else if (window.location.port === '3000') {
+      // If we are on port 3000 (standard Next.js dev), assume Socket is on 3001 on the same host
+      const protocol = window.location.protocol;
+      const host = window.location.hostname;
+      defaultUrl = `${protocol}//${host}:3001`;
     }
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || defaultUrl;
 
