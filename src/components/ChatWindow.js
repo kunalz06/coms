@@ -6,7 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { useStorage } from "@/context/StorageContext";
 import { decompressText, decompressJSON } from "@/lib/compression";
-import { Send, Paperclip, Video, Phone, MoreVertical, Image as ImageIcon, File as FileIcon, UserPlus, X, ChevronLeft, Trash2, LogOut, Info, Shield, ShieldAlert, BadgeCheck, Eraser, Edit2, Check } from "lucide-react";
+import { Send, Paperclip, Video, Phone, MoreVertical, Image as ImageIcon, File as FileIcon, UserPlus, X, ChevronLeft, Trash2, LogOut, Info, Shield, ShieldAlert, BadgeCheck, Eraser, Edit2, Check, Download } from "lucide-react";
 import clsx from "clsx";
 import styles from "./ChatWindow.module.css";
 import { compressImage } from "@/lib/utils";
