@@ -203,9 +203,22 @@
     .controlsBar {
         bottom: 24px;
         padding-bottom: max(12px, env(safe-area-inset-bottom));
-        /* Safe area for iPhone home bar */
-        width: 90%;
+        width: 95%;
+        /* Use more width */
         gap: 12px;
+        overflow-x: auto;
+        /* Allow scrolling if buttons don't fit */
+        justify-content: flex-start;
+        /* Align start to allow scroll */
+        -webkit-overflow-scrolling: touch;
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    /* Center the buttons if they DO fit */
+    .controlsBar::after {
+        content: '';
+        flex: 0 0 auto;
     }
 }
 

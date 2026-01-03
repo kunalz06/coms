@@ -280,7 +280,7 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
                 {/* Partner Video Area */}
                 <div className="relative w-full h-full bg-slate-900">
                     {callAccepted ? (
-                        <video playsInline ref={partnerVideo} autoPlay className={styles.partnerVideo} />
+                        <video playsInline autoPlay ref={partnerVideo} className={styles.partnerVideo} />
                     ) : (
                         <div className={styles.placeholder}>
                             <div className={styles.avatarRing}>
@@ -342,6 +342,7 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
                         {isScreenSharing ? <MonitorOff size={24} /> : <Monitor size={24} />}
                     </button>
 
+                    {/* Show toggle camera button */}
                     <button
                         onClick={toggleCamera}
                         className={styles.controlBtn}
