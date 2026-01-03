@@ -6,7 +6,10 @@ export async function GET(request) {
     const query = searchParams.get('q');
     const userId = searchParams.get('userId');
 
+    console.log(`[Search API] Query: "${query}", UserId: "${userId}"`);
+
     if (!query) {
+        console.log("[Search API] No query provided, returning empty list.");
         return NextResponse.json({ success: true, data: [] });
     }
 
@@ -17,7 +20,12 @@ export async function GET(request) {
             .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
             .limit(20);
 
-        if (error) throw error;
+        if (error) {
+            console.error("[Search API] Supabase Error:", error);
+            throw error;
+        }
+
+        console.log(`[Search API] Supabase returned ${data?.length || 0} results.`);
 
         // Filter out current user
         const results = data
@@ -29,8 +37,11 @@ export async function GET(request) {
                 status: u.status
             }));
 
+        console.log(`[Search API] Returned ${results.length} results after filtering.`);
+
         return NextResponse.json({ success: true, data: results });
     } catch (error) {
+        console.error("[Search API] Exception:", error);
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 }

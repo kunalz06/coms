@@ -20,35 +20,53 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const sessionIdRef = useRef(null);
 
+    // Reusable Session Sync Function
+    const syncSession = async (userObj) => {
+        try {
+            const res = await fetch('/api/auth/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uid: userObj.uid,
+                    email: userObj.email,
+                    username: userObj.displayName,
+                    photoURL: userObj.photoURL,
+                    sessionId: sessionIdRef.current
+                })
+            });
+
+            if (res.ok) {
+                const { data } = await res.json();
+                return data;
+            } else {
+                console.error("Session sync failed");
+                return null;
+            }
+        } catch (e) {
+            console.error("Auth flow error", e);
+            return null;
+        }
+    };
+
     useEffect(() => {
         let supabaseChannel = null;
 
         const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
             if (authUser) {
-                // Generate new Session ID
-                const newSessionId = crypto.randomUUID();
-                sessionIdRef.current = newSessionId;
-
-                // Sync to Supabase & Register Session
                 try {
-                    const res = await fetch('/api/auth/session', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            uid: authUser.uid,
-                            email: authUser.email,
-                            username: authUser.displayName,
-                            photoURL: authUser.photoURL,
-                            sessionId: newSessionId
-                        })
-                    });
+                    // Generate new Session ID if not present
+                    if (!sessionIdRef.current) {
+                        const newSessionId = crypto.randomUUID();
+                        sessionIdRef.current = newSessionId;
+                    }
 
-                    if (res.ok) {
-                        const { data } = await res.json();
-                        // Set initial user state with merged data if available, or just auth
-                        setUser({ ...authUser, ...data });
+                    // Sync to Supabase & Register Session
+                    const syncedData = await syncSession(authUser);
+
+                    // Set initial user state with merged data if available, or just auth
+                    if (syncedData) {
+                        setUser({ ...authUser, ...syncedData });
                     } else {
-                        console.error("Session sync failed");
                         setUser(authUser);
                     }
 
@@ -72,17 +90,13 @@ export const AuthProvider = ({ children }) => {
                         })
                         .subscribe();
 
-                } catch (e) {
-                    console.error("Auth flow error", e);
-                    setUser(authUser);
+                } else {
+                    setUser(null);
+                    setLoading(false);
+                    if (supabaseChannel) supabase.removeChannel(supabaseChannel);
                 }
                 setLoading(false);
-            } else {
-                setUser(null);
-                setLoading(false);
-                if (supabaseChannel) supabase.removeChannel(supabaseChannel);
-            }
-        });
+            });
 
         return () => {
             unsubscribe();
@@ -93,8 +107,14 @@ export const AuthProvider = ({ children }) => {
     const signup = async (email, password, username, photoURL = "") => {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
+
+        // Update Firebase Profile
         await updateProfile(user, { displayName: username, photoURL });
-        // Session sync happens in onAuthStateChanged
+
+        // FORCE SYNC to DB immediately with new profile data
+        // This ensures the username/photo is saved before the auto-sync from onAuthStateChanged (which might run with old data)
+        await syncSession({ ...user, displayName: username, photoURL });
+
         return user;
     };
 
@@ -114,21 +134,12 @@ export const AuthProvider = ({ children }) => {
         if (Object.keys(authUpdates).length > 0) {
             await updateProfile(user, authUpdates);
             // Re-sync session data to update DB
-            await fetch('/api/auth/session', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    uid: user.uid,
-                    email: user.email,
-                    username: data.displayName || user.displayName,
-                    photoURL: data.photoURL || user.photoURL,
-                    sessionId: sessionIdRef.current
-                })
-            });
+            await syncSession({ ...user, ...authUpdates });
         }
     };
 
     const logout = () => {
+        sessionIdRef.current = null;
         return signOut(auth);
     };
 

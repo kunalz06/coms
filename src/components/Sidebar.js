@@ -564,7 +564,9 @@ export default function Sidebar({ onSelectChat, activeChat }) {
             {isSearching ? (
                 <div className={styles.searchContainer}>
                     <form onSubmit={handleSearch} className={styles.searchForm}>
-                        <Search className={styles.searchIcon} />
+                        <button type="submit" className={styles.searchIconBtn} title="Search">
+                            <Search className={styles.searchIcon} />
+                        </button>
                         <input
                             className={styles.searchInput}
                             placeholder="Search username..."

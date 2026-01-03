@@ -138,13 +138,30 @@
     background: var(--md-sys-color-surface-container-highest);
 }
 
-.searchIcon {
+.searchIconBtn {
     position: absolute;
-    left: 28px;
+    left: 20px;
     top: 50%;
     transform: translateY(-50%);
+    background: none;
+    border: none;
+    padding: 8px;
+    cursor: pointer;
     color: var(--md-sys-color-on-surface-variant);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+.searchIconBtn:hover {
+    color: var(--md-sys-color-primary);
+    background-color: var(--md-sys-color-surface-container-highest);
+}
+
+.searchIcon {
     width: 20px;
+    height: 20px;
 }
 
 /* Chat List */

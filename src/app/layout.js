@@ -1,6 +1,7 @@
 import { Outfit } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import { StorageProvider } from "@/context/StorageContext";
 import { UIProvider } from "@/context/UIContext";
 
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
@@ -15,9 +16,11 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body className={outfit.className}>
         <AuthProvider>
-          <UIProvider>
-            {children}
-          </UIProvider>
+          <StorageProvider>
+            <UIProvider>
+              {children}
+            </UIProvider>
+          </StorageProvider>
         </AuthProvider>
       </body>
     </html>
