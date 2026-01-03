@@ -16,7 +16,7 @@ import { useStorage } from "@/context/StorageContext";
 export default function Sidebar({ onSelectChat, activeChat }) {
     const { user, logout, updateUserProfile, updateUserPassword } = useAuth();
     const { showToast, confirmAction } = useUI();
-    const { downloadAllMedia } = useStorage();
+    const { downloadAllMedia, exportBackup } = useStorage();
     const [chats, setChats] = useState([]);
 
     // Pinned Chats State
@@ -480,16 +480,28 @@ export default function Sidebar({ onSelectChat, activeChat }) {
                                         </div>
                                     </button>
 
-                                    {/* Bulk Media Download */}
                                     <button
                                         type="button"
                                         onClick={downloadAllMedia}
-                                        className={styles.notificationToggle} // Reusing style for consistency
+                                        className={styles.notificationToggle}
                                         style={{ marginTop: '1rem' }}
                                     >
                                         <div className="flex items-center gap-3">
                                             <Save size={24} />
                                             <span className="font-medium">Download Media (Last 5 Days)</span>
+                                        </div>
+                                    </button>
+
+                                    {/* Manual Chat Backup */}
+                                    <button
+                                        type="button"
+                                        onClick={exportBackup}
+                                        className={styles.notificationToggle}
+                                        style={{ marginTop: '1rem', borderColor: '#4CAF50' }}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <Save size={24} className="text-green-500" />
+                                            <span className="font-medium">Download & Clear Chats</span>
                                         </div>
                                     </button>
 
