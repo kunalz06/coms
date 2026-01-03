@@ -14,6 +14,7 @@ import { useUI } from "@/context/UIContext";
 
 export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
     const { user } = useAuth();
+    const { getMessages, addMessage, ackMessage, getReceipts, clearChatMessages } = useStorage();
     const [messages, setMessages] = useState([]);
     const [neuMessage, setNewMessage] = useState("");
     const [uploading, setUploading] = useState(false);
