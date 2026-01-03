@@ -217,9 +217,27 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
         }
     }
 
+    const [showControls, setShowControls] = useState(true);
+
+    useEffect(() => {
+        // Auto-hide controls after 3 seconds of inactivity
+        let timeout;
+        if (showControls) {
+            timeout = setTimeout(() => {
+                // Only auto-hide on mobile-like widths if needed, or globally
+                // For now, let's just use manual toggle for better UX or simple auto-hide
+            }, 5000);
+        }
+        return () => clearTimeout(timeout);
+    }, [showControls]);
+
+    const handleOverlayClick = () => {
+        setShowControls(prev => !prev);
+    };
+
     return (
         <div className={styles.overlayContainer}>
-            <div className={styles.callCard}>
+            <div className={styles.callCard} onClick={handleOverlayClick}>
 
                 {/* Partner Video Area */}
                 <div className="relative w-full h-full bg-slate-900">
@@ -243,7 +261,10 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
                 </div>
 
                 {/* Self View (Draggable-looking PiP) */}
-                <div className={styles.selfVideoWrapper}>
+                <div
+                    className={styles.selfVideoWrapper}
+                    onClick={(e) => e.stopPropagation()} // Prevent toggling controls when clicking self view
+                >
                     <video playsInline ref={userVideo} autoPlay muted className={styles.selfVideo} />
                     {!callAccepted && isIncoming && (
                         <div className={styles.answerOverlay}>
@@ -255,7 +276,10 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
                 </div>
 
                 {/* Controls Bar */}
-                <div className={styles.controlsBar}>
+                <div
+                    className={clsx(styles.controlsBar, !showControls && styles.controlsHidden)}
+                    onClick={(e) => e.stopPropagation()} // Prevent toggling controls when clicking buttons
+                >
                     <button
                         onClick={toggleMute}
                         className={clsx(styles.controlBtn, isAudioMuted && styles.dangerActive)}

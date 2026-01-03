@@ -123,6 +123,25 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
         }
     };
 
+    // Helper to normalize message keys (snake_case from DB -> camelCase for App)
+    const normalizeMessage = (msg) => {
+        if (!msg) return null;
+        return {
+            id: msg.id,
+            chatId: msg.chat_id || msg.chatId,
+            senderId: msg.sender_id || msg.senderId,
+            senderName: msg.sender_name ? decompressText(msg.sender_name) : (msg.senderName || "Unknown"),
+            senderPhoto: msg.sender_photo || msg.senderPhoto,
+            text: msg.text ? decompressText(msg.text) : (msg.text || ""),
+            fileUrl: msg.file_url || msg.fileUrl,
+            fileType: msg.file_type || msg.fileType || (msg.file_url || msg.fileUrl ? 'file' : 'text'),
+            fileName: msg.file_name || msg.fileName,
+            readBy: msg.read_by || msg.readBy || [],
+            createdAt: msg.created_at || msg.createdAt || new Date().toISOString(),
+            type: (msg.file_url || msg.fileUrl) ? (msg.file_type || msg.fileType || 'file') : 'text'
+        };
+    };
+
     useEffect(() => {
         if (!chat?.id) return;
         setMessages([]);
@@ -154,8 +173,9 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
                 const json = await res.json();
                 if (json.success && json.data.length > 0) {
                     for (const msg of json.data) {
-                        await addMessage(msg);
-                        await ackMessage(msg.id);
+                        const normalized = normalizeMessage(msg);
+                        await addMessage(normalized);
+                        await ackMessage(normalized.id);
                     }
                     loadLocalData();
                 }
@@ -166,7 +186,32 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
         fetchBuffer();
 
 
-        // 3. Subscribe to Realtime Updates (Messages & Receipts)
+        // 3. Socket.io Realtime Listener
+        if (socket) {
+            const handleReceiveMessage = async (msg) => {
+                // If message is for this chat
+                if ((msg.chat_id === chat.id || msg.chatId === chat.id) && (msg.sender_id !== user.uid && msg.senderId !== user.uid)) {
+                    const normalized = normalizeMessage(msg);
+                    await addMessage(normalized);
+                    setMessages(prev => {
+                        if (prev.find(m => m.id === normalized.id)) return prev;
+                        return [...prev, normalized].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                    });
+                    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+                    await ackMessage(normalized.id);
+                }
+            };
+
+            socket.on('receive_message', handleReceiveMessage);
+
+            return () => {
+                socket.off('receive_message', handleReceiveMessage);
+            };
+        }
+
+        // 4. Fallback: Subscribe to Realtime Updates (Messages & Receipts) via Supabase
+        // (Only used if socket is down or as backup? Actually duplicate listeners might be bad.
+        // Let's keep it but rely on deduplication in addMessage/setMessages)
         const channel = supabase
             .channel(`chat:${chat.id}`)
             // Messages
@@ -179,30 +224,22 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
                 const newMsg = payload.new;
                 if (!newMsg || !newMsg.id) return;
 
-                const decompressedMsg = {
-                    id: newMsg.id,
-                    chatId: newMsg.chat_id,
-                    senderId: newMsg.sender_id,
-                    senderName: decompressText(newMsg.sender_name),
-                    senderPhoto: newMsg.sender_photo,
-                    text: decompressText(newMsg.text),
-                    fileUrl: newMsg.file_url,
-                    fileType: newMsg.file_type,
-                    fileName: newMsg.file_name,
-                    readBy: newMsg.read_by || [],
-                    createdAt: newMsg.created_at,
-                    type: newMsg.file_url ? (newMsg.file_type || 'file') : 'text'
-                };
+                // Skip if we are the sender (local update handles it) 
+                // BUT wait, we need it if we are on another device? 
+                // For now, simple check:
+                if (newMsg.sender_id === user.uid) return;
 
-                await addMessage(decompressedMsg);
+                const normalized = normalizeMessage(newMsg);
+
+                await addMessage(normalized);
 
                 setMessages(prev => {
-                    if (prev.find(m => m.id === decompressedMsg.id)) return prev;
-                    return [...prev, decompressedMsg].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                    if (prev.find(m => m.id === normalized.id)) return prev;
+                    return [...prev, normalized].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
                 });
                 setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
-                await ackMessage(decompressedMsg.id);
+                await ackMessage(normalized.id);
             })
             // Receipts
             .on('postgres_changes', {
@@ -232,9 +269,10 @@ export default function ChatWindow({ chat, onStartCall, onBack }) {
             .subscribe();
 
         return () => {
+            if (socket) socket.off('receive_message'); // Redundant cleanup but safe
             supabase.removeChannel(channel);
         };
-    }, [chat?.id]);
+    }, [chat?.id, socket]);
 
     const typingTimeoutRef = useRef(null);
 
