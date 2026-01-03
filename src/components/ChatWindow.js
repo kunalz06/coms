@@ -717,7 +717,7 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                     >
                         {otherUser.photoURL ? <img src={otherUser.photoURL} className={styles.avatarImg} /> : otherUser.displayName[0]}
                     </div>
-                    <div>
+                    <div className={styles.headerText}>
                         <h3 className={styles.headerTitle}>{otherUser.displayName}</h3>
                         <span className={clsx(
                             styles.headerStatus,
@@ -760,17 +760,43 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                             >
                                 {msg.type === 'text' && <p className={styles.messageText}>{msg.text}</p>}
 
-                                {msg.type === 'image' && (
-                                    <div className={styles.messageImageWrapper}>
-                                        <img src={msg.fileUrl} alt="Shared" className={styles.messageImage} />
-                                    </div>
-                                )}
+                                {msg.type === 'image' && (() => {
+                                    const diff = (new Date() - new Date(msg.createdAt)) / (1000 * 60 * 60 * 24);
+                                    const isExpired = diff > 3;
+                                    const daysLeft = Math.ceil(3 - diff);
+                                    return (
+                                        <div className={styles.messageImageWrapper}>
+                                            <img src={msg.fileUrl} alt="Shared" className={styles.messageImage} />
+                                            <div className="text-[10px] text-white/70 px-2 py-1 bg-black/40 absolute bottom-0 w-full backdrop-blur-sm">
+                                                {isExpired ? "Expired / Stored on device" : `Expires in ${daysLeft} days`}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
 
-                                {msg.type === 'file' && (
-                                    <a href={msg.fileUrl} target="_blank" className={styles.messageFile}>
-                                        <FileIcon size={16} /> {msg.fileName || "Attachment"}
-                                    </a>
-                                )}
+                                {msg.type === 'file' && (() => {
+                                    const diff = (new Date() - new Date(msg.createdAt)) / (1000 * 60 * 60 * 24);
+                                    const isExpired = diff > 3;
+                                    const daysLeft = Math.ceil(3 - diff);
+
+                                    if (isExpired) {
+                                        return (
+                                            <div className={clsx(styles.messageFile, "text-slate-400 cursor-default no-underline")}>
+                                                <FileIcon size={16} />
+                                                <span className="italic">File expired / stored on device</span>
+                                            </div>
+                                        );
+                                    }
+
+                                    return (
+                                        <div className="flex flex-col gap-1">
+                                            <a href={msg.fileUrl} target="_blank" className={styles.messageFile}>
+                                                <FileIcon size={16} /> {msg.fileName || "Attachment"}
+                                            </a>
+                                            <span className="text-[10px] opacity-60 text-right pr-1">Expires in {daysLeft} days</span>
+                                        </div>
+                                    );
+                                })()}
                                 <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
                                     <span className={styles.messageTime}>
                                         {formatTime(msg.createdAt)}

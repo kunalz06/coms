@@ -22,6 +22,19 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const screenTrackRef = useRef(null);
     const [connectionStatus, setConnectionStatus] = useState("Initializing...");
+    const [showControls, setShowControls] = useState(true);
+
+    useEffect(() => {
+        // Auto-hide controls after 3 seconds of inactivity
+        let timeout;
+        if (showControls) {
+            timeout = setTimeout(() => {
+                // Only auto-hide on mobile-like widths if needed, or globally
+                // For now, let's just use manual toggle for better UX or simple auto-hide
+            }, 5000);
+        }
+        return () => clearTimeout(timeout);
+    }, [showControls]);
 
     useEffect(() => {
         // Set presence to in-call
@@ -217,19 +230,7 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
         }
     }
 
-    const [showControls, setShowControls] = useState(true);
 
-    useEffect(() => {
-        // Auto-hide controls after 3 seconds of inactivity
-        let timeout;
-        if (showControls) {
-            timeout = setTimeout(() => {
-                // Only auto-hide on mobile-like widths if needed, or globally
-                // For now, let's just use manual toggle for better UX or simple auto-hide
-            }, 5000);
-        }
-        return () => clearTimeout(timeout);
-    }, [showControls]);
 
     const handleOverlayClick = () => {
         setShowControls(prev => !prev);

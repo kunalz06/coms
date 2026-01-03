@@ -24,6 +24,9 @@
     display: flex;
     align-items: center;
     gap: 16px;
+    min-width: 0;
+    /* Allow shrinking */
+    flex: 1;
 }
 
 .headerAvatar {
@@ -48,12 +51,22 @@
     object-fit: cover;
 }
 
+.headerText {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    /* Important for nested ellipsis */
+}
+
 .headerTitle {
     font-size: 1.375rem;
     font-weight: 400;
     color: var(--md-sys-color-on-surface);
     margin: 0;
     line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .headerStatus {
@@ -76,6 +89,9 @@
 .headerActions {
     display: flex;
     gap: 8px;
+    flex-shrink: 0;
+    /* Prevent actions from squishing */
+    margin-left: 8px;
 }
 
 .iconButton {

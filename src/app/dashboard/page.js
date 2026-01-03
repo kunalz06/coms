@@ -51,21 +51,24 @@ export default function Dashboard() {
   }, [user]);
 
   // Listen for Incoming Calls & Missed Calls
+  // Listen for Incoming Calls & Missed Calls
   useEffect(() => {
     if (!user) return;
     const q = query(
       collection(db, "calls"),
       where("targetId", "==", user.uid),
-      where("status", "in", ["offering", "missed"]),
-      limit(10) // Allow multiple checks
+      where("status", "in", ["offering", "accepted", "missed"]), // Include accepted
+      limit(10)
     );
     const unsub = onSnapshot(q, async (snap) => {
       snap.docChanges().forEach(async (change) => {
         if (change.type === "added" || change.type === "modified") {
           const data = change.doc.data();
-          if (data.status === 'offering') {
+          if (data.status === 'offering' || data.status === 'accepted') {
             setIncomingCall({ id: change.doc.id, ...data });
-            if (document.hidden) {
+
+            // Only notify on new offering
+            if (data.status === 'offering' && change.type === "added" && document.hidden) {
               const { NotificationService } = await import("@/lib/notifications");
               NotificationService.send("Incoming Call", { body: `${data.callerName} is calling...`, tag: 'call' });
             }
@@ -80,6 +83,7 @@ export default function Dashboard() {
           }
         }
         if (change.type === "removed") {
+          // If the doc is removed (e.g. call ended and deleted), clear state
           setIncomingCall(prev => (prev?.id === change.doc.id ? null : prev));
         }
       });

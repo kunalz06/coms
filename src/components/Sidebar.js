@@ -747,9 +747,10 @@ function ChatListItem({ chat, activeChat, onSelectChat, togglePin, user, pinnedC
         if (isGroup) return null;
         const otherUserId = chat.userIds.find(id => id !== user.uid);
         const s = usersStatus[otherUserId] || 'offline';
-        if (s === 'online') return <span className={clsx(styles.statusDot, "bg-green-500")}></span>;
-        if (s === 'in-call') return <span className={clsx(styles.statusDot, "bg-red-500")}></span>;
-        return null;
+        if (s === 'online') return <span className={clsx(styles.statusDot, "bg-green-500")} title="Online"></span>;
+        if (s === 'in-call') return <span className={clsx(styles.statusDot, "bg-red-500")} title="In Call"></span>;
+        if (s === 'idle') return <span className={clsx(styles.statusDot, "bg-yellow-500")} title="Idle"></span>;
+        return <span className={clsx(styles.statusDot, "bg-slate-500")} title="Offline"></span>;
     };
 
     return (
