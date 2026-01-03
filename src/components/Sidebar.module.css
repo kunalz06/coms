@@ -2,7 +2,7 @@
 
 .sidebar {
     width: 380px;
-    height: 100vh;
+    height: 100dvh;
     border-right: 1px solid var(--md-sys-color-outline-variant);
     background: var(--md-sys-color-surface-container);
     display: flex;

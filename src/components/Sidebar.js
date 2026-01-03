@@ -509,6 +509,10 @@ export default function Sidebar({ onSelectChat, activeChat }) {
 
                                     {/* Footer */}
                                     <div className={styles.settingsFooter}>
+                                        <button onClick={exportBackup} className={styles.logoutBtn} style={{ borderColor: 'var(--md-sys-color-primary)', color: 'var(--md-sys-color-primary)' }}>
+                                            <Save size={18} />
+                                            <span>Backup Chats</span>
+                                        </button>
                                         <button type="submit" className={styles.saveBtn}>
                                             Save Changes
                                         </button>

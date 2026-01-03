@@ -87,6 +87,21 @@ export default function Dashboard() {
     return () => unsub();
   }, [user]);
 
+  // Backup Prompt on Exit (Window Close)
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      // Modern browsers don't show custom messages, but setting returnValue triggers the dialog.
+      // We rely on the user knowing they should backup if they see this.
+      const msg = "Have you backed up your chats? Changes may not be saved externally.";
+      e.preventDefault();
+      e.returnValue = msg;
+      return msg;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   const startCall = async () => {
     if (!activeChat || !activeChat.userIds) {
       console.error("Cannot start call: Invalid chat data", activeChat);
