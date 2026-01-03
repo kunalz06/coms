@@ -376,8 +376,10 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
     };
 
     const handleDownload = async (url, filename) => {
+        showToast("Starting download...", "info");
         try {
             const res = await fetch(url);
+            if (!res.ok) throw new Error("Network response was not ok");
             const blob = await res.blob();
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
@@ -386,9 +388,15 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(link.href);
+            showToast("Download complete", "success");
         } catch (e) {
-            console.error("Download failed", e);
-            window.open(url, '_blank');
+            console.error("Blob download failed, falling back to direct link", e);
+            // Fallback for mobile/CORS: Open directly
+            const win = window.open(url, '_blank');
+            if (!win) {
+                // Popup blocked
+                window.location.href = url;
+            }
         }
     };
 
