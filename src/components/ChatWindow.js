@@ -952,7 +952,6 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                         </div>
                     );
                 })}
-                })}
 
                 {/* Typing Indicator */}
                 {typingUsers.size > 0 && (
