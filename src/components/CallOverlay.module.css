@@ -46,7 +46,9 @@
 .partnerVideo {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    /* Default for desktop: Show full video (e.g. vertical mobile) without cropping */
+    background: #000;
 }
 
 .placeholder {

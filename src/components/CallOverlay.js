@@ -4,7 +4,7 @@ import Peer from "simple-peer";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, MonitorOff } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, MonitorOff, RefreshCcw } from "lucide-react";
 import styles from "./CallOverlay.module.css";
 import clsx from "clsx";
 import { useUI } from "@/context/UIContext";
@@ -23,6 +23,7 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
     const screenTrackRef = useRef(null);
     const [connectionStatus, setConnectionStatus] = useState("Initializing...");
     const [showControls, setShowControls] = useState(true);
+    const [facingMode, setFacingMode] = useState('user');
 
     useEffect(() => {
         // Auto-hide controls after 3 seconds of inactivity
@@ -77,6 +78,41 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
             updateDoc(doc(db, "users", user.uid), { status: 'online' });
         };
     }, []);
+
+    const toggleCamera = async () => {
+        const newMode = facingMode === 'user' ? 'environment' : 'user';
+        try {
+            const newStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: newMode },
+                audio: true
+            });
+
+            const newVideoTrack = newStream.getVideoTracks()[0];
+            const oldVideoTrack = stream.getVideoTracks()[0];
+
+            if (peer) {
+                peer.replaceTrack(oldVideoTrack, newVideoTrack, stream);
+            }
+
+            if (userVideo.current) {
+                userVideo.current.srcObject = newStream;
+            }
+
+            // Construct new stream with new video + existing audio (to maintain mute state if complicated, 
+            // but getting new audio track is safer for simple switch, just ensure mute state is reapplied if needed)
+            // Actually, simpler to just use the new stream's tracks.
+            setStream(newStream);
+            setFacingMode(newMode);
+            setIsVideoOff(false);
+
+            // Stop old tracks to release camera
+            oldVideoTrack.stop();
+
+        } catch (err) {
+            console.error("Failed to switch camera", err);
+            showToast("Camera switch failed", "error");
+        }
+    };
 
     const toggleScreenShare = () => {
         if (isScreenSharing) {
@@ -304,6 +340,14 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
                         title="Share Screen"
                     >
                         {isScreenSharing ? <MonitorOff size={24} /> : <Monitor size={24} />}
+                    </button>
+
+                    <button
+                        onClick={toggleCamera}
+                        className={styles.controlBtn}
+                        title="Flip Camera"
+                    >
+                        <RefreshCcw size={24} />
                     </button>
 
                     <button
