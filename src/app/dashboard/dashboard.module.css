@@ -1,7 +1,7 @@
 /* Material You V3 Expressive Dashboard */
 
 .container {
-    min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     font-family: var(--font-sans);
     color: var(--md-sys-color-on-background);
@@ -12,7 +12,7 @@
 
 /* Layout */
 .sidebarWrapper {
-    height: 100vh;
+    height: 100dvh;
     flex-shrink: 0;
     z-index: 10;
 }
@@ -22,7 +22,7 @@
     display: flex;
     flex-direction: column;
     position: relative;
-    height: 100vh;
+    height: 100dvh;
     background: var(--md-sys-color-background);
     overflow: hidden;
 }
@@ -72,7 +72,7 @@
 
 /* Spinner */
 .spinnerContainer {
-    min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;
