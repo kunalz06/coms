@@ -12,7 +12,7 @@ import styles from "./ChatWindow.module.css";
 import { compressImage } from "@/lib/utils";
 import { useUI } from "@/context/UIContext";
 
-export default function ChatWindow({ chat, onStartCall, onBack }) {
+export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
     const { user } = useAuth();
     const [messages, setMessages] = useState([]);
     const [neuMessage, setNewMessage] = useState("");

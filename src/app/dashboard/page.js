@@ -10,12 +10,45 @@ import { collection, query, where, onSnapshot, limit, addDoc, serverTimestamp, d
 import { db } from "@/lib/firebase";
 import styles from "./dashboard.module.css";
 
+import { io } from "socket.io-client";
+
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [activeChat, setActiveChat] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [outgoingCallTarget, setOutgoingCallTarget] = useState(null);
+  const [socket, setSocket] = useState(null);
+
+  // Initialize Socket.io
+  useEffect(() => {
+    if (!user) return;
+
+    // Use environment variable for backend URL or default to current origin
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+
+    const newSocket = io(socketUrl, {
+      path: "/socket.io", // Standard path for socket.io
+      reconnectionAttempts: 5,
+      ackTimeout: 10000,
+      transports: ['websocket', 'polling']
+    });
+
+    newSocket.on("connect", () => {
+      // console.log("Socket connected:", newSocket.id);
+      newSocket.emit("register", user.uid);
+    });
+
+    newSocket.on("connect_error", (err) => {
+      console.error("Socket connection error:", err);
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [user]);
 
   // Listen for Incoming Calls & Missed Calls
   useEffect(() => {
@@ -126,6 +159,7 @@ export default function Dashboard() {
             chat={activeChat}
             onStartCall={startCall}
             onBack={() => setActiveChat(null)}
+            socket={socket}
           />
         ) : (
           <div className={styles.emptyState}>
