@@ -90,13 +90,16 @@ export const AuthProvider = ({ children }) => {
                         })
                         .subscribe();
 
-                } else {
-                    setUser(null);
-                    setLoading(false);
-                    if (supabaseChannel) supabase.removeChannel(supabaseChannel);
+                } catch (err) {
+                    console.error("Error in auth state change", err);
                 }
+            } else {
+                setUser(null);
                 setLoading(false);
-            });
+                if (supabaseChannel) supabase.removeChannel(supabaseChannel);
+            }
+            setLoading(false);
+        });
 
         return () => {
             unsubscribe();

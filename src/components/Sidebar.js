@@ -11,10 +11,12 @@ import { compressImage } from "@/lib/utils";
 import { NotificationService } from "@/lib/notifications";
 
 import { useUI } from "@/context/UIContext";
+import { useStorage } from "@/context/StorageContext";
 
 export default function Sidebar({ onSelectChat, activeChat }) {
     const { user, logout, updateUserProfile, updateUserPassword } = useAuth();
     const { showToast, confirmAction } = useUI();
+    const { downloadAllMedia } = useStorage();
     const [chats, setChats] = useState([]);
 
     // Pinned Chats State
@@ -475,6 +477,19 @@ export default function Sidebar({ onSelectChat, activeChat }) {
                                         </div>
                                         <div className={styles.toggleLabel}>
                                             {profileData.notificationsEnabled ? "On" : "Off"}
+                                        </div>
+                                    </button>
+
+                                    {/* Bulk Media Download */}
+                                    <button
+                                        type="button"
+                                        onClick={downloadAllMedia}
+                                        className={styles.notificationToggle} // Reusing style for consistency
+                                        style={{ marginTop: '1rem' }}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <Save size={24} />
+                                            <span className="font-medium">Download Media (Last 5 Days)</span>
                                         </div>
                                     </button>
 
