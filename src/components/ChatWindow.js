@@ -324,7 +324,7 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
         if (e) e.preventDefault();
 
         const text = fileData ? fileData.fileName : neuMessage;
-        if (!text.trim() && !fileData) return;
+        if ((!text || !text.trim()) && !fileData) return;
 
         if (!fileData) setNewMessage("");
 
@@ -338,7 +338,7 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             senderPhoto: user.photoURL,
             type: fileData ? (fileData.type || 'file') : 'text',
             fileUrl: fileData ? fileData.url : null,
-            fileName: fileData ? fileData.name : null,
+            fileName: fileData ? fileData.fileName : null,
             createdAt: new Date().toISOString(),
             readBy: []
         };
@@ -359,7 +359,7 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                 p: user.photoURL,
                 fileUrl: fileData ? fileData.url : null,
                 fileType: fileData ? (fileData.type || 'file') : null,
-                fileName: fileData ? fileData.name : null
+                fileName: fileData ? fileData.fileName : null
             }, (ack) => {
                 if (ack && ack.status === 'sent') {
                     // console.log("Message Sent & Buffered", ack.id);
@@ -433,7 +433,7 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                 // Use socket-based sendMessage to ensure realtime delivery & optimistic UI
                 await sendMessage(null, {
                     url: data.link || data.downloadLink,
-                    name: file.name,
+                    fileName: file.name,
                     type: fileType
                 });
             }
