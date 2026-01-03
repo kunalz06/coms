@@ -208,10 +208,11 @@ export default function CallOverlay({ activeCall, onClose, isIncoming }) {
                 if (!isIncoming && activeCall.status === 'offering') {
                     await updateDoc(doc(db, "calls", activeCall.id), { status: 'missed' });
                 } else {
-                    // Otherwise just delete/end it
+                    // For active calls, deleting the document Signals termination to the other peer via onSnapshot('removed')
+                    // Logic: Both peers listen to the doc. If deleted, they close.
                     await deleteDoc(doc(db, "calls", activeCall.id));
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) { console.error("Error ending call:", e); }
         }
         onClose();
     };

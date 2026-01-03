@@ -245,9 +245,30 @@ export default function GroupCallOverlay({ activeCall, onClose }) {
                 <button className={styles.controlBtn} title="Share Screen (Coming Soon)">
                     <Monitor />
                 </button>
-                <button onClick={handleHangup} className={clsx(styles.controlBtn, styles.hangup)}>
-                    <PhoneOff />
-                </button>
+
+                {/* Admin 'End for All' vs Regular 'Leave' */}
+                {activeCall.adminIds?.includes(user.uid) || activeCall.hostId === user.uid ? (
+                    <button
+                        onClick={() => {
+                            if (confirm("End call for everyone?")) {
+                                deleteDoc(callDocRef);
+                                onClose();
+                            }
+                        }}
+                        className={clsx(styles.controlBtn, styles.hangup)}
+                        title="End Call For Everyone"
+                    >
+                        <PhoneOff size={24} />
+                    </button>
+                ) : (
+                    <button
+                        onClick={handleHangup}
+                        className={clsx(styles.controlBtn, styles.hangup)}
+                        title="Leave Call"
+                    >
+                        <PhoneOff size={24} />
+                    </button>
+                )}
             </div>
         </div>
     );

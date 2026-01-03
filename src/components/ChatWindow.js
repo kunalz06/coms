@@ -357,12 +357,33 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
         }
     };
 
+    const isImageFile = (file) => {
+        return file.type.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+    };
+
+    const handleDownload = async (url, filename) => {
+        try {
+            const res = await fetch(url);
+            const blob = await res.blob();
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename || "download";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+        } catch (e) {
+            console.error("Download failed", e);
+            window.open(url, '_blank');
+        }
+    };
+
     const handleFileUpload = async (e) => {
         let file = e.target.files[0];
         if (!file) return;
 
         if (file.size > 5 * 1024 * 1024) {
-            if (file.type.startsWith('image/')) {
+            if (isImageFile(file)) {
                 try {
                     file = await compressImage(file);
                     if (file.size > 5 * 1024 * 1024) {
@@ -393,6 +414,8 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             const data = await res.json();
 
             if (data.success) {
+                const fileType = isImageFile(file) ? 'image' : 'file';
+
                 await fetch(`/api/chats/${chat.id}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -400,13 +423,14 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                         text: file.name,
                         fileUrl: data.link || data.downloadLink,
                         fileName: file.name,
-                        fileType: file.type.startsWith('image/') ? 'image' : 'file',
+                        fileType: fileType,
                         senderId: user.uid,
                         senderName: user.displayName,
                         senderPhoto: user.photoURL
                     })
                 });
             }
+
         } catch (err) {
             console.error(err);
             showToast("Upload failed", "error");
@@ -814,6 +838,15 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                                     return (
                                         <div className={styles.messageImageWrapper}>
                                             <img src={msg.fileUrl} alt="Shared" className={styles.messageImage} />
+                                            {!isExpired && (
+                                                <button
+                                                    className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
+                                                    onClick={(e) => { e.stopPropagation(); handleDownload(msg.fileUrl, msg.fileName); }}
+                                                    title="Download Image"
+                                                >
+                                                    <Download size={16} />
+                                                </button>
+                                            )}
                                             <div className="text-[10px] text-white/70 px-2 py-1 bg-black/40 absolute bottom-0 w-full backdrop-blur-sm">
                                                 {isExpired ? "Expired / Stored on device" : `Expires in ${daysLeft} days`}
                                             </div>
@@ -837,9 +870,18 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
 
                                     return (
                                         <div className="flex flex-col gap-1">
-                                            <a href={msg.fileUrl} target="_blank" className={styles.messageFile}>
-                                                <FileIcon size={16} /> {msg.fileName || "Attachment"}
-                                            </a>
+                                            <div className="flex items-center gap-2">
+                                                <a href={msg.fileUrl} target="_blank" className={styles.messageFile}>
+                                                    <FileIcon size={16} /> {msg.fileName || "Attachment"}
+                                                </a>
+                                                <button
+                                                    className="p-1.5 bg-slate-700/50 hover:bg-slate-700 rounded-full text-blue-200 transition-colors"
+                                                    onClick={() => handleDownload(msg.fileUrl, msg.fileName)}
+                                                    title="Download File"
+                                                >
+                                                    <Download size={14} />
+                                                </button>
+                                            </div>
                                             <span className="text-[10px] opacity-60 text-right pr-1">Expires in {daysLeft} days</span>
                                         </div>
                                     );

@@ -34,10 +34,18 @@ export default function Dashboard() {
       transports: ['websocket', 'polling']
     });
 
-    newSocket.on("connect", () => {
+    // Handle connection logic cleanly
+    const onConnect = () => {
       // console.log("Socket connected:", newSocket.id);
       newSocket.emit("register", user.uid);
-    });
+    };
+
+    newSocket.on("connect", onConnect);
+
+    // If already connected by the time we bind (rare but possible with strict mode)
+    if (newSocket.connected) {
+      onConnect();
+    }
 
     newSocket.on("connect_error", (err) => {
       console.error("Socket connection error:", err);
