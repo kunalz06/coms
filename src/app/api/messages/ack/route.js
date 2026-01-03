@@ -44,10 +44,23 @@ export async function POST(request) {
             const allMembers = chat.user_ids || [];
             const currentReadBy = msg.read_by || [];
 
-            // Add current user to read_by (ACK)
+            // 1. Insert RECEIPT (Persistent Status)
+            try {
+                await supabaseAdmin.from('receipts').insert({
+                    message_id: msgId,
+                    chat_id: msg.chat_id,
+                    user_id: userId,
+                    status: 'read'
+                });
+            } catch (ignore) {
+                // Ignore if duplicate (though UUID PK prevents it usually)
+                console.warn("Receipt insert failed or ignored", ignore.message);
+            }
+
+            // 2. Add current user to read_by (Buffer Status)
             const newReadBy = [...new Set([...currentReadBy, userId])];
 
-            // Check if ALL members have ACK'd
+            // 3. Check if ALL members have ACK'd
             const allReceived = allMembers.every(uid => newReadBy.includes(uid));
 
             if (allReceived) {

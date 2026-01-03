@@ -1,9 +1,17 @@
 const nextConfig = {
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+    ],
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
-        'simple-peer': false, // or handle if needed, usually just global/process
+        'simple-peer': false,
       };
     }
     return config;
