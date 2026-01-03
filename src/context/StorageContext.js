@@ -133,11 +133,22 @@ export const StorageProvider = ({ children }) => {
         localStorage.setItem("coms_last_backup", Date.now().toString());
     };
 
+    const clearChatMessages = async (chatId) => {
+        if (!db) return;
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const index = tx.store.index("chatId");
+        for await (const cursor of index.iterate(IDBKeyRange.only(chatId))) {
+            await cursor.delete();
+        }
+        await tx.done;
+    };
+
     return (
         <StorageContext.Provider value={{
             db,
             addMessage,
             getMessages,
+            clearChatMessages,
             needsBackup,
             showImportPrompt,
             exportBackup,

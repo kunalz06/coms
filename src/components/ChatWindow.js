@@ -149,7 +149,15 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
 
         // 1. Load from Local IndexedDB
         const loadLocalData = async () => {
-            const localMsgs = await getMessages(chat.id);
+            let localMsgs = await getMessages(chat.id);
+
+            // Filter cleared messages
+            const clearedAt = chat.users?.[user.uid]?.clearedAt;
+            if (clearedAt) {
+                const clearTime = new Date(clearedAt).getTime();
+                localMsgs = localMsgs.filter(m => new Date(m.createdAt).getTime() > clearTime);
+            }
+
             setMessages(localMsgs.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)));
             setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
 
@@ -172,10 +180,16 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                 const res = await fetch(`/api/chats/${chat.id}/messages`);
                 const json = await res.json();
                 if (json.success && json.data.length > 0) {
+                    const clearedAt = chat.users?.[user.uid]?.clearedAt;
+                    const clearTime = clearedAt ? new Date(clearedAt).getTime() : 0;
+
                     for (const msg of json.data) {
                         const normalized = normalizeMessage(msg);
-                        await addMessage(normalized);
-                        await ackMessage(normalized.id);
+                        // Only add if newer than clearedAt
+                        if (new Date(normalized.createdAt).getTime() > clearTime) {
+                            await addMessage(normalized);
+                        }
+                        await ackMessage(normalized.id); // Ack anyway to flush server buffer? Yes.
                     }
                     loadLocalData();
                 }
@@ -191,6 +205,12 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             const handleReceiveMessage = async (msg) => {
                 // If message is for this chat
                 if ((msg.chat_id === chat.id || msg.chatId === chat.id) && (msg.sender_id !== user.uid && msg.senderId !== user.uid)) {
+                    // Check One-Way Clear
+                    const clearedAt = chat.users?.[user.uid]?.clearedAt;
+                    if (clearedAt && new Date(msg.createdAt).getTime() <= new Date(clearedAt).getTime()) {
+                        return; // Ignore old message coming in late
+                    }
+
                     const normalized = normalizeMessage(msg);
                     await addMessage(normalized);
                     setMessages(prev => {
@@ -502,9 +522,36 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
     };
 
     const handleClearChat = async () => {
-        // Clear history not fully implemented in API yet (need DELETE /messages or update).
-        // For MVP, skip or implement later.
-        showToast("Clear chat not supported in this version", "info");
+        if (!await confirmAction("Clear chat history? This will remove messages for YOU only.")) return;
+
+        try {
+            const clearedAt = new Date().toISOString();
+
+            // 1. Update Server (One-Way Clear)
+            const updatedUsers = {
+                ...chat.users,
+                [user.uid]: { ...chat.users[user.uid], clearedAt }
+            };
+
+            await fetch(`/api/chats/${chat.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ users: updatedUsers })
+            });
+
+            // 2. Clear Local DB
+            if (clearChatMessages) await clearChatMessages(chat.id);
+
+            // 3. Clear UI State
+            setMessages([]);
+            showToast("Chat history cleared", "success");
+
+            // Force re-fetch or rely on realtime update to 'chat' prop to set clearedAt? 
+            // Ideally 'chat' prop updates from parent. We can assume parent updates.
+        } catch (err) {
+            console.error(err);
+            showToast("Failed to clear chat", "error");
+        }
     };
 
     // --- Read Receipts & Helpers ---
