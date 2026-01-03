@@ -840,10 +840,11 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
 
                                 {/* Image Rendering (Robust check for extension) */}
                                 {/* Unified Document Rendering (Images & Files) */}
+                                {/* Unified Document Rendering (Images & Files) */}
                                 {(msg.type === 'image' || msg.type === 'file' || msg.fileUrl) && (() => {
                                     const diff = (new Date() - new Date(msg.createdAt)) / (1000 * 60 * 60 * 24);
-                                    const isExpired = diff > 3;
-                                    const daysLeft = Math.ceil(3 - diff);
+                                    const isExpired = diff > 1; // 1 Day Expiration Policy
+                                    const daysLeft = Math.ceil(1 - diff);
                                     const isImage = msg.type === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(msg.fileName || msg.text);
 
                                     if (isExpired) {
@@ -861,35 +862,40 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                                     }
 
                                     return (
-                                        <div className="group flex items-center gap-3 p-3 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-all duration-200 max-w-[280px]">
-                                            <div className={clsx("p-2.5 rounded-lg shrink-0", isImage ? "bg-purple-500/10 text-purple-400" : "bg-blue-500/10 text-blue-400")}>
+                                        <div className="group relative flex items-center gap-3 p-3 pr-12 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-all duration-300 max-w-[280px] overflow-hidden shadow-sm hover:shadow-md">
+                                            {/* Icon Section */}
+                                            <div className={clsx("p-3 rounded-xl shrink-0 transition-transform duration-300 group-hover:scale-105",
+                                                isImage ? "bg-purple-500/10 text-purple-400" : "bg-blue-500/10 text-blue-400")}>
                                                 {isImage ? <ImageIcon size={24} /> : <FileIcon size={24} />}
                                             </div>
 
-                                            <div className="flex-1 min-w-0 overflow-hidden">
-                                                <p className="text-sm font-medium text-slate-200 truncate pr-2" title={msg.fileName}>
+                                            {/* Text Section */}
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-slate-200 truncate" title={msg.fileName}>
                                                     {msg.fileName || "Attachment"}
                                                 </p>
-                                                <div className="flex items-center gap-2 mt-0.5">
-                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50">
-                                                        {isImage ? 'IMAGE' : 'FILE'}
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className={clsx("text-[10px] px-1.5 py-0.5 rounded border font-medium tracking-wide",
+                                                        isImage ? "bg-purple-500/5 border-purple-500/20 text-purple-300" : "bg-blue-500/5 border-blue-500/20 text-blue-300")}>
+                                                        {isImage ? 'IMG' : 'DOC'}
                                                     </span>
-                                                    <span className="text-[10px] text-slate-500">
-                                                        Expires in {daysLeft}d
+                                                    <span className="text-[10px] text-slate-500 font-medium">
+                                                        {daysLeft <= 0 ? 'Expiring soon' : `Expires in ${daysLeft}d`}
                                                     </span>
                                                 </div>
                                             </div>
 
+                                            {/* Download Button (Absolute Positioned for cleaner look) */}
                                             <button
                                                 onClick={(e) => {
                                                     e.preventDefault();
                                                     e.stopPropagation();
                                                     handleDownload(msg.fileUrl, msg.fileName);
                                                 }}
-                                                className="p-2.5 bg-slate-700/50 hover:bg-green-600 text-slate-300 hover:text-white rounded-lg transition-colors shadow-sm shrink-0"
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-slate-700/50 hover:bg-green-500 text-slate-400 hover:text-white rounded-full transition-all duration-200 shadow-sm opacity-90 hover:opacity-100 hover:scale-110 active:scale-95"
                                                 title="Download"
                                             >
-                                                <Download size={18} />
+                                                <Download size={18} strokeWidth={2.5} />
                                             </button>
                                         </div>
                                     );
