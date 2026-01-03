@@ -14,7 +14,7 @@ import { useUI } from "@/context/UIContext";
 
 export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
     const { user } = useAuth();
-    const { getMessages, addMessage, ackMessage, getReceipts, clearChatMessages } = useStorage();
+    const { getMessages, addMessage, getReceipts, addReceipt, clearChatMessages } = useStorage();
     const [messages, setMessages] = useState([]);
     const [neuMessage, setNewMessage] = useState("");
     const [uploading, setUploading] = useState(false);
@@ -103,7 +103,6 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
     const isInCall = statusText === 'In a call';
 
     // Local First Logic
-    const { addMessage, getMessages, addReceipt, getReceipts } = useStorage();
     const [localReceipts, setLocalReceipts] = useState({});
 
     // Mark Read Logic (Still useful for "Seen" status, but focus is on delivery ACK)
@@ -841,62 +840,62 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                                 {msg.type === 'text' && <p className={styles.messageText}>{msg.text}</p>}
 
                                 {/* Image Rendering (Robust check for extension) */}
-                                {(msg.type === 'image' || (msg.fileUrl && /\.(jpg|jpeg|png|gif|webp)$/i.test(msg.fileName || msg.text))) && (() => {
+                                {/* Unified Document Rendering (Images & Files) */}
+                                {(msg.type === 'image' || msg.type === 'file' || msg.fileUrl) && (() => {
                                     const diff = (new Date() - new Date(msg.createdAt)) / (1000 * 60 * 60 * 24);
                                     const isExpired = diff > 3;
                                     const daysLeft = Math.ceil(3 - diff);
-                                    return (
-                                        <div className={styles.messageImageWrapper}>
-                                            <img src={msg.fileUrl} alt="Shared" className={styles.messageImage} />
-                                            {!isExpired && (
-                                                <button
-                                                    className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
-                                                    onClick={(e) => { e.stopPropagation(); handleDownload(msg.fileUrl, msg.fileName); }}
-                                                    title="Download Image"
-                                                >
-                                                    <Download size={16} />
-                                                </button>
-                                            )}
-                                            <div className="text-[10px] text-white/70 px-2 py-1 bg-black/40 absolute bottom-0 w-full backdrop-blur-sm">
-                                                {isExpired ? "Expired / Stored on device" : `Expires in ${daysLeft} days`}
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
-
-                                {/* File Rendering (Fallback if not image) */}
-                                {msg.type === 'file' && !(/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.fileName || msg.text)) && (() => {
-                                    const diff = (new Date() - new Date(msg.createdAt)) / (1000 * 60 * 60 * 24);
-                                    const isExpired = diff > 3;
-                                    const daysLeft = Math.ceil(3 - diff);
+                                    const isImage = msg.type === 'image' || /\.(jpg|jpeg|png|gif|webp)$/i.test(msg.fileName || msg.text);
 
                                     if (isExpired) {
                                         return (
-                                            <div className={clsx(styles.messageFile, "text-slate-400 cursor-default no-underline")}>
-                                                <FileIcon size={16} />
-                                                <span className="italic">File expired / stored on device</span>
+                                            <div className="flex items-center gap-3 p-3 bg-slate-800/30 rounded-xl border border-dashed border-slate-700/50 cursor-not-allowed opacity-70">
+                                                <div className="p-2.5 bg-slate-800 rounded-lg text-slate-500">
+                                                    {isImage ? <ImageIcon size={20} /> : <FileIcon size={20} />}
+                                                </div>
+                                                <div className="bg-transparent">
+                                                    <p className="text-sm font-medium text-slate-400 italic">File expired</p>
+                                                    <p className="text-xs text-slate-600">Stored on device only</p>
+                                                </div>
                                             </div>
                                         );
                                     }
 
                                     return (
-                                        <div className="flex flex-col gap-1">
-                                            <div className="flex items-center gap-2">
-                                                <a href={msg.fileUrl} target="_blank" className={styles.messageFile}>
-                                                    <FileIcon size={16} /> {msg.fileName || "Attachment"}
-                                                </a>
-                                                <button
-                                                    className="p-1.5 bg-slate-700/50 hover:bg-slate-700 rounded-full text-blue-200 transition-colors"
-                                                    onClick={() => handleDownload(msg.fileUrl, msg.fileName)}
-                                                    title="Download File"
-                                                >
-                                                    <Download size={14} />
-                                                </button>
+                                        <div className="group flex items-center gap-3 p-3 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl border border-slate-700/50 hover:border-slate-600 transition-all duration-200 max-w-[280px]">
+                                            <div className={clsx("p-2.5 rounded-lg shrink-0", isImage ? "bg-purple-500/10 text-purple-400" : "bg-blue-500/10 text-blue-400")}>
+                                                {isImage ? <ImageIcon size={24} /> : <FileIcon size={24} />}
                                             </div>
-                                            <span className="text-[10px] opacity-60 text-right pr-1">Expires in {daysLeft} days</span>
+
+                                            <div className="flex-1 min-w-0 overflow-hidden">
+                                                <p className="text-sm font-medium text-slate-200 truncate pr-2" title={msg.fileName}>
+                                                    {msg.fileName || "Attachment"}
+                                                </p>
+                                                <div className="flex items-center gap-2 mt-0.5">
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50">
+                                                        {isImage ? 'IMAGE' : 'FILE'}
+                                                    </span>
+                                                    <span className="text-[10px] text-slate-500">
+                                                        Expires in {daysLeft}d
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <button
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleDownload(msg.fileUrl, msg.fileName);
+                                                }}
+                                                className="p-2.5 bg-slate-700/50 hover:bg-green-600 text-slate-300 hover:text-white rounded-lg transition-colors shadow-sm shrink-0"
+                                                title="Download"
+                                            >
+                                                <Download size={18} />
+                                            </button>
                                         </div>
                                     );
                                 })()}
+
                                 <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
                                     <span className={styles.messageTime}>
                                         {formatTime(msg.createdAt)}
