@@ -320,12 +320,13 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
         }
     };
 
-    const sendMessage = async (e) => {
-        e.preventDefault();
-        if (!neuMessage.trim()) return;
+    const sendMessage = async (e, fileData = null) => {
+        if (e) e.preventDefault();
 
-        const text = neuMessage;
-        setNewMessage("");
+        const text = fileData ? fileData.fileName : neuMessage;
+        if (!text.trim() && !fileData) return;
+
+        if (!fileData) setNewMessage("");
 
         const tempId = crypto.randomUUID();
         const msgPayload = {
@@ -335,7 +336,9 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             senderId: user.uid,
             senderName: user.displayName,
             senderPhoto: user.photoURL,
-            type: 'text',
+            type: fileData ? (fileData.type || 'file') : 'text',
+            fileUrl: fileData ? fileData.url : null,
+            fileName: fileData ? fileData.name : null,
             createdAt: new Date().toISOString(),
             readBy: []
         };
@@ -353,7 +356,10 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                 t: text,
                 s: user.uid,
                 n: user.displayName,
-                p: user.photoURL
+                p: user.photoURL,
+                fileUrl: fileData ? fileData.url : null,
+                fileType: fileData ? (fileData.type || 'file') : null,
+                fileName: fileData ? fileData.name : null
             }, (ack) => {
                 if (ack && ack.status === 'sent') {
                     // console.log("Message Sent & Buffered", ack.id);
@@ -361,7 +367,7 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             });
         } else {
             // Fallback or Toast
-            // showToast("Socket Disconnected...", "error");
+            showToast("Socket Disconnected. Message saved locally.", "error");
         }
     };
 
@@ -424,18 +430,11 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             if (data.success) {
                 const fileType = isImageFile(file) ? 'image' : 'file';
 
-                await fetch(`/api/chats/${chat.id}/messages`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text: file.name,
-                        fileUrl: data.link || data.downloadLink,
-                        fileName: file.name,
-                        fileType: fileType,
-                        senderId: user.uid,
-                        senderName: user.displayName,
-                        senderPhoto: user.photoURL
-                    })
+                // Use socket-based sendMessage to ensure realtime delivery & optimistic UI
+                await sendMessage(null, {
+                    url: data.link || data.downloadLink,
+                    name: file.name,
+                    type: fileType
                 });
             }
 

@@ -92,7 +92,7 @@ io.on('connection', (socket) => {
         const text = data.t || data.text;
         const senderName = data.n || data.senderName;
         const senderPhoto = data.p || data.senderPhoto;
-        const fileUrl = data.fileUrl; // Usually not minified in this version yet
+        const fileUrl = data.fileUrl || data.fileURL; // Handle both cases for robustness
 
         if (!chatId || !senderId || !text) {
             if (callback) callback({ status: 'error', error: 'Invalid Payload' });
