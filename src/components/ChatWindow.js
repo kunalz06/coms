@@ -25,6 +25,7 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
     const [otherUserLastSeen, setOtherUserLastSeen] = useState(null);
     const [memberSearch, setMemberSearch] = useState("");
     const [memberResults, setMemberResults] = useState([]);
+    const [typingUsers, setTypingUsers] = useState(new Set()); // IDs of users typing
 
     // Group Name Edit State
     const [isEditingName, setIsEditingName] = useState(false);
@@ -301,6 +302,36 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             supabase.removeChannel(channel);
         };
     }, [chat?.id, socket]);
+
+    // Listen for Typing Signals
+    useEffect(() => {
+        if (!socket) return;
+
+        const handleTypingSignal = (data) => {
+            if (data.c !== chat.id || data.s === user.uid) return;
+
+            setTypingUsers(prev => {
+                const newSet = new Set(prev);
+                if (data.isTyping) {
+                    newSet.add(data.n || "Someone");
+                } else {
+                    newSet.delete(data.n || "Someone");
+                }
+                return newSet;
+            });
+        };
+
+        socket.on('typing_signal', handleTypingSignal);
+
+        return () => {
+            socket.off('typing_signal', handleTypingSignal);
+        };
+    }, [socket, chat.id, user.uid]);
+
+    // Cleanup typing state on chat change
+    useEffect(() => {
+        setTypingUsers(new Set());
+    }, [chat.id]);
 
     const typingTimeoutRef = useRef(null);
 
@@ -921,6 +952,24 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                         </div>
                     );
                 })}
+                })}
+
+                {/* Typing Indicator */}
+                {typingUsers.size > 0 && (
+                    <div className={styles.typingIndicatorRow}>
+                        <div className={styles.typingBubble}>
+                            <span className={styles.typingDots}>
+                                <span className={styles.dot}></span>
+                                <span className={styles.dot}></span>
+                                <span className={styles.dot}></span>
+                            </span>
+                            <span className={styles.typingText}>
+                                {Array.from(typingUsers).join(", ")} is typing...
+                            </span>
+                        </div>
+                    </div>
+                )}
+
                 <div ref={bottomRef} />
             </div>
 

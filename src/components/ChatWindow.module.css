@@ -630,3 +630,60 @@
         height: 40px;
     }
 }
+
+/* Typing Indicator */
+.typingIndicatorRow {
+    display: flex;
+    padding: 0 16px 8px;
+    align-items: center;
+}
+
+.typingBubble {
+    background: var(--md-sys-color-surface-container-high);
+    padding: 8px 12px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--shadow-1);
+    animation: fadeIn 0.2s;
+}
+
+.typingText {
+    font-size: 0.75rem;
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+.typingDots {
+    display: flex;
+    gap: 3px;
+}
+
+.dot {
+    width: 4px;
+    height: 4px;
+    background: var(--md-sys-color-on-surface-variant);
+    border-radius: 50%;
+    animation: bounce 1.4s infinite ease-in-out;
+}
+
+.dot:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.dot:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+
+    0%,
+    80%,
+    100% {
+        transform: scale(0);
+    }
+
+    40% {
+        transform: scale(1);
+    }
+}
