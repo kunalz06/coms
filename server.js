@@ -20,8 +20,15 @@ const io = new Server(server, {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+if (!supabaseUrl) {
+    console.error("ERROR: NEXT_PUBLIC_SUPABASE_URL is missing.");
+}
+if (!supabaseServiceKey) {
+    console.error("ERROR: SUPABASE_SERVICE_ROLE_KEY is missing.");
+}
+
 if (!supabaseUrl || !supabaseServiceKey) {
-    console.error("Missing Supabase Env Vars in server.js");
+    console.error("Missing Supabase Env Vars in server.js. Exiting.");
     process.exit(1);
 }
 
