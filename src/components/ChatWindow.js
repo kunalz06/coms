@@ -831,7 +831,8 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                             >
                                 {msg.type === 'text' && <p className={styles.messageText}>{msg.text}</p>}
 
-                                {msg.type === 'image' && (() => {
+                                {/* Image Rendering (Robust check for extension) */}
+                                {(msg.type === 'image' || (msg.fileUrl && /\.(jpg|jpeg|png|gif|webp)$/i.test(msg.fileName || msg.text))) && (() => {
                                     const diff = (new Date() - new Date(msg.createdAt)) / (1000 * 60 * 60 * 24);
                                     const isExpired = diff > 3;
                                     const daysLeft = Math.ceil(3 - diff);
@@ -854,7 +855,8 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
                                     );
                                 })()}
 
-                                {msg.type === 'file' && (() => {
+                                {/* File Rendering (Fallback if not image) */}
+                                {msg.type === 'file' && !(/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.fileName || msg.text)) && (() => {
                                     const diff = (new Date() - new Date(msg.createdAt)) / (1000 * 60 * 60 * 24);
                                     const isExpired = diff > 3;
                                     const daysLeft = Math.ceil(3 - diff);
