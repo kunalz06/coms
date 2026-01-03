@@ -151,6 +151,14 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
         const loadLocalData = async () => {
             let localMsgs = await getMessages(chat.id);
 
+            // Normalize & Filter
+            localMsgs = localMsgs.map(m => ({
+                ...m,
+                fileUrl: m.fileUrl || m.fileURL || m.file_url, // Handle all casing
+                fileName: m.fileName || m.file_name,
+                type: m.type || m.fileType || (m.fileURL || m.fileUrl || m.file_url ? 'file' : 'text')
+            }));
+
             // Filter cleared messages
             const clearedAt = chat.users?.[user.uid]?.clearedAt;
             if (clearedAt) {

@@ -24,8 +24,12 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
 
-    // Use environment variable for backend URL or default to current origin
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+    // Use environment variable for backend URL or smart default for localhost
+    let defaultUrl = window.location.origin;
+    if (window.location.hostname === 'localhost') {
+      defaultUrl = 'http://localhost:3001';
+    }
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || defaultUrl;
 
     const newSocket = io(socketUrl, {
       path: "/socket.io", // Standard path for socket.io
