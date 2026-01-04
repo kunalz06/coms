@@ -122,6 +122,17 @@ io.on('connection', (socket) => {
             // Ack to Sender
             if (callback) callback({ status: 'sent', msg: savedMsg });
 
+            // 1.5 Update Chat Metadata (Last Message & Time)
+            // Storing uncompressed text (client decompressText handles fallback)
+            try {
+                await supabase.from('chats').update({
+                    last_message: text,
+                    last_updated: new Date()
+                }).eq('id', chatId);
+            } catch (err) {
+                console.error("Failed to update chat metadata:", err);
+            }
+
             // 2. Relay to Recipients
             const { data: chat } = await supabase.from('chats').select('user_ids').eq('id', chatId).single();
             if (chat && chat.user_ids) {

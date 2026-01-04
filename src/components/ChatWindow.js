@@ -134,12 +134,12 @@ export default function ChatWindow({ chat, onStartCall, onBack, socket }) {
             senderName: msg.sender_name ? decompressText(msg.sender_name) : (msg.senderName || "Unknown"),
             senderPhoto: msg.sender_photo || msg.senderPhoto,
             text: msg.text ? decompressText(msg.text) : (msg.text || ""),
-            fileUrl: msg.file_url || msg.fileUrl,
-            fileType: msg.file_type || msg.fileType || (msg.file_url || msg.fileUrl ? 'file' : 'text'),
+            fileUrl: msg.file_url || msg.fileUrl || msg.fileURL,
+            fileType: msg.file_type || msg.fileType || (msg.file_url || msg.fileUrl || msg.fileURL ? 'file' : 'text'),
             fileName: msg.file_name || msg.fileName,
             readBy: msg.read_by || msg.readBy || [],
             createdAt: msg.created_at || msg.createdAt || new Date().toISOString(),
-            type: (msg.file_url || msg.fileUrl) ? (msg.file_type || msg.fileType || 'file') : 'text'
+            type: (msg.file_url || msg.fileUrl || msg.fileURL) ? (msg.file_type || msg.fileType || 'file') : 'text'
         };
     };
 
