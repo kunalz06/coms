@@ -23,7 +23,7 @@ type ClientSocket = WebSocket & {
 };
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOSTNAME ?? "0.0.0.0";
+const hostname = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3000);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -128,6 +128,11 @@ const groupCalls = new GroupCallInviteManager(userIsConversationMember, conversa
 void app.prepare().then(() => {
   const handleUpgrade = app.getUpgradeHandler();
   const server = createServer((request, response) => {
+    if (request.url === "/healthz") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: true, service: "comms-signaling" }));
+      return;
+    }
     void handle(request, response);
   });
   const wss = new WebSocketServer({ noServer: true });
