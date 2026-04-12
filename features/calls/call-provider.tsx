@@ -34,6 +34,13 @@ type CallContextValue = {
 
 const CallContext = createContext<CallContextValue | null>(null);
 
+function unavailableMessage(reason?: string) {
+  if (reason === "offline") return "The contact is not connected to calling right now. Ask them to open COMMS and try again.";
+  if (reason === "blocked") return "This call is blocked by contact settings.";
+  if (reason === "block-check-failed") return "The calling server could not verify block settings. Check the Render Supabase service-role environment variable.";
+  return "The contact is unavailable.";
+}
+
 function rtcConfig(): RTCConfiguration {
   const iceServers: RTCIceServer[] = [];
   const stun = process.env.NEXT_PUBLIC_STUN_URLS?.split(",").map((url) => url.trim()).filter(Boolean);
@@ -400,7 +407,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
       }
       if (message.type === "call-reject" || message.type === "call-busy" || message.type === "call-unavailable") {
-        showToast({ variant: "info", title: "Call ended", description: message.type === "call-busy" ? "The contact is already in a call." : "The contact is unavailable." });
+        showToast({
+          variant: "info",
+          title: "Call ended",
+          description: message.type === "call-busy" ? "The contact is already in a call." : unavailableMessage(message.reason)
+        });
         await resetCall(message.type === "call-busy" ? "busy" : message.type === "call-reject" ? "rejected" : message.reason === "offline" ? "missed" : "ended");
       }
       if (message.type === "call-end") {

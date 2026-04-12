@@ -40,14 +40,17 @@ function serviceSupabase() {
 
 async function usersAreBlocked(a: string, b: string) {
   const supabase = serviceSupabase();
-  if (!supabase) return false;
+  if (!supabase) return { blocked: false, reason: null };
   const { data, error } = await supabase
     .from("blocks")
     .select("id")
     .or(`and(blocker_id.eq.${a},blocked_id.eq.${b}),and(blocker_id.eq.${b},blocked_id.eq.${a})`)
     .maybeSingle();
-  if (error) return true;
-  return Boolean(data);
+  if (error) {
+    console.error("Call block check failed", { callerId: a, calleeId: b, message: error.message });
+    return { blocked: true, reason: "block-check-failed" };
+  }
+  return { blocked: Boolean(data), reason: data ? "blocked" : null };
 }
 
 async function userIsConversationMember(conversationId: string, userId: string) {
@@ -165,6 +168,7 @@ void app.prepare().then(() => {
         if (message.type === "register" && "userId" in message && typeof message.userId === "string") {
           socket.userId = message.userId;
           addClient(message.userId, socket);
+          console.log("Signaling client registered", { userId: message.userId, sockets: clients.get(message.userId)?.size ?? 0 });
           return;
         }
 
@@ -182,8 +186,10 @@ void app.prepare().then(() => {
         const directMessage = message as Signal;
 
         if (directMessage.type === "call-initiate") {
-          if (await usersAreBlocked(directMessage.from, directMessage.to)) {
-            send(socket, { type: "call-unavailable", callId: directMessage.callId, from: directMessage.to, to: directMessage.from, reason: "blocked" });
+          const blockState = await usersAreBlocked(directMessage.from, directMessage.to);
+          if (blockState.blocked) {
+            console.log("Direct call unavailable", { callId: directMessage.callId, from: directMessage.from, to: directMessage.to, reason: blockState.reason });
+            send(socket, { type: "call-unavailable", callId: directMessage.callId, from: directMessage.to, to: directMessage.from, reason: blockState.reason ?? "blocked" });
             return;
           }
           if (activeCallsByUser.has(directMessage.from) || activeCallsByUser.has(directMessage.to)) {
@@ -191,6 +197,7 @@ void app.prepare().then(() => {
             return;
           }
           if (!hasClient(directMessage.to)) {
+            console.log("Direct call unavailable", { callId: directMessage.callId, from: directMessage.from, to: directMessage.to, reason: "offline" });
             send(socket, { type: "call-unavailable", callId: directMessage.callId, from: directMessage.to, to: directMessage.from, reason: "offline" });
             return;
           }
@@ -215,6 +222,7 @@ void app.prepare().then(() => {
       if (!socket.userId) return;
       groupCalls.leaveBySocket(socket);
       const wasLastSocketForUser = removeClient(socket.userId, socket);
+      console.log("Signaling client closed", { userId: socket.userId, remainingSockets: clients.get(socket.userId)?.size ?? 0 });
       if (!wasLastSocketForUser) return;
       const callId = activeCallsByUser.get(socket.userId);
       if (!callId) return;
