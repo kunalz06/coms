@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
+import { signalingUrl } from "@/lib/signaling-url";
 import { getGroup } from "@/services/group-service";
 import type { CallMode, GroupConversation, UserProfile } from "@/types";
 
@@ -32,12 +33,6 @@ type GroupCallContextValue = {
 };
 
 const GroupCallContext = createContext<GroupCallContextValue | null>(null);
-
-function signalingUrl() {
-  if (process.env.NEXT_PUBLIC_SIGNALING_URL) return process.env.NEXT_PUBLIC_SIGNALING_URL;
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws`;
-}
 
 function jitsiDomain() {
   return process.env.NEXT_PUBLIC_JITSI_DOMAIN || "meet.jit.si";

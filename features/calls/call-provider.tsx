@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { CALL_TIMEOUT_MS, canTransitionCall, readableCallStatus } from "@/lib/call-state";
+import { signalingUrl } from "@/lib/signaling-url";
 import { getProfile } from "@/services/profile-service";
 import type { CallMode, CallStatus, SignalingMessage, UserProfile } from "@/types";
 
@@ -32,12 +33,6 @@ type CallContextValue = {
 };
 
 const CallContext = createContext<CallContextValue | null>(null);
-
-function signalingUrl() {
-  if (process.env.NEXT_PUBLIC_SIGNALING_URL) return process.env.NEXT_PUBLIC_SIGNALING_URL;
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws`;
-}
 
 function rtcConfig(): RTCConfiguration {
   const iceServers: RTCIceServer[] = [];
