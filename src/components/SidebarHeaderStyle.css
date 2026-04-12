@@ -1,8 +1,0 @@
-.clickableHeader {
-    cursor: pointer;
-    transition: opacity 0.2s;
-}
-
-.clickableHeader:hover {
-    opacity: 0.8;
-}

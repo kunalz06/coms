@@ -1,0 +1,46 @@
+@import "tailwindcss";
+@config "../tailwind.config.mjs";
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(135deg, rgba(61, 107, 83, 0.14), transparent 32%),
+    linear-gradient(315deg, rgba(199, 82, 74, 0.10), transparent 28%),
+    #f7f5f1;
+  color: #151514;
+}
+
+.dark body {
+  background:
+    linear-gradient(135deg, rgba(61, 107, 83, 0.22), transparent 34%),
+    linear-gradient(315deg, rgba(199, 82, 74, 0.14), transparent 30%),
+    #141412;
+  color: #f7f5f1;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(8, 127, 130, 0.22);
+}
