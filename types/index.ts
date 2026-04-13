@@ -72,6 +72,18 @@ export type Attachment = {
   created_at: string;
 };
 
+export type MessageReactionKind = "emoji" | "text";
+
+export type MessageReaction = {
+  id: string;
+  message_id: string;
+  user_id: string;
+  kind: MessageReactionKind;
+  content: string;
+  created_at: string;
+  profile?: UserProfile;
+};
+
 export type Message = {
   id: string;
   conversation_id: string;
@@ -82,6 +94,7 @@ export type Message = {
   created_at: string;
   updated_at: string;
   attachments?: Attachment[];
+  reactions?: MessageReaction[];
 };
 
 export type Block = {

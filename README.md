@@ -42,6 +42,7 @@ The schema includes:
 - `conversations`
 - `messages`
 - `message_attachments`
+- `message_reactions`
 - `call_sessions`
 - `group_call_sessions`
 - `group_call_participants`
@@ -105,9 +106,10 @@ npm run start
 - Search users by registered email.
 - Add friends, delete friends, block and unblock contacts.
 - Open one-to-one conversations with realtime messages.
-- Create small group chats, capped at 5 members for the current MVP.
+- Create small group chats, capped at 10 members for the current MVP.
 - Manage group members with owner/admin/member roles.
 - Send text, images, documents up to 5 MB, and voice notes.
+- React to messages with quick emojis, custom emoji, or short text reactions.
 - Start one-to-one or group audio/video calls.
 - Accept, reject, end, mute mic, toggle camera, and switch between audio and video.
 
@@ -120,7 +122,7 @@ npm run start
 - The signaling server tracks active users and returns busy/unavailable states to prevent duplicate peer connection bugs.
 - Call UI state is constrained by a strict state machine in `lib/call-state.ts`.
 - Add a production TURN service before deploying outside a local network. STUN alone is not enough for all NAT/firewall conditions.
-- Group calls use a browser mesh WebRTC model through the same `/ws` signaling server. This is capped at 5 participants for the MVP; add an SFU before increasing that cap.
+- Group calls use a browser mesh WebRTC model through the same `/ws` signaling server. This is capped at 10 participants for the MVP; add an SFU before increasing that cap further.
 
 ## Tradeoffs
 

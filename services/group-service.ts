@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ConversationMember, GroupConversation, Message, UserProfile } from "@/types";
 
-export const MAX_GROUP_MEMBERS = 5;
+export const MAX_GROUP_MEMBERS = 10;
 
 type CreateGroupValues = {
   title: string;
@@ -89,7 +89,7 @@ export async function getGroupMembers(supabase: SupabaseClient, conversationId: 
 }
 
 export async function createGroup(supabase: SupabaseClient, values: CreateGroupValues) {
-  const memberIds = Array.from(new Set([values.ownerId, ...values.memberIds])).slice(0, MAX_GROUP_MEMBERS);
+  const memberIds = Array.from(new Set([values.ownerId, ...values.memberIds]));
   if (memberIds.length < 2) throw new Error("Add at least one other member.");
   if (memberIds.length > MAX_GROUP_MEMBERS) throw new Error(`Groups are limited to ${MAX_GROUP_MEMBERS} people for now.`);
 

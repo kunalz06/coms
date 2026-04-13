@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Attachment, Conversation, Message, MessageKind } from "@/types";
+import type { Attachment, Conversation, Message, MessageKind, MessageReaction, MessageReactionKind, UserProfile } from "@/types";
 
 export async function getOrCreateConversation(supabase: SupabaseClient, userId: string, friendId: string): Promise<Conversation> {
   const pairFilter = `and(user_one_id.eq.${userId},user_two_id.eq.${friendId}),and(user_one_id.eq.${friendId},user_two_id.eq.${userId})`;
@@ -24,12 +24,23 @@ export async function getOrCreateConversation(supabase: SupabaseClient, userId: 
 export async function getMessages(supabase: SupabaseClient, conversationId: string) {
   const { data, error } = await supabase
     .from("messages")
-    .select("*, attachments:message_attachments(*)")
+    .select("*, attachments:message_attachments(*), reactions:message_reactions(*)")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true })
     .returns<Message[]>();
   if (error) throw error;
-  return data;
+
+  const reactorIds = Array.from(new Set(data.flatMap((message) => message.reactions?.map((reaction) => reaction.user_id) ?? [])));
+  if (!reactorIds.length) return data;
+
+  const { data: profiles, error: profileError } = await supabase.from("user_profiles").select("*").in("id", reactorIds).returns<UserProfile[]>();
+  if (profileError) throw profileError;
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+
+  return data.map((message) => ({
+    ...message,
+    reactions: message.reactions?.map((reaction) => ({ ...reaction, profile: profileMap.get(reaction.user_id) }))
+  }));
 }
 
 export async function sendMessage(
@@ -94,4 +105,47 @@ export async function markConversationRead(supabase: SupabaseClient, conversatio
     .neq("sender_id", userId)
     .in("status", ["sent", "delivered"]);
   if (error) throw error;
+}
+
+function normalizeReaction(kind: MessageReactionKind, content: string) {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) throw new Error("Reaction cannot be empty.");
+  if (normalized.length > 80) throw new Error("Reactions must be 80 characters or fewer.");
+  if (kind === "emoji" && normalized.length > 16) throw new Error("Use a shorter emoji reaction.");
+  return normalized;
+}
+
+export async function toggleMessageReaction(
+  supabase: SupabaseClient,
+  values: {
+    messageId: string;
+    userId: string;
+    kind: MessageReactionKind;
+    content: string;
+  }
+) {
+  const content = normalizeReaction(values.kind, values.content);
+  const { data: existing, error: findError } = await supabase
+    .from("message_reactions")
+    .select("*")
+    .eq("message_id", values.messageId)
+    .eq("user_id", values.userId)
+    .eq("kind", values.kind)
+    .eq("content", content)
+    .maybeSingle<MessageReaction>();
+  if (findError) throw findError;
+
+  if (existing) {
+    const { error } = await supabase.from("message_reactions").delete().eq("id", existing.id);
+    if (error) throw error;
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("message_reactions")
+    .insert({ message_id: values.messageId, user_id: values.userId, kind: values.kind, content })
+    .select("*")
+    .single<MessageReaction>();
+  if (error) throw error;
+  return data;
 }

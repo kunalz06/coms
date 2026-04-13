@@ -114,6 +114,16 @@ create table if not exists message_attachments (
   created_at timestamptz not null default now()
 );
 
+create table if not exists message_reactions (
+  id uuid primary key default gen_random_uuid(),
+  message_id uuid not null references messages(id) on delete cascade,
+  user_id text not null references user_profiles(id) on delete cascade,
+  kind text not null check (kind in ('emoji', 'text')),
+  content text not null check (char_length(content) between 1 and 80),
+  created_at timestamptz not null default now(),
+  unique (message_id, user_id, kind, content)
+);
+
 create table if not exists call_sessions (
   id uuid primary key,
   conversation_id uuid references conversations(id) on delete set null,
@@ -168,6 +178,8 @@ create index if not exists conversations_type_idx on conversations(type);
 create index if not exists conversation_members_user_idx on conversation_members(user_id);
 create index if not exists conversation_members_conversation_idx on conversation_members(conversation_id);
 create index if not exists messages_conversation_created_idx on messages(conversation_id, created_at desc);
+create index if not exists message_reactions_message_idx on message_reactions(message_id, created_at asc);
+create index if not exists message_reactions_user_idx on message_reactions(user_id);
 create index if not exists call_sessions_participants_idx on call_sessions(caller_id, callee_id, started_at desc);
 create index if not exists group_call_sessions_conversation_idx on group_call_sessions(conversation_id, started_at desc);
 create index if not exists group_call_participants_session_idx on group_call_participants(session_id);
@@ -256,8 +268,8 @@ begin
     select count(*)
     from conversation_members
     where conversation_id = new.conversation_id
-  ) >= 5 then
-    raise exception 'Groups are limited to 5 members for now.';
+  ) >= 10 then
+    raise exception 'Groups are limited to 10 members for now.';
   end if;
 
   return new;
@@ -289,6 +301,7 @@ alter table conversations enable row level security;
 alter table conversation_members enable row level security;
 alter table messages enable row level security;
 alter table message_attachments enable row level security;
+alter table message_reactions enable row level security;
 alter table call_sessions enable row level security;
 alter table group_call_sessions enable row level security;
 alter table group_call_participants enable row level security;
@@ -434,6 +447,31 @@ for insert with check (
   )
 );
 
+drop policy if exists "reactions visible to participants" on message_reactions;
+create policy "reactions visible to participants" on message_reactions
+for select using (
+  exists (
+    select 1 from messages
+    where messages.id = message_id
+      and user_is_conversation_participant(messages.conversation_id, app_user_id())
+  )
+);
+
+drop policy if exists "reactions created by participants" on message_reactions;
+create policy "reactions created by participants" on message_reactions
+for insert with check (
+  user_id = app_user_id()
+  and exists (
+    select 1 from messages
+    where messages.id = message_id
+      and user_is_conversation_participant(messages.conversation_id, app_user_id())
+  )
+);
+
+drop policy if exists "reactions removable by author" on message_reactions;
+create policy "reactions removable by author" on message_reactions
+for delete using (user_id = app_user_id());
+
 drop policy if exists "call sessions visible to participants" on call_sessions;
 create policy "call sessions visible to participants" on call_sessions
 for select using (app_user_id() in (caller_id, callee_id));
@@ -506,6 +544,7 @@ begin
     'conversation_members',
     'messages',
     'message_attachments',
+    'message_reactions',
     'call_sessions',
     'group_call_sessions',
     'group_call_participants'

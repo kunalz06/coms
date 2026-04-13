@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getMessages, getOrCreateConversation, markConversationRead, sendMessage } from "@/services/chat-service";
+import { getMessages, getOrCreateConversation, markConversationRead, sendMessage, toggleMessageReaction } from "@/services/chat-service";
 import { uploadToCloudinary, type CloudinaryUploadResult } from "@/services/upload-service";
-import type { ChatTarget, Conversation, Message, MessageKind, UploadKind } from "@/types";
+import type { ChatTarget, Conversation, Message, MessageKind, MessageReactionKind, UploadKind } from "@/types";
 import { useAuth } from "@/features/auth/auth-provider";
 
 const REFRESH_INTERVAL_MS = 10_000;
@@ -48,6 +48,7 @@ export function useChat(target: ChatTarget | null) {
       .channel(`chat:${conversationId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` }, () => void load({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "message_attachments" }, () => void load({ silent: true }))
+      .on("postgres_changes", { event: "*", schema: "public", table: "message_reactions" }, () => void load({ silent: true }))
       .subscribe();
 
     return () => {
@@ -144,8 +145,18 @@ export function useChat(target: ChatTarget | null) {
     [getIdToken]
   );
 
+  const reactToMessage = useCallback(
+    async (messageId: string, kind: MessageReactionKind, content: string) => {
+      if (!supabase || !user) throw new Error("Sign in to react.");
+      if (messageId.startsWith("local-")) throw new Error("Wait for the message to finish sending first.");
+      await toggleMessageReaction(supabase, { messageId, userId: user.uid, kind, content });
+      await load({ silent: true });
+    },
+    [load, supabase, user]
+  );
+
   return useMemo(
-    () => ({ conversation, messages, loading, uploadProgress, sendText, sendFile, getDownloadUrl, reload: load }),
-    [conversation, getDownloadUrl, loading, load, messages, sendFile, sendText, uploadProgress]
+    () => ({ conversation, messages, loading, uploadProgress, sendText, sendFile, getDownloadUrl, reactToMessage, reload: load }),
+    [conversation, getDownloadUrl, loading, load, messages, reactToMessage, sendFile, sendText, uploadProgress]
   );
 }

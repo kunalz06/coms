@@ -535,7 +535,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
                   <p className="truncate font-semibold">{active.conversation.title}</p>
                   <p className="flex items-center gap-1 text-sm capitalize text-white/60">
                     <Users className="h-3.5 w-3.5" />
-                    {participantCount}/5 in {active.mode} call
+                    {participantCount}/10 in {active.mode} call
                   </p>
                 </div>
               </div>

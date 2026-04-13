@@ -151,7 +151,7 @@ export function ChatPanel() {
             <Skeleton className="h-20 w-3/5" />
           </div>
         ) : (
-          <MessageList messages={chat.messages} currentUserId={user.uid} friend={directFriend ?? fallbackProfile} showSenderNames={Boolean(group)} senderProfiles={senderProfiles} getDownloadUrl={chat.getDownloadUrl} />
+          <MessageList messages={chat.messages} currentUserId={user.uid} friend={directFriend ?? fallbackProfile} showSenderNames={Boolean(group)} senderProfiles={senderProfiles} getDownloadUrl={chat.getDownloadUrl} onReact={chat.reactToMessage} />
         )}
         {showScrollButton ? (
           <Button

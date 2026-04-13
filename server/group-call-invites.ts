@@ -1,6 +1,6 @@
 import type { WebSocket } from "ws";
 
-const MAX_GROUP_CALL_PARTICIPANTS = 5;
+const MAX_GROUP_CALL_PARTICIPANTS = 10;
 
 type ClientSocket = WebSocket & {
   userId?: string;
@@ -112,7 +112,7 @@ export class GroupCallInviteManager {
   private joinSession(socket: ClientSocket, session: GroupCallSession, userId: string, requestId: string) {
     const existingParticipantIds = [...session.participantIds].filter((participantId) => participantId !== userId);
     if (!session.participantIds.has(userId) && session.participantIds.size >= MAX_GROUP_CALL_PARTICIPANTS) {
-      throw new Error("Group calls are limited to 5 people in this MVP.");
+      throw new Error("Group calls are limited to 10 people in this MVP.");
     }
 
     session.participantIds.add(userId);
