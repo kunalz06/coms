@@ -9,7 +9,10 @@ type ClientSocket = WebSocket & {
 type GroupCallMessage =
   | { type: "group-call-start"; requestId: string; from: string; conversationId: string; mode: "audio" | "video" }
   | { type: "group-call-join"; requestId: string; from: string; conversationId: string; mode: "audio" | "video" }
-  | { type: "group-call-leave"; requestId?: string; from: string; conversationId: string };
+  | { type: "group-call-leave"; requestId?: string; from: string; conversationId: string }
+  | { type: "group-call-offer"; from: string; to: string; conversationId: string; offer: unknown }
+  | { type: "group-call-answer"; from: string; to: string; conversationId: string; answer: unknown }
+  | { type: "group-call-ice-candidate"; from: string; to: string; conversationId: string; candidate: unknown };
 
 type GroupCallSession = {
   conversationId: string;
@@ -17,6 +20,7 @@ type GroupCallSession = {
   mode: "audio" | "video";
   invitedUserIds: Set<string>;
   participantIds: Set<string>;
+  startedAt: number;
 };
 
 type SendToUser = (userId: string, payload: unknown) => void;
@@ -58,6 +62,11 @@ export class GroupCallInviteManager {
           this.leave(message.conversationId, message.from);
           this.respond(message.from, message.requestId, true, { left: true });
           return;
+        case "group-call-offer":
+        case "group-call-answer":
+        case "group-call-ice-candidate":
+          await this.relay(message);
+          return;
       }
     } catch (error) {
       this.respond(message.from, "requestId" in message ? message.requestId : undefined, false, null, toErrorMessage(error));
@@ -78,13 +87,13 @@ export class GroupCallInviteManager {
         hostId: message.from,
         mode: message.mode,
         invitedUserIds: new Set(memberIds),
-        participantIds: new Set()
+        participantIds: new Set(),
+        startedAt: Date.now()
       };
       this.sessions.set(message.conversationId, session);
     }
 
-    this.addParticipant(socket, session, message.from);
-    this.respond(message.from, message.requestId, true, { conversationId: session.conversationId, mode: session.mode, hostId: session.hostId });
+    this.joinSession(socket, session, message.from, message.requestId);
 
     for (const userId of memberIds) {
       if (userId !== message.from) {
@@ -97,11 +106,37 @@ export class GroupCallInviteManager {
     const session = this.sessions.get(message.conversationId);
     if (!session) throw new Error("This group call has ended.");
     await this.allowedMemberIds(message.conversationId, message.from);
-    if (!session.participantIds.has(message.from) && session.participantIds.size >= MAX_GROUP_CALL_PARTICIPANTS) {
+    this.joinSession(socket, session, message.from, message.requestId);
+  }
+
+  private joinSession(socket: ClientSocket, session: GroupCallSession, userId: string, requestId: string) {
+    const existingParticipantIds = [...session.participantIds].filter((participantId) => participantId !== userId);
+    if (!session.participantIds.has(userId) && session.participantIds.size >= MAX_GROUP_CALL_PARTICIPANTS) {
       throw new Error("Group calls are limited to 5 people in this MVP.");
     }
-    this.addParticipant(socket, session, message.from);
-    this.respond(message.from, message.requestId, true, { conversationId: session.conversationId, mode: session.mode, hostId: session.hostId });
+
+    session.participantIds.add(userId);
+    session.invitedUserIds.add(userId);
+    this.socketsByUser.set(socket, session.conversationId);
+
+    this.respond(userId, requestId, true, {
+      conversationId: session.conversationId,
+      mode: session.mode,
+      hostId: session.hostId,
+      participantIds: existingParticipantIds
+    });
+
+    existingParticipantIds.forEach((participantId) => {
+      this.sendToUser(participantId, { type: "group-call-peer-joined", conversationId: session.conversationId, userId });
+    });
+  }
+
+  private async relay(message: Extract<GroupCallMessage, { type: "group-call-offer" | "group-call-answer" | "group-call-ice-candidate" }>) {
+    const session = this.sessions.get(message.conversationId);
+    const isValidPair = session?.participantIds.has(message.from) && session.participantIds.has(message.to);
+    const isMember = await this.verifyMembership(message.conversationId, message.from);
+    if (!session || !isValidPair || !isMember) return;
+    this.sendToUser(message.to, message);
   }
 
   private async allowedMemberIds(conversationId: string, userId: string) {
@@ -110,17 +145,14 @@ export class GroupCallInviteManager {
     return memberIds.slice(0, MAX_GROUP_CALL_PARTICIPANTS);
   }
 
-  private addParticipant(socket: ClientSocket, session: GroupCallSession, userId: string) {
-    session.participantIds.add(userId);
-    session.invitedUserIds.add(userId);
-    this.socketsByUser.set(socket, session.conversationId);
-  }
-
   private leave(conversationId: string, userId: string) {
     const session = this.sessions.get(conversationId);
-    if (!session) return;
+    if (!session || !session.participantIds.has(userId)) return;
     session.participantIds.delete(userId);
-    if (session.participantIds.size > 0 && session.hostId !== userId) return;
+    session.participantIds.forEach((participantId) => {
+      this.sendToUser(participantId, { type: "group-call-peer-left", conversationId, userId });
+    });
+    if (session.participantIds.size > 0) return;
     this.notifyInvitees(session, { type: "group-call-ended", conversationId, userId });
     this.sessions.delete(conversationId);
   }

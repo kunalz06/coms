@@ -8,7 +8,7 @@ COMMS is a minimal messaging and audio/video calling app.
 - **Firebase Authentication** owns account creation, sign in, persistence, password reset, email updates, password updates, and profile identity.
 - **Supabase** stores user profiles, friends, blocks, conversations, messages, attachments, call logs, and presence metadata. The SQL in `supabase/schema.sql` enables RLS and realtime.
 - **Cloudinary** stores profile pictures, chat images, documents, and voice recordings. Signed uploads are available through `app/api/cloudinary/sign/route.ts`; an unsigned restricted preset can be used for local development.
-- **WebRTC** carries direct-call media between peers. The custom Node server in `server/index.ts` uses WebSocket for direct signaling and group-call invites, while Jitsi hosts group call media.
+- **WebRTC** carries direct and small-group call media between peers. The custom Node server in `server/index.ts` uses WebSocket for direct and group-call signaling.
 - **Zustand** stores app UI selection and theme.
 - **Zod + React Hook Form** validate auth, settings, and composer forms.
 
@@ -55,9 +55,8 @@ Important notes:
 
 - `NEXT_PUBLIC_*` values are safe browser configuration values.
 - `SUPABASE_SERVICE_ROLE_KEY`, `FIREBASE_PRIVATE_KEY`, and `CLOUDINARY_API_SECRET` must remain server-only.
-- `NEXT_PUBLIC_TURN_URLS`, `NEXT_PUBLIC_TURN_USERNAME`, and `NEXT_PUBLIC_TURN_CREDENTIAL` are placeholders for production TURN service credentials.
+- `NEXT_PUBLIC_TURN_URLS`, `NEXT_PUBLIC_TURN_USERNAME`, and `NEXT_PUBLIC_TURN_CREDENTIAL` are placeholders for production TURN service credentials. TURN is especially important for reliable group calls.
 - Local default signaling URL: `ws://localhost:3000/ws`.
-- `NEXT_PUBLIC_JITSI_DOMAIN=meet.jit.si` is fine for testing. Use a Jitsi/JaaS domain and JWT-backed rooms before treating group calls as private production calls.
 
 ## Firebase Setup
 
@@ -121,7 +120,7 @@ npm run start
 - The signaling server tracks active users and returns busy/unavailable states to prevent duplicate peer connection bugs.
 - Call UI state is constrained by a strict state machine in `lib/call-state.ts`.
 - Add a production TURN service before deploying outside a local network. STUN alone is not enough for all NAT/firewall conditions.
-- Group calls are routed through Jitsi instead of a browser mesh or self-hosted SFU. COMMS still uses `/ws` to show incoming group call popups to members.
+- Group calls use a browser mesh WebRTC model through the same `/ws` signaling server. This is capped at 5 participants for the MVP; add an SFU before increasing that cap.
 
 ## Tradeoffs
 

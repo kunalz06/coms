@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@hookform/resolvers": "latest",
-    "@jitsi/react-sdk": "^1.4.4",
     "@supabase/supabase-js": "latest",
     "firebase": "latest",
     "firebase-admin": "latest",
