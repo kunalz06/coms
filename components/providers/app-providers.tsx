@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { AuthProvider } from "@/features/auth/auth-provider";
 import { CallProvider } from "@/features/calls/call-provider";
 import { GroupCallProvider } from "@/features/group-calls/group-call-provider";
+import { NotificationProvider } from "@/features/notifications/notification-provider";
 import { useAppStore } from "@/store/app-store";
 
 function ThemeBridge() {
@@ -21,12 +22,14 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <ToastProvider>
       <AuthProvider>
-        <CallProvider>
-          <GroupCallProvider>
-            <ThemeBridge />
-            {children}
-          </GroupCallProvider>
-        </CallProvider>
+        <NotificationProvider>
+          <CallProvider>
+            <GroupCallProvider>
+              <ThemeBridge />
+              {children}
+            </GroupCallProvider>
+          </CallProvider>
+        </NotificationProvider>
       </AuthProvider>
     </ToastProvider>
   );

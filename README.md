@@ -37,9 +37,11 @@ types/               Shared TypeScript types
 The schema includes:
 
 - `user_profiles`
+- `notification_settings`
 - `friendships`
 - `blocks`
 - `conversations`
+- `conversation_mutes`
 - `messages`
 - `message_attachments`
 - `message_reactions`
@@ -110,6 +112,7 @@ npm run start
 - Manage group members with owner/admin/member roles.
 - Send text, images, documents up to 5 MB, and voice notes.
 - React to messages with quick emojis, custom emoji, or short text reactions.
+- Turn browser notifications and call ringtone on or off, and mute specific direct chats or groups.
 - Start one-to-one or group audio/video calls.
 - Accept, reject, end, mute mic, toggle camera, and switch between audio and video.
 

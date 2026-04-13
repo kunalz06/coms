@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
+import { useNotifications } from "@/features/notifications/notification-provider";
 import { CALL_TIMEOUT_MS, canTransitionCall, readableCallStatus } from "@/lib/call-state";
 import { signalingUrl } from "@/lib/signaling-url";
 import { getProfile } from "@/services/profile-service";
@@ -65,6 +66,7 @@ function attachStream(stream: MediaStream | null, element: HTMLVideoElement | nu
 export function CallProvider({ children }: { children: ReactNode }) {
   const { user, supabase } = useAuth();
   const { showToast } = useToast();
+  const { notifyIncomingCall, startRingtone, stopRingtone } = useNotifications();
   const socketRef = useRef<WebSocket | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
@@ -229,8 +231,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         forceStatus("ended");
         window.setTimeout(() => forceStatus("idle"), 250);
       }
+      stopRingtone();
     },
-    [clearCallTimeout, forceStatus, transitionTo, updateCallSession]
+    [clearCallTimeout, forceStatus, stopRingtone, transitionTo, updateCallSession]
   );
 
   useEffect(() => {
@@ -336,6 +339,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const acceptCall = useCallback(async () => {
     if (!incoming || !user) return;
     try {
+      stopRingtone();
       transitionTo("acquiring_media");
       setMode(incoming.mode);
       const stream = await getMedia(incoming.mode);
@@ -357,7 +361,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       sendSignal({ type: "call-reject", callId: incoming.callId, from: user.uid, to: incoming.from.id, reason: "media-denied" });
       await resetCall("failed");
     }
-  }, [addPendingCandidates, createPeer, getMedia, incoming, resetCall, sendSignal, showToast, transitionTo, user]);
+  }, [addPendingCandidates, createPeer, getMedia, incoming, resetCall, sendSignal, showToast, stopRingtone, transitionTo, user]);
 
   const rejectCall = useCallback(async () => {
     if (!incoming || !user) return;
@@ -391,6 +395,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
         transitionTo("incoming_ringing");
         setMode(message.mode);
         setIncoming({ callId: message.callId, from: caller, mode: message.mode, conversationId: message.conversationId });
+        notifyIncomingCall({
+          conversationId: message.conversationId,
+          title: `Incoming ${message.mode} call`,
+          body: `${caller.full_name} is calling you`
+        });
+        startRingtone(message.conversationId);
       }
       if (message.type === "call-offer") await handleOffer(message);
       if (message.type === "call-answer" && peerRef.current && activeRef.current?.callId === message.callId) {
@@ -419,7 +429,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }
       if (message.type === "error") showToast({ variant: "error", title: "Calling error", description: message.message });
     },
-    [addPendingCandidates, handleOffer, resetCall, sendSignal, showToast, supabase, transitionTo, user]
+    [addPendingCandidates, handleOffer, notifyIncomingCall, resetCall, sendSignal, showToast, startRingtone, supabase, transitionTo, user]
   );
 
   const connectSocket = useCallback(() => {

@@ -105,6 +105,23 @@ export type Block = {
   blocked_profile?: UserProfile;
 };
 
+export type NotificationSettings = {
+  user_id: string;
+  browser_notifications_enabled: boolean;
+  ringtone_enabled: boolean;
+  notifications_prompted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConversationMute = {
+  id: string;
+  conversation_id: string;
+  user_id: string;
+  muted_until: string | null;
+  created_at: string;
+};
+
 export type CallMode = "audio" | "video";
 export type CallLogStatus = "ringing" | "connecting" | "connected" | "reconnecting" | "rejected" | "missed" | "busy" | "ended" | "failed";
 export type CallStatus =

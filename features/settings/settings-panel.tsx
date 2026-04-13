@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { updateEmail, updatePassword, updateProfile as updateFirebaseProfile } from "firebase/auth";
-import { Camera, Moon, Sun, X } from "lucide-react";
+import { Bell, BellOff, Camera, Moon, Sun, Volume2, VolumeX, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
@@ -17,6 +17,7 @@ import { uploadToCloudinary } from "@/services/upload-service";
 import { useAppStore } from "@/store/app-store";
 import type { Block, UserProfile } from "@/types";
 import { useAuth } from "@/features/auth/auth-provider";
+import { useNotifications } from "@/features/notifications/notification-provider";
 
 type Values = z.infer<typeof accountSchema>;
 
@@ -30,6 +31,7 @@ type SettingsPanelProps = {
 export function SettingsPanel({ open, onClose, blocked, unblock }: SettingsPanelProps) {
   const { user, profile, supabase, getIdToken, refreshProfile } = useAuth();
   const { showToast } = useToast();
+  const { settings, browserPermission, enableBrowserNotifications, disableBrowserNotifications, setRingtoneEnabled } = useNotifications();
   const theme = useAppStore((state) => state.theme);
   const setTheme = useAppStore((state) => state.setTheme);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -108,6 +110,40 @@ export function SettingsPanel({ open, onClose, blocked, unblock }: SettingsPanel
                 <Moon className="h-4 w-4" />
                 Dark
               </Button>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-ink dark:text-white">Notifications</h3>
+          <div className="mt-3 grid gap-3 rounded-lg border border-line bg-white/60 p-3 text-sm dark:border-white/10 dark:bg-white/10">
+            <div>
+              <p className="font-medium text-ink dark:text-white">Browser notifications</p>
+              <p className="text-ink/60 dark:text-white/60">Permission: {browserPermission}. New messages and calls respect muted chats.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant={settings?.browser_notifications_enabled ? "primary" : "secondary"} onClick={() => void enableBrowserNotifications()}>
+                <Bell className="h-4 w-4" />
+                Turn on
+              </Button>
+              <Button variant={!settings?.browser_notifications_enabled ? "primary" : "secondary"} onClick={() => void disableBrowserNotifications()}>
+                <BellOff className="h-4 w-4" />
+                Turn off
+              </Button>
+            </div>
+            <div className="border-t border-line pt-3 dark:border-white/10">
+              <p className="font-medium text-ink dark:text-white">Call ringtone</p>
+              <p className="text-ink/60 dark:text-white/60">Plays for incoming calls while COMMS is open.</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button variant={settings?.ringtone_enabled ? "primary" : "secondary"} onClick={() => void setRingtoneEnabled(true)}>
+                  <Volume2 className="h-4 w-4" />
+                  Unmute
+                </Button>
+                <Button variant={!settings?.ringtone_enabled ? "primary" : "secondary"} onClick={() => void setRingtoneEnabled(false)}>
+                  <VolumeX className="h-4 w-4" />
+                  Mute
+                </Button>
+              </div>
             </div>
           </div>
         </section>

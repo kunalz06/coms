@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ChevronDown, Info, Phone, Video } from "lucide-react";
+import { ArrowLeft, Bell, BellOff, ChevronDown, Info, Phone, Video } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { MessageList } from "@/features/chats/message-list";
 import { GroupInfoPanel } from "@/features/groups/group-info-panel";
 import { useCalls } from "@/features/calls/call-provider";
 import { useGroupCalls } from "@/features/group-calls/group-call-provider";
+import { useNotifications } from "@/features/notifications/notification-provider";
 import { useChat } from "@/hooks/use-chat";
 import { formatRelativePresence } from "@/lib/utils";
 import { useAppStore } from "@/store/app-store";
@@ -23,6 +24,7 @@ export function ChatPanel() {
   const chat = useChat(target);
   const { startCall, status } = useCalls();
   const { joinGroupCall, status: groupCallStatus } = useGroupCalls();
+  const { isConversationMuted, toggleConversationMute } = useNotifications();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [recentCalls, setRecentCalls] = useState<CallSession[]>([]);
@@ -46,6 +48,7 @@ export function ChatPanel() {
     if (!groupMembers) return undefined;
     return new Map(groupMembers.flatMap((member) => (member.profile ? [[member.user_id, member.profile] as const] : [])));
   }, [groupMembers]);
+  const muted = isConversationMuted(chat.conversation?.id);
 
   function scrollToLatest(behavior: ScrollBehavior = "smooth") {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior });
@@ -122,6 +125,16 @@ export function ChatPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {chat.conversation ? (
+            <Button
+              variant="ghost"
+              className="h-10 w-10 px-0"
+              onClick={() => void toggleConversationMute(chat.conversation!.id)}
+              aria-label={muted ? "Unmute conversation notifications" : "Mute conversation notifications"}
+            >
+              {muted ? <BellOff className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
+            </Button>
+          ) : null}
           {directFriend ? (
             <>
               <Button variant="ghost" className="h-10 w-10 px-0" disabled={!chat.conversation || status !== "idle"} onClick={() => chat.conversation && void startCall(directFriend, chat.conversation.id, "audio")} aria-label="Start audio call">

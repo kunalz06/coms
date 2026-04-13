@@ -45,6 +45,15 @@ create table if not exists blocks (
   check (blocker_id <> blocked_id)
 );
 
+create table if not exists notification_settings (
+  user_id text primary key references user_profiles(id) on delete cascade,
+  browser_notifications_enabled boolean not null default false,
+  ringtone_enabled boolean not null default true,
+  notifications_prompted_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists conversations (
   id uuid primary key default gen_random_uuid(),
   type text not null default 'direct' check (type in ('direct', 'group')),
@@ -73,6 +82,15 @@ create table if not exists conversation_members (
   role text not null default 'member' check (role in ('owner', 'admin', 'member')),
   joined_at timestamptz not null default now(),
   last_read_at timestamptz,
+  unique (conversation_id, user_id)
+);
+
+create table if not exists conversation_mutes (
+  id uuid primary key default gen_random_uuid(),
+  conversation_id uuid not null references conversations(id) on delete cascade,
+  user_id text not null references user_profiles(id) on delete cascade,
+  muted_until timestamptz,
+  created_at timestamptz not null default now(),
   unique (conversation_id, user_id)
 );
 
@@ -172,6 +190,8 @@ create index if not exists friendships_requester_idx on friendships(requester_id
 create index if not exists friendships_addressee_idx on friendships(addressee_id);
 create index if not exists blocks_blocker_idx on blocks(blocker_id);
 create index if not exists blocks_blocked_idx on blocks(blocked_id);
+create index if not exists conversation_mutes_user_idx on conversation_mutes(user_id);
+create index if not exists conversation_mutes_conversation_idx on conversation_mutes(conversation_id);
 create index if not exists conversations_user_one_idx on conversations(user_one_id);
 create index if not exists conversations_user_two_idx on conversations(user_two_id);
 create index if not exists conversations_type_idx on conversations(type);
@@ -197,6 +217,10 @@ $$;
 
 drop trigger if exists user_profiles_touch_updated_at on user_profiles;
 create trigger user_profiles_touch_updated_at before update on user_profiles
+for each row execute function touch_updated_at();
+
+drop trigger if exists notification_settings_touch_updated_at on notification_settings;
+create trigger notification_settings_touch_updated_at before update on notification_settings
 for each row execute function touch_updated_at();
 
 drop trigger if exists friendships_touch_updated_at on friendships;
@@ -365,10 +389,12 @@ $$;
 grant execute on function get_or_create_direct_conversation(text) to anon, authenticated;
 
 alter table user_profiles enable row level security;
+alter table notification_settings enable row level security;
 alter table friendships enable row level security;
 alter table blocks enable row level security;
 alter table conversations enable row level security;
 alter table conversation_members enable row level security;
+alter table conversation_mutes enable row level security;
 alter table messages enable row level security;
 alter table message_attachments enable row level security;
 alter table message_reactions enable row level security;
@@ -388,6 +414,19 @@ for insert with check (id = app_user_id());
 drop policy if exists "users update own profile" on user_profiles;
 create policy "users update own profile" on user_profiles
 for update using (id = app_user_id()) with check (id = app_user_id());
+
+drop policy if exists "notification settings visible to owner" on notification_settings;
+create policy "notification settings visible to owner" on notification_settings
+for select using (user_id = app_user_id());
+
+drop policy if exists "notification settings created by owner" on notification_settings;
+create policy "notification settings created by owner" on notification_settings
+for insert with check (user_id = app_user_id());
+
+drop policy if exists "notification settings updated by owner" on notification_settings;
+create policy "notification settings updated by owner" on notification_settings
+for update using (user_id = app_user_id())
+with check (user_id = app_user_id());
 
 drop policy if exists "friendships visible to participants" on friendships;
 create policy "friendships visible to participants" on friendships
@@ -479,6 +518,23 @@ with check (user_id = app_user_id());
 drop policy if exists "conversation members removable" on conversation_members;
 create policy "conversation members removable" on conversation_members
 for delete using (user_id = app_user_id() or user_can_manage_conversation(conversation_id, app_user_id()));
+
+drop policy if exists "conversation mutes visible to owner" on conversation_mutes;
+create policy "conversation mutes visible to owner" on conversation_mutes
+for select using (user_id = app_user_id());
+
+drop policy if exists "conversation mutes created by owner" on conversation_mutes;
+create policy "conversation mutes created by owner" on conversation_mutes
+for insert with check (user_id = app_user_id() and user_is_conversation_participant(conversation_id, app_user_id()));
+
+drop policy if exists "conversation mutes updated by owner" on conversation_mutes;
+create policy "conversation mutes updated by owner" on conversation_mutes
+for update using (user_id = app_user_id())
+with check (user_id = app_user_id() and user_is_conversation_participant(conversation_id, app_user_id()));
+
+drop policy if exists "conversation mutes removed by owner" on conversation_mutes;
+create policy "conversation mutes removed by owner" on conversation_mutes
+for delete using (user_id = app_user_id());
 
 drop policy if exists "messages visible to participants" on messages;
 create policy "messages visible to participants" on messages
@@ -614,10 +670,12 @@ declare
 begin
   foreach table_name in array array[
     'user_profiles',
+    'notification_settings',
     'friendships',
     'blocks',
     'conversations',
     'conversation_members',
+    'conversation_mutes',
     'messages',
     'message_attachments',
     'message_reactions',

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
+import { useNotifications } from "@/features/notifications/notification-provider";
 import { signalingUrl } from "@/lib/signaling-url";
 import { getGroup } from "@/services/group-service";
 import type { CallMode, GroupConversation, UserProfile } from "@/types";
@@ -86,6 +87,7 @@ function VideoTile({ stream, name, avatarUrl, muted = false, label }: { stream: 
 export function GroupCallProvider({ children }: { children: ReactNode }) {
   const { user, profile, supabase } = useAuth();
   const { showToast } = useToast();
+  const { notifyIncomingCall, startRingtone, stopRingtone } = useNotifications();
   const socketRef = useRef<WebSocket | null>(null);
   const shouldReconnectRef = useRef(true);
   const pendingRequestsRef = useRef(new Map<string, PendingRequest>());
@@ -235,8 +237,9 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       setMicEnabled(true);
       setCameraEnabled(true);
       setStatus("idle");
+      stopRingtone();
     },
-    [sendRequest]
+    [sendRequest, stopRingtone]
   );
 
   const getMedia = useCallback(async (mode: CallMode) => {
@@ -255,11 +258,17 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         const conversation = await getGroup(supabase, message.conversationId, user.uid);
         const caller = profileFor(conversation, message.from) ?? null;
         setIncoming({ conversation, caller, mode: message.mode });
+        notifyIncomingCall({
+          conversationId: conversation.id,
+          title: `Incoming group ${message.mode} call`,
+          body: `${caller?.full_name ?? "A group member"} is calling ${conversation.title ?? "your group"}`
+        });
+        startRingtone(conversation.id);
       } catch {
         showToast({ variant: "error", title: "Group call unavailable", description: "Could not load the group details for this call." });
       }
     },
-    [showToast, supabase, user]
+    [notifyIncomingCall, showToast, startRingtone, supabase, user]
   );
 
   const handleOffer = useCallback(
@@ -428,6 +437,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     if (!incoming) return;
     const call = incoming;
     setIncoming(null);
+    stopRingtone();
     try {
       await joinMeshCall(call.conversation, call.mode, "group-call-join");
     } catch (error) {
@@ -436,7 +446,12 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       setStatus("failed");
       window.setTimeout(() => setStatus("idle"), 600);
     }
-  }, [cleanup, incoming, joinMeshCall, showToast]);
+  }, [cleanup, incoming, joinMeshCall, showToast, stopRingtone]);
+
+  const dismissIncoming = useCallback(() => {
+    stopRingtone();
+    setIncoming(null);
+  }, [stopRingtone]);
 
   const toggleMic = useCallback(() => {
     localStream?.getAudioTracks().forEach((track) => {
@@ -506,7 +521,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   return (
     <GroupCallContext.Provider value={value}>
       {children}
-      <Modal open={Boolean(incoming)} title="Incoming group call" onClose={() => setIncoming(null)}>
+      <Modal open={Boolean(incoming)} title="Incoming group call" onClose={dismissIncoming}>
         {incoming ? (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
@@ -520,7 +535,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
             </div>
             <div className="flex gap-2">
               <Button onClick={() => void acceptIncoming()}>Join</Button>
-              <Button variant="danger" onClick={() => setIncoming(null)}>Reject</Button>
+              <Button variant="danger" onClick={dismissIncoming}>Reject</Button>
             </div>
           </div>
         ) : null}
