@@ -1,6 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Conversation, ConversationMute, NotificationSettings, UserProfile } from "@/types";
 
+export function isNotificationStorageMissingError(error: unknown) {
+  const candidate = error as { code?: string; message?: string; details?: string; status?: number } | null;
+  const message = `${candidate?.message ?? ""} ${candidate?.details ?? ""}`.toLowerCase();
+  const tableMentioned = message.includes("notification_settings") || message.includes("conversation_mutes");
+
+  return (
+    candidate?.code === "PGRST205" ||
+    candidate?.code === "42P01" ||
+    candidate?.status === 404 ||
+    (tableMentioned && (message.includes("schema cache") || message.includes("does not exist") || message.includes("could not find")))
+  );
+}
+
 export async function getOrCreateNotificationSettings(supabase: SupabaseClient, userId: string) {
   const { data: existing, error } = await supabase
     .from("notification_settings")

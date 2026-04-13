@@ -8,7 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { useNotifications } from "@/features/notifications/notification-provider";
-import { signalingUrl } from "@/lib/signaling-url";
+import { signalingUrl, warmSignalingServer } from "@/lib/signaling-url";
 import { getGroup } from "@/services/group-service";
 import type { CallMode, GroupConversation, UserProfile } from "@/types";
 
@@ -56,6 +56,10 @@ function profileFor(group: GroupConversation | null, userId: string): UserProfil
 
 function isStartResponse(value: unknown): value is GroupCallStartResponse {
   return value !== null && typeof value === "object" && "mode" in value;
+}
+
+function socketIsOpeningOrOpen(socket: WebSocket | null) {
+  return socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING;
 }
 
 function VideoTile({ stream, name, avatarUrl, muted = false, label }: { stream: MediaStream | null; name: string; avatarUrl?: string | null; muted?: boolean; label?: string }) {
@@ -338,9 +342,11 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   );
 
   const connectSocket = useCallback(
-    function openGroupCallSocket() {
-      if (!user || socketRef.current?.readyState === WebSocket.OPEN || socketRef.current?.readyState === WebSocket.CONNECTING) return;
+    async function openGroupCallSocket() {
+      if (!user || socketIsOpeningOrOpen(socketRef.current)) return;
       shouldReconnectRef.current = true;
+      await warmSignalingServer();
+      if (!user || !shouldReconnectRef.current || socketIsOpeningOrOpen(socketRef.current)) return;
       const socket = new WebSocket(signalingUrl());
       socketRef.current = socket;
       socket.onopen = () => socket.send(JSON.stringify({ type: "register", userId: user.uid }));
@@ -351,7 +357,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           showToast({ variant: "error", title: "Group call disconnected", description: "The call was cleaned up locally. Rejoin when signaling reconnects." });
           void cleanup(false);
         }
-        if (user && shouldReconnectRef.current) window.setTimeout(openGroupCallSocket, 1500);
+        if (user && shouldReconnectRef.current) window.setTimeout(() => void openGroupCallSocket(), 1500);
       };
     },
     [cleanup, handleSocketMessage, showToast, user]
@@ -361,7 +367,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     const existing = socketRef.current;
     if (existing?.readyState === WebSocket.OPEN) return;
     if (!user) throw new Error("Sign in before joining a group call.");
-    if (!existing || existing.readyState === WebSocket.CLOSED) connectSocket();
+    if (!existing || existing.readyState === WebSocket.CLOSED) await connectSocket();
     const socket = socketRef.current;
     if (!socket) throw new Error("Group call signaling is not available.");
     if (socket.readyState === WebSocket.OPEN) return;
@@ -501,7 +507,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     shouldReconnectRef.current = true;
-    connectSocket();
+    void connectSocket();
     const pendingRequests = pendingRequestsRef.current;
     return () => {
       shouldReconnectRef.current = false;

@@ -35,3 +35,21 @@ export function signalingUrl() {
     return fallbackSignalingUrl();
   }
 }
+
+export function signalingHealthUrl() {
+  const url = new URL(signalingUrl());
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.pathname = "/healthz";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+export async function warmSignalingServer() {
+  try {
+    await fetch(signalingHealthUrl(), { cache: "no-store" });
+  } catch {
+    // Render can close a cold WebSocket before the service is fully awake; the
+    // actual socket connection still owns the user-facing error path.
+  }
+}

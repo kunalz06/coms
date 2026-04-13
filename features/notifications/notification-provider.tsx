@@ -10,6 +10,7 @@ import {
   getConversationMutes,
   getOrCreateNotificationSettings,
   getUserProfileForNotification,
+  isNotificationStorageMissingError,
   setConversationMute,
   updateNotificationSettings
 } from "@/services/notification-service";
@@ -31,6 +32,9 @@ type NotificationContextValue = {
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
+const localSettingsKey = (userId: string) => `comms:notification-settings:${userId}`;
+const localMutesKey = (userId: string) => `comms:conversation-mutes:${userId}`;
+
 function currentPermission(): NotificationPermission | "unsupported" {
   if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
   return Notification.permission;
@@ -40,6 +44,69 @@ function isMuteActive(mute: ConversationMute) {
   return !mute.muted_until || new Date(mute.muted_until).getTime() > Date.now();
 }
 
+function defaultSettings(userId: string): NotificationSettings {
+  const now = new Date().toISOString();
+
+  return {
+    user_id: userId,
+    browser_notifications_enabled: false,
+    ringtone_enabled: true,
+    notifications_prompted_at: null,
+    created_at: now,
+    updated_at: now
+  };
+}
+
+function readLocalSettings(userId: string) {
+  const fallback = defaultSettings(userId);
+  if (typeof window === "undefined") return fallback;
+
+  try {
+    const raw = window.localStorage.getItem(localSettingsKey(userId));
+    if (!raw) return fallback;
+    return { ...fallback, ...JSON.parse(raw), user_id: userId } as NotificationSettings;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLocalSettings(settings: NotificationSettings) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(localSettingsKey(settings.user_id), JSON.stringify(settings));
+}
+
+function readLocalMutes(userId: string) {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(localMutesKey(userId));
+    return raw ? (JSON.parse(raw) as ConversationMute[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalMutes(userId: string, mutes: ConversationMute[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(localMutesKey(userId), JSON.stringify(mutes));
+}
+
+function applyLocalMute(userId: string, currentMutes: ConversationMute[], conversationId: string, muted: boolean) {
+  if (!muted) return currentMutes.filter((mute) => mute.conversation_id !== conversationId);
+  if (currentMutes.some((mute) => mute.conversation_id === conversationId)) return currentMutes;
+
+  return [
+    ...currentMutes,
+    {
+      id: `local:${conversationId}`,
+      conversation_id: conversationId,
+      user_id: userId,
+      muted_until: null,
+      created_at: new Date().toISOString()
+    }
+  ];
+}
+
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { user, supabase } = useAuth();
   const { showToast } = useToast();
@@ -47,11 +114,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [mutes, setMutes] = useState<ConversationMute[]>([]);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [promptOpen, setPromptOpen] = useState(false);
+  const [notificationStorageReady, setNotificationStorageReady] = useState(true);
   const audioContextRef = useRef<AudioContext | null>(null);
   const ringtoneTimerRef = useRef<number | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const notifiedMessagesRef = useRef(new Set<string>());
+  const missingStorageToastShownRef = useRef(false);
 
   const mutedConversationIds = useMemo(() => new Set(mutes.filter(isMuteActive).map((mute) => mute.conversation_id)), [mutes]);
 
@@ -60,6 +129,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     [mutedConversationIds]
   );
 
+  const showMissingStorageNotice = useCallback(() => {
+    if (missingStorageToastShownRef.current) return;
+    missingStorageToastShownRef.current = true;
+    showToast({
+      variant: "info",
+      title: "Notification schema not applied",
+      description: "Notification controls are saved locally until the new Supabase tables are created."
+    });
+  }, [showToast]);
+
   const load = useCallback(async () => {
     setPermission(currentPermission());
     if (!user || !supabase) {
@@ -67,11 +146,25 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       setMutes([]);
       return;
     }
-    const [nextSettings, nextMutes] = await Promise.all([getOrCreateNotificationSettings(supabase, user.uid), getConversationMutes(supabase, user.uid)]);
-    setSettings(nextSettings);
-    setMutes(nextMutes);
-    setPromptOpen(!nextSettings.notifications_prompted_at);
-  }, [supabase, user]);
+    try {
+      const [nextSettings, nextMutes] = await Promise.all([getOrCreateNotificationSettings(supabase, user.uid), getConversationMutes(supabase, user.uid)]);
+      setNotificationStorageReady(true);
+      setSettings(nextSettings);
+      setMutes(nextMutes);
+      writeLocalSettings(nextSettings);
+      writeLocalMutes(user.uid, nextMutes);
+      setPromptOpen(!nextSettings.notifications_prompted_at);
+    } catch (error) {
+      if (!isNotificationStorageMissingError(error)) throw error;
+      const localSettings = readLocalSettings(user.uid);
+      const localMutes = readLocalMutes(user.uid);
+      setNotificationStorageReady(false);
+      setSettings(localSettings);
+      setMutes(localMutes);
+      setPromptOpen(!localSettings.notifications_prompted_at);
+      showMissingStorageNotice();
+    }
+  }, [showMissingStorageNotice, supabase, user]);
 
   useEffect(() => {
     void load().catch(() => undefined);
@@ -79,11 +172,30 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const saveSettings = useCallback(
     async (values: Partial<Pick<NotificationSettings, "browser_notifications_enabled" | "ringtone_enabled" | "notifications_prompted_at">>) => {
-      if (!user || !supabase) return;
-      const nextSettings = await updateNotificationSettings(supabase, user.uid, values);
-      setSettings(nextSettings);
+      if (!user) return;
+      const optimisticSettings = {
+        ...(settings ?? readLocalSettings(user.uid)),
+        ...values,
+        user_id: user.uid,
+        updated_at: new Date().toISOString()
+      };
+      setSettings(optimisticSettings);
+      writeLocalSettings(optimisticSettings);
+
+      if (!supabase || !notificationStorageReady) return;
+
+      try {
+        const nextSettings = await updateNotificationSettings(supabase, user.uid, values);
+        setNotificationStorageReady(true);
+        setSettings(nextSettings);
+        writeLocalSettings(nextSettings);
+      } catch (error) {
+        if (!isNotificationStorageMissingError(error)) throw error;
+        setNotificationStorageReady(false);
+        showMissingStorageNotice();
+      }
     },
-    [supabase, user]
+    [notificationStorageReady, settings, showMissingStorageNotice, supabase, user]
   );
 
   const unlockAudio = useCallback(() => {
@@ -129,13 +241,28 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const toggleConversationMute = useCallback(
     async (conversationId: string, muted?: boolean) => {
-      if (!user || !supabase) return;
+      if (!user) return;
       const nextMuted = muted ?? !isConversationMuted(conversationId);
-      await setConversationMute(supabase, user.uid, conversationId, nextMuted);
-      setMutes(await getConversationMutes(supabase, user.uid));
+      const optimisticMutes = applyLocalMute(user.uid, mutes, conversationId, nextMuted);
+      setMutes(optimisticMutes);
+      writeLocalMutes(user.uid, optimisticMutes);
+
+      if (supabase && notificationStorageReady) {
+        try {
+          await setConversationMute(supabase, user.uid, conversationId, nextMuted);
+          const nextMutes = await getConversationMutes(supabase, user.uid);
+          setNotificationStorageReady(true);
+          setMutes(nextMutes);
+          writeLocalMutes(user.uid, nextMutes);
+        } catch (error) {
+          if (!isNotificationStorageMissingError(error)) throw error;
+          setNotificationStorageReady(false);
+          showMissingStorageNotice();
+        }
+      }
       showToast({ variant: "success", title: nextMuted ? "Conversation muted" : "Conversation unmuted" });
     },
-    [isConversationMuted, showToast, supabase, user]
+    [isConversationMuted, mutes, notificationStorageReady, showMissingStorageNotice, showToast, supabase, user]
   );
 
   const showBrowserNotification = useCallback(
@@ -218,15 +345,20 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           const body = message.kind === "text" && message.content ? message.content : `${sender?.full_name ?? "Someone"} sent ${message.kind === "voice" ? "a voice note" : message.kind === "document" ? "a document" : "an image"}`;
           showBrowserNotification(title, { body, tag: `message:${message.conversation_id}`, conversationId: message.conversation_id });
         })().catch(() => undefined);
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "notification_settings", filter: `user_id=eq.${user.uid}` }, () => void load().catch(() => undefined))
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_mutes", filter: `user_id=eq.${user.uid}` }, () => void load().catch(() => undefined))
-      .subscribe();
+      });
+
+    if (notificationStorageReady) {
+      channel
+        .on("postgres_changes", { event: "*", schema: "public", table: "notification_settings", filter: `user_id=eq.${user.uid}` }, () => void load().catch(() => undefined))
+        .on("postgres_changes", { event: "*", schema: "public", table: "conversation_mutes", filter: `user_id=eq.${user.uid}` }, () => void load().catch(() => undefined));
+    }
+
+    channel.subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [isConversationMuted, load, settings, showBrowserNotification, supabase, user]);
+  }, [isConversationMuted, load, notificationStorageReady, settings, showBrowserNotification, supabase, user]);
 
   useEffect(() => () => stopRingtone(), [stopRingtone]);
 

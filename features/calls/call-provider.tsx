@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { useNotifications } from "@/features/notifications/notification-provider";
 import { CALL_TIMEOUT_MS, canTransitionCall, readableCallStatus } from "@/lib/call-state";
-import { signalingUrl } from "@/lib/signaling-url";
+import { signalingUrl, warmSignalingServer } from "@/lib/signaling-url";
 import { getProfile } from "@/services/profile-service";
 import type { CallMode, CallStatus, SignalingMessage, UserProfile } from "@/types";
 
@@ -63,6 +63,10 @@ function attachStream(stream: MediaStream | null, element: HTMLVideoElement | nu
   void element.play().catch(() => undefined);
 }
 
+function socketIsOpeningOrOpen(socket: WebSocket | null) {
+  return socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING;
+}
+
 export function CallProvider({ children }: { children: ReactNode }) {
   const { user, supabase } = useAuth();
   const { showToast } = useToast();
@@ -73,7 +77,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const connectSocketRef = useRef<() => void>(() => undefined);
+  const connectSocketRef = useRef<() => Promise<void>>(async () => undefined);
   const shouldReconnectRef = useRef(true);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
@@ -143,7 +147,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const waitForSignaling = useCallback(async () => {
     const existing = socketRef.current;
     if (existing?.readyState === WebSocket.OPEN) return;
-    connectSocketRef.current();
+    await connectSocketRef.current();
     const socket = socketRef.current;
     if (!socket) throw new Error("Signaling is not available.");
     if (socket.readyState === WebSocket.OPEN) return;
@@ -432,16 +436,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [addPendingCandidates, handleOffer, notifyIncomingCall, resetCall, sendSignal, showToast, startRingtone, supabase, transitionTo, user]
   );
 
-  const connectSocket = useCallback(() => {
-    if (!user || socketRef.current?.readyState === WebSocket.OPEN || socketRef.current?.readyState === WebSocket.CONNECTING) return;
+  const connectSocket = useCallback(async () => {
+    if (!user || socketIsOpeningOrOpen(socketRef.current)) return;
     shouldReconnectRef.current = true;
+    await warmSignalingServer();
+    if (!user || !shouldReconnectRef.current || socketIsOpeningOrOpen(socketRef.current)) return;
     const socket = new WebSocket(signalingUrl());
     socketRef.current = socket;
     socket.onopen = () => socket.send(JSON.stringify({ type: "register", userId: user.uid } satisfies SignalingMessage));
     socket.onmessage = (event) => void handleMessage(event);
     socket.onclose = () => {
       socketRef.current = null;
-      if (user && shouldReconnectRef.current) window.setTimeout(() => connectSocketRef.current(), 1500);
+      if (user && shouldReconnectRef.current) window.setTimeout(() => void connectSocketRef.current(), 1500);
     };
   }, [handleMessage, user]);
 
@@ -451,7 +457,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     shouldReconnectRef.current = true;
-    connectSocket();
+    void connectSocket();
     return () => {
       shouldReconnectRef.current = false;
       socketRef.current?.close();
