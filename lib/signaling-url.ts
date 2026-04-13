@@ -47,7 +47,7 @@ export function signalingHealthUrl() {
 
 export async function warmSignalingServer() {
   try {
-    await fetch(signalingHealthUrl(), { cache: "no-store" });
+    await fetch(signalingHealthUrl(), { cache: "no-store", mode: "no-cors" });
   } catch {
     // Render can close a cold WebSocket before the service is fully awake; the
     // actual socket connection still owns the user-facing error path.

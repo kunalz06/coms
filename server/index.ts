@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import next from "next";
 import { createClient } from "@supabase/supabase-js";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
@@ -30,6 +30,12 @@ const handle = app.getRequestHandler();
 const clients = new Map<string, Set<ClientSocket>>();
 const activeCallsByUser = new Map<string, string>();
 const participantsByCall = new Map<string, Set<string>>();
+
+function writeCorsHeaders(response: ServerResponse) {
+  response.setHeader("access-control-allow-origin", process.env.ALLOWED_ORIGIN ?? "*");
+  response.setHeader("access-control-allow-methods", "GET, OPTIONS");
+  response.setHeader("access-control-allow-headers", "content-type");
+}
 
 function serviceSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -132,6 +138,12 @@ void app.prepare().then(() => {
   const handleUpgrade = app.getUpgradeHandler();
   const server = createServer((request, response) => {
     if (request.url === "/healthz") {
+      writeCorsHeaders(response);
+      if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ ok: true, service: "comms-signaling" }));
       return;
