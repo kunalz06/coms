@@ -294,6 +294,76 @@ as $$
   )
 $$;
 
+create or replace function get_or_create_direct_conversation(other_user_id text)
+returns conversations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id text := app_user_id();
+  existing_conversation conversations;
+  created_conversation conversations;
+begin
+  if current_user_id is null then
+    raise exception 'Not authenticated.' using errcode = '42501';
+  end if;
+
+  if other_user_id is null or other_user_id = current_user_id then
+    raise exception 'Choose another COMMS user.' using errcode = '22023';
+  end if;
+
+  if not exists (select 1 from user_profiles where id = other_user_id) then
+    raise exception 'No COMMS user exists for this conversation.' using errcode = '22023';
+  end if;
+
+  if users_are_blocked(current_user_id, other_user_id) then
+    raise exception 'This contact is blocked.' using errcode = '42501';
+  end if;
+
+  select *
+  into existing_conversation
+  from conversations
+  where type = 'direct'
+    and (
+      (user_one_id = current_user_id and user_two_id = other_user_id)
+      or
+      (user_one_id = other_user_id and user_two_id = current_user_id)
+    )
+  limit 1;
+
+  if existing_conversation.id is not null then
+    return existing_conversation;
+  end if;
+
+  begin
+    insert into conversations (type, user_one_id, user_two_id)
+    values ('direct', least(current_user_id, other_user_id), greatest(current_user_id, other_user_id))
+    returning * into created_conversation;
+    return created_conversation;
+  exception when unique_violation then
+    select *
+    into existing_conversation
+    from conversations
+    where type = 'direct'
+      and (
+        (user_one_id = current_user_id and user_two_id = other_user_id)
+        or
+        (user_one_id = other_user_id and user_two_id = current_user_id)
+      )
+    limit 1;
+
+    if existing_conversation.id is not null then
+      return existing_conversation;
+    end if;
+
+    raise;
+  end;
+end;
+$$;
+
+grant execute on function get_or_create_direct_conversation(text) to anon, authenticated;
+
 alter table user_profiles enable row level security;
 alter table friendships enable row level security;
 alter table blocks enable row level security;
@@ -355,7 +425,13 @@ for select using (user_is_conversation_participant(id, app_user_id()) or created
 drop policy if exists "conversations created by participant" on conversations;
 create policy "conversations created by participant" on conversations
 for insert with check (
-  (type = 'direct' and app_user_id() in (user_one_id, user_two_id) and not users_are_blocked(user_one_id, user_two_id))
+  (
+    type = 'direct'
+    and app_user_id() in (user_one_id, user_two_id)
+    and exists (select 1 from user_profiles where id = user_one_id)
+    and exists (select 1 from user_profiles where id = user_two_id)
+    and not users_are_blocked(user_one_id, user_two_id)
+  )
   or
   (type = 'group' and created_by = app_user_id())
 );

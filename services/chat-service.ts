@@ -7,6 +7,10 @@ export async function getOrCreateConversation(supabase: SupabaseClient, userId: 
   if (error) throw error;
   if (existing) return existing;
 
+  const { data: rpcConversation, error: rpcError } = await supabase.rpc("get_or_create_direct_conversation", { other_user_id: friendId }).single<Conversation>();
+  if (rpcConversation && !rpcError) return rpcConversation;
+  if (rpcError && rpcError.code !== "PGRST202") throw rpcError;
+
   const [user_one_id, user_two_id] = [userId, friendId].sort();
   const { data, error: insertError } = await supabase
     .from("conversations")
