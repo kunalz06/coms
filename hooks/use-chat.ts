@@ -16,6 +16,7 @@ import {
   shareMessageToConversation,
   toggleMessageReaction
 } from "@/services/chat-service";
+import { sendUnreadMessagePush } from "@/services/notification-service";
 import { uploadToCloudinary, type CloudinaryUploadResult } from "@/services/upload-service";
 import type { ArchivedAttachmentPayload, Attachment, ChatTarget, Conversation, Message, MessageKind, MessageReactionKind, UploadKind } from "@/types";
 import { useAuth } from "@/features/auth/auth-provider";
@@ -166,7 +167,8 @@ export function useChat(target: ChatTarget | null) {
       };
       setMessages((items) => [...items, optimistic]);
       try {
-        await sendMessage(supabase, { conversationId: conversation.id, senderId: user.uid, kind: "text", content: trimmed });
+        const sent = await sendMessage(supabase, { conversationId: conversation.id, senderId: user.uid, kind: "text", content: trimmed });
+        void sendUnreadMessagePush({ messageId: sent.id, getIdToken });
         triggerBackgroundBackup();
         await load({ silent: true });
       } catch (error) {
@@ -174,7 +176,7 @@ export function useChat(target: ChatTarget | null) {
         throw error;
       }
     },
-    [conversation, load, supabase, triggerBackgroundBackup, user]
+    [conversation, getIdToken, load, supabase, triggerBackgroundBackup, user]
   );
 
   const sendFile = useCallback(
@@ -190,7 +192,7 @@ export function useChat(target: ChatTarget | null) {
           signal: options?.signal
         });
         const kind: MessageKind = uploadKind === "voice" ? "voice" : uploadKind === "document" ? "document" : "image";
-        await sendMessage(supabase, {
+        const sent = await sendMessage(supabase, {
           conversationId: conversation.id,
           senderId: user.uid,
           kind,
@@ -204,6 +206,7 @@ export function useChat(target: ChatTarget | null) {
             size_bytes: result.sizeBytes
           }
         });
+        void sendUnreadMessagePush({ messageId: sent.id, getIdToken });
         triggerBackgroundBackup();
         await load({ silent: true });
       } finally {

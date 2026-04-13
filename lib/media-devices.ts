@@ -55,3 +55,15 @@ export async function getVideoStream() {
   }
   throw lastError instanceof Error ? lastError : new Error("Could not open camera.");
 }
+
+export async function getScreenShareStream() {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new Error("Screen sharing is not supported in this browser.");
+  }
+  return navigator.mediaDevices.getDisplayMedia({
+    video: {
+      frameRate: { ideal: 24, max: 30 }
+    },
+    audio: false
+  });
+}

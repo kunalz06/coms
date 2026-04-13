@@ -106,3 +106,15 @@ export async function getUserProfileForNotification(supabase: SupabaseClient, us
   if (error) throw error;
   return data;
 }
+
+export async function sendUnreadMessagePush(values: { messageId: string; getIdToken: () => Promise<string> }) {
+  const token = await values.getIdToken();
+  await fetch("/api/notifications/message-push", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ messageId: values.messageId })
+  }).catch(() => undefined);
+}

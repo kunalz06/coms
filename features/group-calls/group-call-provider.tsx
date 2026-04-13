@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, MicOff, PhoneOff, PhoneIncoming, Users, Video, VideoOff } from "lucide-react";
+import { Maximize2, Mic, MicOff, Minimize2, PhoneOff, PhoneIncoming, ScreenShare, ScreenShareOff, Users, Video, VideoOff } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { useNotifications } from "@/features/notifications/notification-provider";
-import { getCallMedia, getVideoStream } from "@/lib/media-devices";
+import { getCallMedia, getScreenShareStream, getVideoStream } from "@/lib/media-devices";
 import { signalingUrl, warmSignalingServer } from "@/lib/signaling-url";
 import { getGroup } from "@/services/group-service";
 import type { CallMode, GroupConversation, UserProfile } from "@/types";
@@ -99,6 +99,19 @@ function VideoTile({ stream, name, avatarUrl, muted = false, label }: { stream: 
   );
 }
 
+function HiddenMedia({ stream, muted = false }: { stream: MediaStream | null; muted?: boolean }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element || element.srcObject === stream) return;
+    element.srcObject = stream;
+    void element.play().catch(() => undefined);
+  }, [stream]);
+
+  return <video ref={videoRef} autoPlay muted={muted} playsInline className="hidden" />;
+}
+
 function canEndGroupCall(call: ActiveGroupCall | null, userId: string | undefined) {
   if (!call || !userId) return false;
   const myRole = call.conversation.members?.find((member) => member.user_id === userId)?.role;
@@ -115,9 +128,13 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const pendingRequestsRef = useRef(new Map<string, PendingRequest>());
   const cleanupRef = useRef<(notify?: boolean) => Promise<void>>(async () => undefined);
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
+  const videoSendersRef = useRef(new Map<string, RTCRtpSender>());
   const pendingCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const activeRef = useRef<ActiveGroupCall | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const screenSharePreviousModeRef = useRef<CallMode>("audio");
+  const restoreCameraAfterShareRef = useRef(false);
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [active, setActive] = useState<ActiveGroupCall | null>(null);
   const [incoming, setIncoming] = useState<IncomingGroupCall | null>(null);
@@ -127,6 +144,8 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isCallMinimized, setIsCallMinimized] = useState(false);
 
   useEffect(() => {
     activeRef.current = active;
@@ -190,6 +209,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const removePeer = useCallback((peerId: string) => {
     peersRef.current.get(peerId)?.close();
     peersRef.current.delete(peerId);
+    videoSendersRef.current.delete(peerId);
     pendingCandidatesRef.current.delete(peerId);
     setParticipants((current) => current.filter((participant) => participant.userId !== peerId));
   }, []);
@@ -202,7 +222,10 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       if (!current || !user) throw new Error("Group call is not active.");
 
       const connection = new RTCPeerConnection(rtcConfig());
-      localStreamRef.current?.getTracks().forEach((track) => connection.addTrack(track, localStreamRef.current as MediaStream));
+      localStreamRef.current?.getTracks().forEach((track) => {
+        const sender = connection.addTrack(track, localStreamRef.current as MediaStream);
+        if (track.kind === "video") videoSendersRef.current.set(peerId, sender);
+      });
       connection.onicecandidate = (event) => {
         if (!event.candidate || !activeRef.current || !user) return;
         sendMessage({
@@ -240,6 +263,28 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     [createPeer, sendMessage, user]
   );
 
+  const replaceOutgoingVideoTrack = useCallback(async (track: MediaStreamTrack | null, stream: MediaStream | null) => {
+    if (!stream) return;
+    await Promise.all(
+      [...peersRef.current.entries()].map(async ([peerId, peer]) => {
+        const existingSender = videoSendersRef.current.get(peerId);
+        if (existingSender && peer.getSenders().includes(existingSender)) {
+          await existingSender.replaceTrack(track);
+          if (!track) {
+            peer.removeTrack(existingSender);
+            videoSendersRef.current.delete(peerId);
+          }
+          return;
+        }
+        if (track) videoSendersRef.current.set(peerId, peer.addTrack(track, stream));
+      })
+    );
+  }, []);
+
+  const renegotiateGroupVideo = useCallback(async () => {
+    await Promise.all([...peersRef.current.keys()].map((peerId) => sendOfferToPeer(peerId)));
+  }, [sendOfferToPeer]);
+
   const cleanup = useCallback(
     async (notify = true) => {
       const current = activeRef.current;
@@ -253,7 +298,13 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       }
       peersRef.current.forEach((peer) => peer.close());
       peersRef.current.clear();
+      videoSendersRef.current.clear();
       pendingCandidatesRef.current.clear();
+      if (screenTrackRef.current) {
+        screenTrackRef.current.onended = null;
+        screenTrackRef.current.stop();
+        screenTrackRef.current = null;
+      }
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
       activeRef.current = null;
@@ -262,6 +313,8 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       setActive(null);
       setMicEnabled(true);
       setCameraEnabled(true);
+      setIsScreenSharing(false);
+      setIsCallMinimized(false);
       setStatus("idle");
       stopRingtone();
       if (current && isLeaveResponse(leaveResponse) && !leaveResponse.ended) {
@@ -632,9 +685,99 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     });
   }, [localStream]);
 
+  const stopScreenShare = useCallback(
+    async (restoreCamera = true) => {
+      const current = activeRef.current;
+      const screenTrack = screenTrackRef.current;
+      const stream = localStreamRef.current;
+      if (!current || !screenTrack || !stream) return;
+
+      screenTrack.onended = null;
+      stream.removeTrack(screenTrack);
+      if (screenTrack.readyState !== "ended") screenTrack.stop();
+      screenTrackRef.current = null;
+      setIsScreenSharing(false);
+
+      let restoredCamera = false;
+      if (restoreCamera && restoreCameraAfterShareRef.current) {
+        try {
+          const cameraStream = await getVideoStream();
+          const [cameraTrack] = cameraStream.getVideoTracks();
+          stream.addTrack(cameraTrack);
+          await replaceOutgoingVideoTrack(cameraTrack, stream);
+          const nextActive = { ...current, mode: "video" as CallMode };
+          setActive(nextActive);
+          activeRef.current = nextActive;
+          setCameraEnabled(true);
+          restoredCamera = true;
+        } catch {
+          showToast({ variant: "error", title: "Camera unavailable", description: "Screen sharing stopped, but the camera could not be restored." });
+        }
+      }
+
+      if (!restoredCamera) {
+        await replaceOutgoingVideoTrack(null, stream);
+        const nextActive = { ...current, mode: screenSharePreviousModeRef.current };
+        setActive(nextActive);
+        activeRef.current = nextActive;
+        setCameraEnabled(false);
+      }
+
+      const nextStream = new MediaStream(stream.getTracks());
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      await renegotiateGroupVideo();
+    },
+    [renegotiateGroupVideo, replaceOutgoingVideoTrack, showToast]
+  );
+
+  const toggleScreenShare = useCallback(async () => {
+    const current = activeRef.current;
+    const stream = localStreamRef.current;
+    if (!current || !stream) return;
+
+    if (isScreenSharing) {
+      await stopScreenShare(true);
+      return;
+    }
+
+    try {
+      const displayStream = await getScreenShareStream();
+      const [screenTrack] = displayStream.getVideoTracks();
+      if (!screenTrack) throw new Error("No screen track was selected.");
+
+      screenSharePreviousModeRef.current = current.mode;
+      restoreCameraAfterShareRef.current = current.mode === "video" && cameraEnabled;
+      stream.getVideoTracks().forEach((track) => {
+        stream.removeTrack(track);
+        track.stop();
+      });
+      stream.addTrack(screenTrack);
+      screenTrackRef.current = screenTrack;
+      screenTrack.onended = () => void stopScreenShare(true);
+
+      await replaceOutgoingVideoTrack(screenTrack, stream);
+      const nextActive = { ...current, mode: "video" as CallMode };
+      setActive(nextActive);
+      activeRef.current = nextActive;
+      const nextStream = new MediaStream(stream.getTracks());
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      setCameraEnabled(false);
+      setIsScreenSharing(true);
+      await renegotiateGroupVideo();
+    } catch (error) {
+      showToast({
+        variant: "error",
+        title: "Screen sharing unavailable",
+        description: error instanceof Error ? error.message : "Your browser did not allow screen sharing."
+      });
+    }
+  }, [cameraEnabled, isScreenSharing, renegotiateGroupVideo, replaceOutgoingVideoTrack, showToast, stopScreenShare]);
+
   const toggleCamera = useCallback(async () => {
     const current = activeRef.current;
-    if (!localStream || !current || current.mode !== "video") return;
+    if (!localStream || !current || current.mode !== "video" || isScreenSharing) return;
 
     try {
       if (cameraEnabled) {
@@ -642,6 +785,10 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           peersRef.current.forEach((peer) => {
             const sender = peer.getSenders().find((item) => item.track === track);
             if (sender) peer.removeTrack(sender);
+            if (sender) {
+              const peerEntry = [...videoSendersRef.current.entries()].find(([, videoSender]) => videoSender === sender);
+              if (peerEntry) videoSendersRef.current.delete(peerEntry[0]);
+            }
           });
           localStream.removeTrack(track);
           track.stop();
@@ -651,27 +798,27 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         const videoStream = await getVideoStream();
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
-        peersRef.current.forEach((peer) => peer.addTrack(track, localStream));
+        peersRef.current.forEach((peer, peerId) => videoSendersRef.current.set(peerId, peer.addTrack(track, localStream)));
         setCameraEnabled(true);
       }
 
       const nextStream = new MediaStream(localStream.getTracks());
       localStreamRef.current = nextStream;
       setLocalStream(nextStream);
-      await Promise.all([...peersRef.current.keys()].map((peerId) => sendOfferToPeer(peerId)));
+      await renegotiateGroupVideo();
     } catch {
       showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to turn video on." });
     }
-  }, [cameraEnabled, localStream, sendOfferToPeer, showToast]);
+  }, [cameraEnabled, isScreenSharing, localStream, renegotiateGroupVideo, showToast]);
 
   const switchMode = useCallback(async () => {
-    if (!localStream || !activeRef.current) return;
+    if (!localStream || !activeRef.current || isScreenSharing) return;
     try {
       if (activeRef.current.mode === "audio") {
         const videoStream = await getVideoStream();
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
-        peersRef.current.forEach((peer) => peer.addTrack(track, localStream));
+        peersRef.current.forEach((peer, peerId) => videoSendersRef.current.set(peerId, peer.addTrack(track, localStream)));
         const nextActive = { ...activeRef.current, mode: "video" as CallMode };
         setActive(nextActive);
         activeRef.current = nextActive;
@@ -686,6 +833,10 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           peersRef.current.forEach((peer) => {
             const sender = peer.getSenders().find((item) => item.track === track);
             if (sender) peer.removeTrack(sender);
+            if (sender) {
+              const peerEntry = [...videoSendersRef.current.entries()].find(([, videoSender]) => videoSender === sender);
+              if (peerEntry) videoSendersRef.current.delete(peerEntry[0]);
+            }
           });
         });
         const nextActive = { ...activeRef.current, mode: "audio" as CallMode };
@@ -696,11 +847,11 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         localStreamRef.current = nextStream;
         setLocalStream(nextStream);
       }
-      await Promise.all([...peersRef.current.keys()].map((peerId) => sendOfferToPeer(peerId)));
+      await renegotiateGroupVideo();
     } catch {
       showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to switch to video." });
     }
-  }, [localStream, sendOfferToPeer, showToast]);
+  }, [isScreenSharing, localStream, renegotiateGroupVideo, showToast]);
 
   useEffect(() => {
     shouldReconnectRef.current = true;
@@ -787,7 +938,32 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           </div>
         </div>
       ) : null}
-      {active ? (
+      {active && isCallMinimized ? (
+        <div className="fixed bottom-4 left-1/2 z-40 w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 rounded-lg border border-white/15 bg-neutral-950 px-3 py-3 text-white shadow-soft sm:bottom-5">
+          <HiddenMedia stream={localStream} muted />
+          {participants.map((participant) => (
+            <HiddenMedia key={participant.userId} stream={participant.stream} />
+          ))}
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsCallMinimized(false)}>
+              <Avatar name={active.conversation.title ?? "Group"} src={active.conversation.avatar_url} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold">{active.conversation.title}</span>
+                <span className="block truncate text-xs text-white/65">{participantCount}/10 in {active.mode} call</span>
+              </span>
+            </button>
+            <Button variant="secondary" className="h-9 px-3" onClick={() => setIsCallMinimized(false)}>
+              <Maximize2 className="h-4 w-4" />
+              Open
+            </Button>
+            <Button variant="danger" className="h-9 px-3" onClick={() => void cleanup(true)}>
+              <PhoneOff className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {active && !isCallMinimized ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/75 p-0 backdrop-blur-sm sm:p-4">
           <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/15 bg-neutral-950 text-white shadow-soft sm:h-[min(820px,calc(100vh-2rem))] sm:w-[min(1120px,calc(100vw-2rem))] sm:rounded-lg">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-3 sm:px-4">
@@ -802,6 +978,10 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
                 </div>
               </div>
               <div className="flex flex-1 justify-end gap-2 sm:flex-none">
+                <Button variant="secondary" className="h-9 px-3" onClick={() => setIsCallMinimized(true)}>
+                  <Minimize2 className="h-4 w-4" />
+                  Minimize
+                </Button>
                 {mayEndForEveryone ? (
                   <Button variant="danger" className="h-9 px-3" onClick={() => void endCallForEveryone()}>
                     <PhoneOff className="h-4 w-4" />
@@ -830,8 +1010,12 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
             </div>
             <div className="grid grid-cols-2 gap-2 border-t border-white/10 px-3 py-3 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:px-4">
               <Button variant="secondary" className="h-9 px-3" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
-              <Button variant="secondary" className="h-9 px-3" onClick={() => void toggleCamera()} disabled={active.mode === "audio"}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
-              <Button variant="secondary" className="h-9 px-3" onClick={() => void switchMode()}>
+              <Button variant="secondary" className="h-9 px-3" onClick={() => void toggleCamera()} disabled={active.mode === "audio" || isScreenSharing}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
+              <Button variant="secondary" className="h-9 px-3" onClick={() => void toggleScreenShare()}>
+                {isScreenSharing ? <ScreenShareOff className="h-4 w-4" /> : <ScreenShare className="h-4 w-4" />}
+                {isScreenSharing ? "Stop sharing" : "Share screen"}
+              </Button>
+              <Button variant="secondary" className="h-9 px-3" onClick={() => void switchMode()} disabled={isScreenSharing}>
                 {active.mode === "audio" ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                 {active.mode === "audio" ? "Switch to video" : "Switch to audio"}
               </Button>

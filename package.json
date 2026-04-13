@@ -20,6 +20,7 @@
     "react": "latest",
     "react-dom": "latest",
     "react-hook-form": "latest",
+    "web-push": "^3.6.7",
     "ws": "latest",
     "zod": "latest",
     "zustand": "latest"
@@ -29,6 +30,7 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "latest",
     "autoprefixer": "latest",
     "eslint": "latest",

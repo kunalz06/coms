@@ -54,16 +54,17 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = {};
   }
+  const isMessage = payload.type === "message";
   const options = {
-    body: payload.body ?? "Open COMMS to answer.",
+    body: payload.body ?? (isMessage ? "Open COMMS to read your unread chat." : "Open COMMS to answer."),
     icon: "/favicon.ico",
     badge: "/favicon.ico",
-    tag: payload.tag ?? "comms-incoming-call",
-    requireInteraction: true,
+    tag: payload.tag ?? (isMessage ? "comms-unread-chat" : "comms-incoming-call"),
+    requireInteraction: !isMessage,
     data: { url: payload.url ?? "/app" }
   };
 
-  event.waitUntil(self.registration.showNotification(payload.title ?? "Incoming COMMS call", options));
+  event.waitUntil(self.registration.showNotification(payload.title ?? (isMessage ? "Unread COMMS chat" : "Incoming COMMS call"), options));
 });
 
 self.addEventListener("notificationclick", (event) => {

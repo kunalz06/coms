@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
+import { Maximize2, Mic, MicOff, Minimize2, PhoneOff, ScreenShare, ScreenShareOff, Video, VideoOff } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { useNotifications } from "@/features/notifications/notification-provider";
 import { CALL_TIMEOUT_MS, canTransitionCall, readableCallStatus } from "@/lib/call-state";
-import { getCallMedia, getVideoStream } from "@/lib/media-devices";
+import { getCallMedia, getScreenShareStream, getVideoStream } from "@/lib/media-devices";
 import { signalingUrl, warmSignalingServer } from "@/lib/signaling-url";
 import { getProfile } from "@/services/profile-service";
 import type { CallMode, CallStatus, SignalingMessage, UserProfile } from "@/types";
@@ -75,6 +75,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const socketRef = useRef<WebSocket | null>(null);
   const handleMessageRef = useRef<(event: MessageEvent<string>) => void>(() => undefined);
   const peerRef = useRef<RTCPeerConnection | null>(null);
+  const videoSenderRef = useRef<RTCRtpSender | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const pendingOfferRef = useRef<Extract<SignalingMessage, { type: "call-offer" }> | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -84,6 +85,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const shouldReconnectRef = useRef(true);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
+  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const screenSharePreviousModeRef = useRef<CallMode>("audio");
+  const restoreCameraAfterShareRef = useRef(false);
   const callTimeoutRef = useRef<number | null>(null);
   const [status, setCallStatus] = useState<CallStatus>("idle");
   const [mode, setMode] = useState<CallMode>("audio");
@@ -93,6 +97,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isCallMinimized, setIsCallMinimized] = useState(false);
   const statusRef = useRef(status);
   const activeRef = useRef(active);
   const incomingRef = useRef(incoming);
@@ -132,8 +138,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     incomingRef.current = incoming;
   }, [incoming]);
 
-  useEffect(() => attachStream(localStream, localVideoRef.current), [localStream]);
-  useEffect(() => attachStream(remoteStream, remoteVideoRef.current), [remoteStream]);
+  useEffect(() => attachStream(localStream, localVideoRef.current), [isCallMinimized, localStream]);
+  useEffect(() => attachStream(remoteStream, remoteVideoRef.current), [isCallMinimized, remoteStream]);
   useEffect(() => {
     localStreamRef.current = localStream;
   }, [localStream]);
@@ -211,11 +217,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (hadCallState && statusRef.current !== "idle" && statusRef.current !== "ending") {
         transitionTo("ending");
       }
+      if (screenTrackRef.current) {
+        screenTrackRef.current.onended = null;
+        screenTrackRef.current.stop();
+        screenTrackRef.current = null;
+      }
       peerRef.current?.getSenders().forEach((sender) => sender.track?.stop());
       peerRef.current?.close();
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
       peerRef.current = null;
+      videoSenderRef.current = null;
       pendingCandidatesRef.current = [];
       pendingOfferRef.current = null;
       localStreamRef.current = null;
@@ -227,6 +239,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setMode("audio");
       setMicEnabled(true);
       setCameraEnabled(true);
+      setIsScreenSharing(false);
+      setIsCallMinimized(false);
       if (callId) {
         await updateCallSession(callId, {
           status: reason,
@@ -310,6 +324,30 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [clearCallTimeout, resetCall, sendSignal, transitionTo, updateCallSession, user]
   );
 
+  const replaceOutgoingVideoTrack = useCallback(async (track: MediaStreamTrack | null, stream: MediaStream | null) => {
+    const peer = peerRef.current;
+    if (!peer || !stream) return;
+    const existingSender = videoSenderRef.current;
+    if (existingSender && peer.getSenders().includes(existingSender)) {
+      await existingSender.replaceTrack(track);
+      if (!track) {
+        peer.removeTrack(existingSender);
+        videoSenderRef.current = null;
+      }
+      return;
+    }
+    if (track) videoSenderRef.current = peer.addTrack(track, stream);
+  }, []);
+
+  const renegotiateActiveCall = useCallback(async () => {
+    const call = activeRef.current;
+    const peer = peerRef.current;
+    if (!call || !peer || !user) return;
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    sendSignal({ type: "call-offer", callId: call.callId, from: user.uid, to: call.peer.id, offer });
+  }, [sendSignal, user]);
+
   const addPendingCandidates = useCallback(async () => {
     const peer = peerRef.current;
     if (!peer?.remoteDescription) return;
@@ -378,7 +416,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
       transitionTo("acquiring_media");
       const { stream, effectiveMode } = await getMedia(incoming.mode);
       const peer = createPeer(incoming.callId, incoming.from.id);
-      stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+      stream.getTracks().forEach((track) => {
+        const sender = peer.addTrack(track, stream);
+        if (track.kind === "video") videoSenderRef.current = sender;
+      });
       const nextActive = { callId: incoming.callId, peer: incoming.from, conversationId: incoming.conversationId, mode: effectiveMode };
       setActive(nextActive);
       activeRef.current = nextActive;
@@ -527,7 +568,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
         transitionTo("acquiring_media");
         const { stream, effectiveMode } = await getMedia(nextMode);
         const connection = createPeer(callId, peer.id);
-        stream.getTracks().forEach((track) => connection.addTrack(track, stream));
+        stream.getTracks().forEach((track) => {
+          const sender = connection.addTrack(track, stream);
+          if (track.kind === "video") videoSenderRef.current = sender;
+        });
         const nextActive = { callId, peer, conversationId, mode: effectiveMode };
         setActive(nextActive);
         activeRef.current = nextActive;
@@ -558,16 +602,100 @@ export function CallProvider({ children }: { children: ReactNode }) {
     });
   }, [localStream]);
 
+  const stopScreenShare = useCallback(
+    async (restoreCamera = true) => {
+      const screenTrack = screenTrackRef.current;
+      const stream = localStreamRef.current;
+      if (!screenTrack || !stream) return;
+
+      screenTrack.onended = null;
+      stream.removeTrack(screenTrack);
+      if (screenTrack.readyState !== "ended") screenTrack.stop();
+      screenTrackRef.current = null;
+      setIsScreenSharing(false);
+
+      let restoredCamera = false;
+      if (restoreCamera && restoreCameraAfterShareRef.current) {
+        try {
+          const cameraStream = await getVideoStream();
+          const [cameraTrack] = cameraStream.getVideoTracks();
+          stream.addTrack(cameraTrack);
+          await replaceOutgoingVideoTrack(cameraTrack, stream);
+          setCameraEnabled(true);
+          setMode("video");
+          restoredCamera = true;
+        } catch {
+          showToast({ variant: "error", title: "Camera unavailable", description: "Screen sharing stopped, but the camera could not be restored." });
+        }
+      }
+
+      if (!restoredCamera) {
+        await replaceOutgoingVideoTrack(null, stream);
+        setCameraEnabled(false);
+        setMode(screenSharePreviousModeRef.current === "audio" ? "audio" : "video");
+      }
+
+      const nextStream = new MediaStream(stream.getTracks());
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      await renegotiateActiveCall();
+    },
+    [renegotiateActiveCall, replaceOutgoingVideoTrack, showToast]
+  );
+
+  const toggleScreenShare = useCallback(async () => {
+    const stream = localStreamRef.current;
+    const call = activeRef.current;
+    if (!stream || !call) return;
+
+    if (isScreenSharing) {
+      await stopScreenShare(true);
+      return;
+    }
+
+    try {
+      const displayStream = await getScreenShareStream();
+      const [screenTrack] = displayStream.getVideoTracks();
+      if (!screenTrack) throw new Error("No screen track was selected.");
+
+      screenSharePreviousModeRef.current = mode;
+      restoreCameraAfterShareRef.current = mode === "video" && cameraEnabled;
+      stream.getVideoTracks().forEach((track) => {
+        stream.removeTrack(track);
+        track.stop();
+      });
+      stream.addTrack(screenTrack);
+      screenTrackRef.current = screenTrack;
+      screenTrack.onended = () => void stopScreenShare(true);
+
+      await replaceOutgoingVideoTrack(screenTrack, stream);
+      const nextStream = new MediaStream(stream.getTracks());
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      setMode("video");
+      setCameraEnabled(false);
+      setIsScreenSharing(true);
+      await renegotiateActiveCall();
+    } catch (error) {
+      showToast({
+        variant: "error",
+        title: "Screen sharing unavailable",
+        description: error instanceof Error ? error.message : "Your browser did not allow screen sharing."
+      });
+    }
+  }, [cameraEnabled, isScreenSharing, mode, renegotiateActiveCall, replaceOutgoingVideoTrack, showToast, stopScreenShare]);
+
   const toggleCamera = useCallback(async () => {
     const call = activeRef.current;
     const peer = peerRef.current;
-    if (!call || !peer || !user || !localStream || mode !== "video") return;
+    if (!call || !peer || !user || !localStream || mode !== "video" || isScreenSharing) return;
 
     try {
       if (cameraEnabled) {
         localStream.getVideoTracks().forEach((track) => {
           const sender = peer.getSenders().find((item) => item.track === track);
           if (sender) peer.removeTrack(sender);
+          if (videoSenderRef.current === sender) videoSenderRef.current = null;
           localStream.removeTrack(track);
           track.stop();
         });
@@ -576,31 +704,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const videoStream = await getVideoStream();
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
-        peer.addTrack(track, localStream);
+        videoSenderRef.current = peer.addTrack(track, localStream);
         setCameraEnabled(true);
       }
 
       const nextStream = new MediaStream(localStream.getTracks());
       localStreamRef.current = nextStream;
       setLocalStream(nextStream);
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      sendSignal({ type: "call-offer", callId: call.callId, from: user.uid, to: call.peer.id, offer });
+      await renegotiateActiveCall();
     } catch {
       showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to turn video on." });
     }
-  }, [cameraEnabled, localStream, mode, sendSignal, showToast, user]);
+  }, [cameraEnabled, isScreenSharing, localStream, mode, renegotiateActiveCall, showToast, user]);
 
   const switchMode = useCallback(async () => {
     const call = activeRef.current;
     const peer = peerRef.current;
-    if (!call || !peer || !user || !localStream) return;
+    if (!call || !peer || !user || !localStream || isScreenSharing) return;
     try {
       if (mode === "audio") {
         const videoStream = await getVideoStream();
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
-        peer.addTrack(track, localStream);
+        videoSenderRef.current = peer.addTrack(track, localStream);
         setMode("video");
         setCameraEnabled(true);
         const nextStream = new MediaStream(localStream.getTracks());
@@ -612,6 +738,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           localStream.removeTrack(track);
           const sender = peer.getSenders().find((item) => item.track === track);
           if (sender) peer.removeTrack(sender);
+          if (videoSenderRef.current === sender) videoSenderRef.current = null;
         });
         setMode("audio");
         setCameraEnabled(false);
@@ -619,13 +746,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
         localStreamRef.current = nextStream;
         setLocalStream(nextStream);
       }
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      sendSignal({ type: "call-offer", callId: call.callId, from: user.uid, to: call.peer.id, offer });
+      await renegotiateActiveCall();
     } catch {
       showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to switch to video." });
     }
-  }, [localStream, mode, sendSignal, showToast, user]);
+  }, [isScreenSharing, localStream, mode, renegotiateActiveCall, showToast, user]);
 
   const value = useMemo(() => ({ status, mode, startCall }), [mode, startCall, status]);
 
@@ -650,7 +775,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
         ) : null}
       </Modal>
 
-      {active ? (
+      {active && isCallMinimized ? (
+        <div className="fixed bottom-4 left-1/2 z-40 w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 rounded-lg border border-white/15 bg-neutral-950 px-3 py-3 text-white shadow-soft sm:bottom-5">
+          <video ref={remoteVideoRef} autoPlay playsInline className="hidden" />
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsCallMinimized(false)}>
+              <Avatar name={active.peer.full_name} src={active.peer.avatar_url} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold">{active.peer.full_name}</span>
+                <span className="block truncate text-xs text-white/65">{readableCallStatus(status)}</span>
+              </span>
+            </button>
+            <Button variant="secondary" className="h-9 px-3" onClick={() => setIsCallMinimized(false)}>
+              <Maximize2 className="h-4 w-4" />
+              Open
+            </Button>
+            <Button variant="danger" className="h-9 px-3" onClick={() => void endCall()}>
+              <PhoneOff className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {active && !isCallMinimized ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/70 p-0 backdrop-blur-sm sm:p-4">
           <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/15 bg-neutral-950 text-white shadow-soft sm:h-[min(760px,calc(100vh-2rem))] sm:w-[min(1040px,calc(100vw-2rem))] sm:rounded-lg">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
@@ -661,10 +808,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   <p className="capitalize text-sm text-white/60">{readableCallStatus(status)}</p>
                 </div>
               </div>
-              <Button variant="danger" onClick={() => void endCall()}>
-                <PhoneOff className="h-4 w-4" />
-                End
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" className="h-9 px-3" onClick={() => setIsCallMinimized(true)}>
+                  <Minimize2 className="h-4 w-4" />
+                  Minimize
+                </Button>
+                <Button variant="danger" className="h-9 px-3" onClick={() => void endCall()}>
+                  <PhoneOff className="h-4 w-4" />
+                  End
+                </Button>
+              </div>
             </div>
             <div className="grid min-h-0 flex-1 gap-3 p-3 md:grid-cols-[1fr_280px]">
               <div className="relative overflow-hidden rounded-lg bg-black">
@@ -684,8 +837,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Button variant="secondary" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
-                  <Button variant="secondary" onClick={() => void toggleCamera()} disabled={mode === "audio"}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
-                  <Button variant="secondary" className="col-span-2" onClick={() => void switchMode()}>
+                  <Button variant="secondary" onClick={() => void toggleCamera()} disabled={mode === "audio" || isScreenSharing}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
+                  <Button variant="secondary" className="col-span-2" onClick={() => void toggleScreenShare()}>
+                    {isScreenSharing ? <ScreenShareOff className="h-4 w-4" /> : <ScreenShare className="h-4 w-4" />}
+                    {isScreenSharing ? "Stop sharing" : "Share screen"}
+                  </Button>
+                  <Button variant="secondary" className="col-span-2" onClick={() => void switchMode()} disabled={isScreenSharing}>
                     {mode === "audio" ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                     {mode === "audio" ? "Switch to video" : "Switch to audio"}
                   </Button>
