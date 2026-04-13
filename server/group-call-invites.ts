@@ -1,4 +1,5 @@
 import type { WebSocket } from "ws";
+import { randomUUID } from "node:crypto";
 
 const MAX_GROUP_CALL_PARTICIPANTS = 10;
 
@@ -16,6 +17,7 @@ type GroupCallMessage =
   | { type: "group-call-ice-candidate"; from: string; to: string; conversationId: string; candidate: unknown };
 
 type GroupCallSession = {
+  id: string;
   conversationId: string;
   hostId: string;
   mode: "audio" | "video";
@@ -30,13 +32,44 @@ type ListMembers = (conversationId: string) => Promise<string[]>;
 type CanEndCall = (conversationId: string, userId: string) => Promise<boolean>;
 type IsUserOnline = (userId: string) => boolean;
 type SendPush = (userId: string) => Promise<boolean>;
+type PersistGroupCall = {
+  start: (session: GroupCallSession) => Promise<void>;
+  join: (session: GroupCallSession, userId: string) => Promise<void>;
+  leave: (session: GroupCallSession, userId: string) => Promise<void>;
+  end: (session: GroupCallSession, status: "ended" | "failed", reason?: string) => Promise<void>;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 512;
+}
+
+function isMode(value: unknown): value is "audio" | "video" {
+  return value === "audio" || value === "video";
+}
+
 export function isGroupCallMessage(message: unknown): message is GroupCallMessage {
-  return isRecord(message) && typeof message.type === "string" && message.type.startsWith("group-call-");
+  if (!isRecord(message) || typeof message.type !== "string" || !message.type.startsWith("group-call-")) return false;
+  if (!isNonEmptyString(message.from) || !isNonEmptyString(message.conversationId)) return false;
+  switch (message.type) {
+    case "group-call-start":
+    case "group-call-join":
+      return isNonEmptyString(message.requestId) && isMode(message.mode);
+    case "group-call-leave":
+    case "group-call-end":
+      return message.requestId === undefined || isNonEmptyString(message.requestId);
+    case "group-call-offer":
+      return isNonEmptyString(message.to) && "offer" in message;
+    case "group-call-answer":
+      return isNonEmptyString(message.to) && "answer" in message;
+    case "group-call-ice-candidate":
+      return isNonEmptyString(message.to) && "candidate" in message;
+    default:
+      return false;
+  }
 }
 
 function toErrorMessage(error: unknown) {
@@ -53,7 +86,8 @@ export class GroupCallInviteManager {
     private readonly canEndCall: CanEndCall,
     private readonly sendToUser: SendToUser,
     private readonly isUserOnline: IsUserOnline,
-    private readonly sendPush: SendPush
+    private readonly sendPush: SendPush,
+    private readonly persist?: PersistGroupCall
   ) {}
 
   async handle(socket: ClientSocket, message: GroupCallMessage) {
@@ -106,6 +140,7 @@ export class GroupCallInviteManager {
     let session = this.sessions.get(message.conversationId);
     if (!session) {
       session = {
+        id: randomUUID(),
         conversationId: message.conversationId,
         hostId: message.from,
         mode: message.mode,
@@ -113,14 +148,17 @@ export class GroupCallInviteManager {
         participantIds: new Set(),
         startedAt: Date.now()
       };
-      this.sessions.set(message.conversationId, session);
+      const createdSession = session;
+      this.sessions.set(message.conversationId, createdSession);
+      await this.persist?.start(createdSession).catch((error) => console.error("Group call start persistence failed", { conversationId: createdSession.conversationId, message: toErrorMessage(error) }));
     }
 
-    this.joinSession(socket, session, message.from, message.requestId);
+    const activeSession = session;
+    await this.joinSession(socket, activeSession, message.from, message.requestId);
 
     for (const userId of memberIds) {
       if (userId !== message.from) {
-        this.sendToUser(userId, { type: "group-call-invite", conversationId: message.conversationId, from: message.from, mode: session.mode });
+        this.sendToUser(userId, { type: "group-call-invite", conversationId: message.conversationId, from: message.from, mode: activeSession.mode });
         if (!this.isUserOnline(userId)) void this.sendPush(userId);
       }
     }
@@ -130,18 +168,22 @@ export class GroupCallInviteManager {
     const session = this.sessions.get(message.conversationId);
     if (!session) throw new Error("This group call has ended.");
     await this.allowedMemberIds(message.conversationId, message.from);
-    this.joinSession(socket, session, message.from, message.requestId);
+    await this.joinSession(socket, session, message.from, message.requestId);
   }
 
-  private joinSession(socket: ClientSocket, session: GroupCallSession, userId: string, requestId: string) {
+  private async joinSession(socket: ClientSocket, session: GroupCallSession, userId: string, requestId: string) {
     const existingParticipantIds = [...session.participantIds].filter((participantId) => participantId !== userId);
     if (!session.participantIds.has(userId) && session.participantIds.size >= MAX_GROUP_CALL_PARTICIPANTS) {
       throw new Error("Group calls are limited to 10 people in this MVP.");
     }
 
+    const wasAlreadyParticipant = session.participantIds.has(userId);
     session.participantIds.add(userId);
     session.invitedUserIds.add(userId);
     this.socketsByUser.set(socket, session.conversationId);
+    if (!wasAlreadyParticipant) {
+      await this.persist?.join(session, userId).catch((error) => console.error("Group call join persistence failed", { conversationId: session.conversationId, userId, message: toErrorMessage(error) }));
+    }
 
     this.respond(userId, requestId, true, {
       conversationId: session.conversationId,
@@ -180,6 +222,7 @@ export class GroupCallInviteManager {
 
     this.notifyInvitees(session, { type: "group-call-ended", conversationId: message.conversationId, userId: message.from, endedBy: message.from });
     this.respond(message.from, message.requestId, true, { ended: true });
+    await this.persist?.end(session, "ended").catch((error) => console.error("Group call end persistence failed", { conversationId: session.conversationId, message: toErrorMessage(error) }));
     this.sessions.delete(message.conversationId);
   }
 
@@ -190,6 +233,7 @@ export class GroupCallInviteManager {
       return;
     }
     session.participantIds.delete(userId);
+    void this.persist?.leave(session, userId).catch((error) => console.error("Group call leave persistence failed", { conversationId, userId, message: toErrorMessage(error) }));
     session.participantIds.forEach((participantId) => {
       this.sendToUser(participantId, { type: "group-call-peer-left", conversationId, userId });
     });
@@ -215,6 +259,7 @@ export class GroupCallInviteManager {
     }
     this.notifyInvitees(session, { type: "group-call-ended", conversationId, userId });
     this.respond(userId, requestId, true, { left: true, ended: true });
+    void this.persist?.end(session, "ended").catch((error) => console.error("Group call end persistence failed", { conversationId, message: toErrorMessage(error) }));
     this.sessions.delete(conversationId);
   }
 
