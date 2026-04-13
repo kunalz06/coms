@@ -3,10 +3,13 @@ import {
   decryptToken,
   encryptToken,
   fetchArchiveFromGoogleDrive,
+  fetchBinaryFromGoogleDrive,
   refreshGoogleDriveAccessToken,
-  uploadArchiveToGoogleDrive
+  uploadArchiveToGoogleDrive,
+  uploadBinaryToGoogleDrive
 } from "@/lib/google-drive";
-import type { ArchiveBatch, ArchiveFilePayload, Attachment, BackupPreference, Message } from "@/types";
+import { safeFileName } from "@/lib/utils";
+import type { ArchiveBatch, ArchivedAttachmentPayload, ArchivedMessagePayload, ArchiveFilePayload, Attachment, BackupPreference, Message } from "@/types";
 
 type InternalBackupPreference = BackupPreference & {
   drive_access_token_enc: string | null;
@@ -24,7 +27,8 @@ type MessageWithAttachments = Message & {
   attachments?: Attachment[];
 };
 
-const ARCHIVE_VERSION = 1;
+const ARCHIVE_VERSION = 2;
+const MAX_ARCHIVE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 function archiveDateKey(createdAt: string) {
   return createdAt.slice(0, 10);
@@ -32,6 +36,70 @@ function archiveDateKey(createdAt: string) {
 
 function archiveFileName(conversationId: string, batchKey: string) {
   return `comms-${conversationId}-${batchKey}.json`;
+}
+
+function attachmentBackupFileName(attachment: Attachment) {
+  return `comms-attachment-${attachment.id}-${safeFileName(attachment.file_name)}`;
+}
+
+function isAllowedCloudinaryUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+    return url.protocol === "https:" && url.hostname === "res.cloudinary.com" && (!cloudName || url.pathname.startsWith(`/${cloudName}/`));
+  } catch {
+    return false;
+  }
+}
+
+async function fetchAttachmentBody(attachment: Attachment) {
+  if (!isAllowedCloudinaryUrl(attachment.url)) throw new Error(`Attachment source is not allowed for ${attachment.file_name}.`);
+  if (attachment.size_bytes > MAX_ARCHIVE_ATTACHMENT_BYTES) throw new Error(`Attachment is too large to archive: ${attachment.file_name}.`);
+  const response = await fetch(attachment.url);
+  if (!response.ok) throw new Error(`Could not fetch attachment for backup: ${attachment.file_name}.`);
+  const body = await response.arrayBuffer();
+  if (body.byteLength > MAX_ARCHIVE_ATTACHMENT_BYTES) throw new Error(`Attachment is too large to archive: ${attachment.file_name}.`);
+  return body;
+}
+
+async function archiveAttachmentBinary(accessToken: string, attachment: Attachment): Promise<ArchivedAttachmentPayload> {
+  const body = await fetchAttachmentBody(attachment);
+  const uploaded = await uploadBinaryToGoogleDrive(accessToken, {
+    fileName: attachmentBackupFileName(attachment),
+    mimeType: attachment.mime_type || "application/octet-stream",
+    body
+  });
+
+  return {
+    ...attachment,
+    original_url: attachment.url,
+    backup: {
+      provider: "google_drive",
+      file_id: uploaded.fileId,
+      file_name: uploaded.fileName,
+      mime_type: uploaded.mimeType,
+      size_bytes: uploaded.sizeBytes,
+      backed_up_at: new Date().toISOString()
+    }
+  };
+}
+
+async function archiveMessagePayload(accessToken: string, message: MessageWithAttachments): Promise<ArchivedMessagePayload> {
+  const attachments = await Promise.all((message.attachments ?? []).map((attachment) => archiveAttachmentBinary(accessToken, attachment)));
+  return {
+    id: message.id,
+    conversation_id: message.conversation_id,
+    sender_id: message.sender_id,
+    kind: message.kind,
+    content: message.content,
+    status: message.status,
+    deleted_for_everyone_at: message.deleted_for_everyone_at,
+    deleted_by: message.deleted_by,
+    edited_at: message.edited_at,
+    created_at: message.created_at,
+    updated_at: message.updated_at,
+    attachments
+  };
 }
 
 async function getInternalPreference(supabase: SupabaseClient, userId: string) {
@@ -104,9 +172,24 @@ async function getConversationIdsForUser(supabase: SupabaseClient, userId: strin
 }
 
 async function getAlreadyArchivedMessageIds(supabase: SupabaseClient, userId: string) {
-  const { data, error } = await supabase.from("message_archives").select("message_id").eq("user_id", userId).returns<Array<{ message_id: string }>>();
+  const { data, error } = await supabase
+    .from("message_archives")
+    .select("message_id, archive_batch_id")
+    .eq("user_id", userId)
+    .returns<Array<{ message_id: string; archive_batch_id: string }>>();
   if (error) throw error;
-  return new Set((data ?? []).map((item) => item.message_id));
+  const batchIds = Array.from(new Set((data ?? []).map((item) => item.archive_batch_id)));
+  if (!batchIds.length) return new Set<string>();
+  const { data: batches, error: batchError } = await supabase
+    .from("archive_batches")
+    .select("id")
+    .in("id", batchIds)
+    .eq("status", "success")
+    .gte("archive_version", ARCHIVE_VERSION)
+    .returns<Array<{ id: string }>>();
+  if (batchError) throw batchError;
+  const currentArchiveBatchIds = new Set((batches ?? []).map((batch) => batch.id));
+  return new Set((data ?? []).filter((item) => currentArchiveBatchIds.has(item.archive_batch_id)).map((item) => item.message_id));
 }
 
 async function getMessagesNeedingBackup(supabase: SupabaseClient, userId: string) {
@@ -239,20 +322,7 @@ export async function runBackupForUser(supabase: SupabaseClient, userId: string)
         batchId: batch.id,
         batchKey: group.batchKey,
         generatedAt: new Date().toISOString(),
-        messages: group.messages.map((message) => ({
-          id: message.id,
-          conversation_id: message.conversation_id,
-          sender_id: message.sender_id,
-          kind: message.kind,
-          content: message.content,
-          status: message.status,
-          deleted_for_everyone_at: message.deleted_for_everyone_at,
-          deleted_by: message.deleted_by,
-          edited_at: message.edited_at,
-          created_at: message.created_at,
-          updated_at: message.updated_at,
-          attachments: message.attachments ?? []
-        }))
+        messages: await Promise.all(group.messages.map((message) => archiveMessagePayload(accessToken, message)))
       };
       const uploaded = await uploadArchiveToGoogleDrive(accessToken, archiveFileName(group.conversationId, group.batchKey), archive);
       const completedAt = new Date().toISOString();
@@ -328,6 +398,45 @@ export async function restoreConversationArchive(supabase: SupabaseClient, userI
   }
 
   return restored;
+}
+
+export async function restoreArchivedAttachment(
+  supabase: SupabaseClient,
+  userId: string,
+  values: { conversationId: string; messageId: string; attachmentId: string }
+) {
+  const preference = await getInternalPreference(supabase, userId);
+  if (!preference?.enabled || preference.provider !== "google_drive") throw new Error("Google Drive backup is not enabled.");
+  const accessToken = await getDriveAccessToken(supabase, preference);
+
+  const { data: batches, error } = await supabase
+    .from("archive_batches")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("conversation_id", values.conversationId)
+    .eq("status", "success")
+    .not("provider_file_id", "is", null)
+    .order("batch_key", { ascending: false })
+    .returns<ArchiveBatch[]>();
+  if (error) throw error;
+
+  for (const batch of batches ?? []) {
+    const archive = await fetchArchiveFromGoogleDrive(accessToken, batch.provider_file_id!);
+    const message = archive.messages.find((item) => item.id === values.messageId);
+    const attachment = message?.attachments?.find((item) => item.id === values.attachmentId);
+    if (!attachment) continue;
+    const backup = attachment.backup;
+    if (!backup?.file_id) throw new Error("This archived attachment does not have a Drive backup.");
+    const response = await fetchBinaryFromGoogleDrive(accessToken, backup.file_id);
+    return {
+      body: response.body,
+      mimeType: backup.mime_type || attachment.mime_type || response.headers.get("content-type") || "application/octet-stream",
+      fileName: safeFileName(attachment.file_name || backup.file_name),
+      sizeBytes: backup.size_bytes
+    };
+  }
+
+  throw new Error("Archived attachment was not found.");
 }
 
 async function getConversationParticipants(supabase: SupabaseClient, conversationId: string) {

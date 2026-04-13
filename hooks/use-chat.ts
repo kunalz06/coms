@@ -17,7 +17,7 @@ import {
   toggleMessageReaction
 } from "@/services/chat-service";
 import { uploadToCloudinary, type CloudinaryUploadResult } from "@/services/upload-service";
-import type { ChatTarget, Conversation, Message, MessageKind, MessageReactionKind, UploadKind } from "@/types";
+import type { ArchivedAttachmentPayload, Attachment, ChatTarget, Conversation, Message, MessageKind, MessageReactionKind, UploadKind } from "@/types";
 import { useAuth } from "@/features/auth/auth-provider";
 
 const REFRESH_INTERVAL_MS = 10_000;
@@ -30,9 +30,30 @@ export function useChat(target: ChatTarget | null) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const conversationId = conversation?.id ?? null;
 
+  const toRestoredAttachment = useCallback(
+    (nextConversationId: string, messageId: string, attachment: ArchivedAttachmentPayload, token: string): Attachment => {
+      const backupUrl = attachment.backup
+        ? `/api/backup/attachment?conversationId=${encodeURIComponent(nextConversationId)}&messageId=${encodeURIComponent(messageId)}&attachmentId=${encodeURIComponent(attachment.id)}&token=${encodeURIComponent(token)}`
+        : attachment.original_url;
+      return {
+        id: attachment.id,
+        message_id: attachment.message_id,
+        url: backupUrl,
+        public_id: attachment.public_id,
+        resource_type: attachment.resource_type,
+        file_name: attachment.file_name,
+        mime_type: attachment.mime_type,
+        size_bytes: attachment.size_bytes,
+        created_at: attachment.created_at
+      };
+    },
+    []
+  );
+
   const hydrateArchivedMessages = useCallback(
     async (nextConversationId: string, nextMessages: Message[]) => {
       if (!nextMessages.some((message) => message.content_redacted_at)) return nextMessages;
+      const token = await getIdToken();
       const mergeArchived = (archivedMessages: Awaited<ReturnType<typeof restoreArchivedMessages>>) => {
         const archivedById = new Map(archivedMessages.map((message) => [message.id, message]));
         return nextMessages.map((message) => {
@@ -41,7 +62,11 @@ export function useChat(target: ChatTarget | null) {
           return {
             ...message,
             content: message.content ?? archived.content,
-            attachments: message.content_redacted_at ? archived.attachments : message.attachments?.length ? message.attachments : archived.attachments
+            attachments: message.content_redacted_at
+              ? archived.attachments?.map((attachment) => toRestoredAttachment(nextConversationId, message.id, attachment, token))
+              : message.attachments?.length
+                ? message.attachments
+                : archived.attachments?.map((attachment) => toRestoredAttachment(nextConversationId, message.id, attachment, token))
           };
         });
       };
@@ -50,7 +75,6 @@ export function useChat(target: ChatTarget | null) {
       if (cached) return mergeArchived(cached);
 
       try {
-        const token = await getIdToken();
         const restored = await restoreArchivedMessages(token, nextConversationId);
         await setCachedArchiveMessages(nextConversationId, restored);
         return mergeArchived(restored);
@@ -58,7 +82,7 @@ export function useChat(target: ChatTarget | null) {
         return nextMessages;
       }
     },
-    [getIdToken]
+    [getIdToken, toRestoredAttachment]
   );
 
   const triggerBackgroundBackup = useCallback(() => {
@@ -192,6 +216,19 @@ export function useChat(target: ChatTarget | null) {
   const getDownloadUrl = useCallback(
     async (url: string) => {
       const token = await getIdToken();
+      if (url.startsWith("/api/backup/attachment")) {
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+          throw new Error(payload?.message ?? "Could not restore this archived file.");
+        }
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
+      }
       const response = await fetch(`/api/files/download?url=${encodeURIComponent(url)}`, {
         headers: {
           Authorization: `Bearer ${token}`

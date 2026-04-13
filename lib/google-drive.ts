@@ -207,6 +207,43 @@ export async function uploadArchiveToGoogleDrive(accessToken: string, fileName: 
   return { fileId: payload.id, fileName: payload.name ?? fileName };
 }
 
+export async function uploadBinaryToGoogleDrive(accessToken: string, values: { fileName: string; mimeType: string; body: ArrayBuffer }) {
+  const boundary = `comms-${crypto.randomUUID()}`;
+  const metadata = {
+    name: values.fileName,
+    parents: ["appDataFolder"],
+    mimeType: values.mimeType
+  };
+  const prefix = [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    `Content-Type: ${values.mimeType}`,
+    "",
+    ""
+  ].join("\r\n");
+  const suffix = `\r\n--${boundary}--\r\n`;
+  const body = new Blob([prefix, values.body, suffix], { type: `multipart/related; boundary=${boundary}` });
+  const response = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,mimeType,size`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": `multipart/related; boundary=${boundary}`
+    },
+    body
+  });
+  const payload = (await response.json().catch(() => ({}))) as { id?: string; name?: string; mimeType?: string; size?: string; error?: { message?: string } };
+  if (!response.ok || !payload.id) throw new Error(payload.error?.message ?? "Google Drive attachment upload failed.");
+  return {
+    fileId: payload.id,
+    fileName: payload.name ?? values.fileName,
+    mimeType: payload.mimeType ?? values.mimeType,
+    sizeBytes: Number(payload.size ?? values.body.byteLength)
+  };
+}
+
 export async function fetchArchiveFromGoogleDrive(accessToken: string, fileId: string) {
   const response = await fetch(`${DRIVE_FILE_URL}/${encodeURIComponent(fileId)}?alt=media`, {
     headers: { authorization: `Bearer ${accessToken}` }
@@ -214,4 +251,13 @@ export async function fetchArchiveFromGoogleDrive(accessToken: string, fileId: s
   if (response.status === 404) throw new Error("This Google Drive archive file is missing.");
   if (!response.ok) throw new Error("Could not restore this Google Drive archive.");
   return (await response.json()) as ArchiveFilePayload;
+}
+
+export async function fetchBinaryFromGoogleDrive(accessToken: string, fileId: string) {
+  const response = await fetch(`${DRIVE_FILE_URL}/${encodeURIComponent(fileId)}?alt=media`, {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+  if (response.status === 404) throw new Error("This Google Drive attachment file is missing.");
+  if (!response.ok || !response.body) throw new Error("Could not restore this Google Drive attachment.");
+  return response;
 }

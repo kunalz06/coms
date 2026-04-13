@@ -163,11 +163,23 @@ export type ArchivedMessagePayload = {
   edited_at: string | null;
   created_at: string;
   updated_at: string;
-  attachments?: Attachment[];
+  attachments?: ArchivedAttachmentPayload[];
+};
+
+export type ArchivedAttachmentPayload = Attachment & {
+  original_url: string;
+  backup: {
+    provider: "google_drive";
+    file_id: string;
+    file_name: string;
+    mime_type: string;
+    size_bytes: number;
+    backed_up_at: string;
+  } | null;
 };
 
 export type ArchiveFilePayload = {
-  version: 1;
+  version: 2;
   provider: "google_drive";
   userId: string;
   conversationId: string;

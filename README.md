@@ -8,7 +8,7 @@ COMMS is a minimal messaging and audio/video calling app.
 - **Firebase Authentication** owns account creation, sign in, persistence, password reset, email updates, password updates, and profile identity.
 - **Supabase** stores user profiles, friends, blocks, conversations, messages, attachments, call logs, and presence metadata. The SQL in `supabase/schema.sql` enables RLS and realtime.
 - **Cloudinary** stores profile pictures, chat images, documents, and voice recordings. Signed uploads are available through `app/api/cloudinary/sign/route.ts`; an unsigned restricted preset can be used for local development.
-- **Google Drive backup** stores user-enabled batched chat archives in the user's app-specific Drive storage. Supabase keeps archive metadata and retention pointers.
+- **Google Drive backup** stores user-enabled batched chat archives and attachment binaries in the user's app-specific Drive storage. Supabase keeps archive metadata and retention pointers.
 - **PWA support** is provided by `app/manifest.ts` and `public/comms-sw.js`, with installability and offline shell caching.
 - **WebRTC** carries direct and small-group call media between peers. The custom Node server in `server/index.ts` uses WebSocket for direct and group-call signaling.
 - **Zustand** stores app UI selection and theme.
@@ -118,6 +118,8 @@ Backup flow:
 - Refresh/access tokens are encrypted server-side before storage in `backup_preferences`.
 - `Backup now` and background backup after sending messages call `/api/backup/run`.
 - Archives are batched by conversation and message date as JSON files.
+- Attachment binaries are uploaded to Google Drive app-specific storage before the JSON batch is marked successful.
+- The JSON archive stores both the original Cloudinary metadata and the Drive attachment file ID.
 - Archive metadata is stored in `archive_batches`; per-user message pointers are stored in `message_archives`.
 
 Restore flow:
@@ -125,13 +127,14 @@ Restore flow:
 - The chat hook loads Supabase messages first.
 - If older message content has been redacted, COMMS checks IndexedDB via `lib/archive-cache.ts`.
 - If not cached, COMMS calls `/api/backup/restore?conversationId=...`, fetches the Drive archive server-side, reconstructs message content, and caches the restored payload locally.
+- Archived images, documents, and voice notes are served through `/api/backup/attachment`, which verifies the Firebase user before streaming the Drive file.
 
 Retention cleanup:
 
 - Call `POST /api/backup/retention` from a scheduler with `Authorization: Bearer $BACKUP_RETENTION_SECRET`.
 - The cleanup job scans messages past `retention_expires_at`.
 - It only redacts message content when every backup-enabled participant has a successful archive pointer for that message.
-- It removes primary `message_attachments` rows for redacted messages after archive coverage exists, while the archive keeps attachment metadata for restore.
+- It removes primary `message_attachments` rows for redacted messages after archive coverage exists, while the archive keeps attachment metadata and Drive binary pointers for restore.
 - It preserves conversation/message metadata and marks skipped or partial messages without deleting conversation structure.
 
 For Render, run the retention endpoint from a cron service or external scheduler every few hours. For local testing:
@@ -202,5 +205,5 @@ npm run start
 - The custom Node server is the simplest stable WebSocket signaling layer. On serverless-only hosting, deploy the signaling server as a separate Node service or use a managed realtime signaling provider.
 - Friend adding is immediate rather than request/accept. The schema can support pending requests later by adding another `friendships.status` value.
 - Uploads include client-side validation and a virus-scan hook placeholder in `services/upload-service.ts`; wire that hook to a malware scanning service before allowing high-risk document types in production.
-- Retention cleanup removes archived attachment references from Supabase, but it does not delete Cloudinary objects yet. Add Cloudinary Admin API deletion once your retention policy for media objects is finalized.
+- Retention cleanup removes archived attachment references from Supabase after Drive binary backup succeeds. It does not delete Cloudinary objects yet; add Cloudinary Admin API deletion once your retention policy for media objects is finalized.
 - Group chats reuse `conversations` with `type = 'group'` plus `conversation_members`, instead of creating parallel group message tables. This keeps direct and group messaging on the same engine.
