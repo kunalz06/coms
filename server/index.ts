@@ -41,6 +41,7 @@ type PushSubscriptionRow = {
 type ClientSocket = WebSocket & {
   userId?: string;
   isAlive?: boolean;
+  messageQueue?: Promise<void>;
 };
 
 const dev = process.env.NODE_ENV !== "production";
@@ -479,7 +480,7 @@ void app.prepare().then(() => {
     });
 
     socket.on("message", (raw) => {
-      void (async () => {
+      socket.messageQueue = (socket.messageQueue ?? Promise.resolve()).then(async () => {
         const message = parseMessage(raw);
         if (!message) {
           send(socket, { type: "error", message: "Invalid signaling message." });
@@ -593,7 +594,10 @@ void app.prepare().then(() => {
         }
         if (routedMessage.type === "call-answer") void updateDirectCallSession(routedMessage.callId, "connecting");
         if (!queuePendingSignal(routedMessage)) forward(routedMessage);
-      })();
+      }).catch((error) => {
+        console.error("Signaling message handling failed", { userId: socket.userId, message: error instanceof Error ? error.message : String(error) });
+        send(socket, { type: "error", message: "Signaling failed. Try the call again." });
+      });
     });
 
     socket.on("close", () => {
