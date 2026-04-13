@@ -1,9 +1,21 @@
 import { createClient } from "@supabase/supabase-js";
+import { firebaseAuth } from "@/lib/firebase";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 let browserSupabase: ReturnType<typeof createClient> | null = null;
 let currentAccessToken: string | null = null;
+
+async function getSupabaseAccessToken() {
+  const currentUser = firebaseAuth.currentUser;
+  if (!currentUser) return currentAccessToken;
+  try {
+    currentAccessToken = await currentUser.getIdToken();
+    return currentAccessToken;
+  } catch {
+    return currentAccessToken;
+  }
+}
 
 if (!supabaseUrl || !supabaseAnonKey) {
   // Keep this non-throwing during static analysis; runtime forms show friendly setup errors.
@@ -15,7 +27,7 @@ export function createBrowserSupabase(accessToken?: string | null) {
 
   if (!browserSupabase) {
     browserSupabase = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "", {
-      accessToken: async () => currentAccessToken,
+      accessToken: getSupabaseAccessToken,
       auth: {
         autoRefreshToken: false,
         persistSession: false,

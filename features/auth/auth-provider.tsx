@@ -2,7 +2,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { User } from "firebase/auth";
-import { onAuthStateChanged, signOut as firebaseSignOut } from "firebase/auth";
+import { onIdTokenChanged, signOut as firebaseSignOut } from "firebase/auth";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { firebaseAuth, ensureFirebasePersistence } from "@/lib/firebase";
 import { createBrowserSupabase } from "@/lib/supabase";
@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     void ensureFirebasePersistence();
-    const unsubscribe = onAuthStateChanged(firebaseAuth, async (nextUser) => {
+    const unsubscribe = onIdTokenChanged(firebaseAuth, async (nextUser) => {
       setLoading(true);
       try {
         if (!nextUser) {
