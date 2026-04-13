@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getMessages, getOrCreateConversation, markConversationRead, sendMessage, toggleMessageReaction } from "@/services/chat-service";
+import {
+  deleteConversationHistoryForMe,
+  deleteMessageForEveryone,
+  deleteMessageForMe,
+  deleteMessageRangeForMe,
+  getMessages,
+  getOrCreateConversation,
+  markConversationRead,
+  sendMessage,
+  toggleMessageReaction
+} from "@/services/chat-service";
 import { uploadToCloudinary, type CloudinaryUploadResult } from "@/services/upload-service";
 import type { ChatTarget, Conversation, Message, MessageKind, MessageReactionKind, UploadKind } from "@/types";
 import { useAuth } from "@/features/auth/auth-provider";
@@ -47,6 +57,7 @@ export function useChat(target: ChatTarget | null) {
     const channel = supabase
       .channel(`chat:${conversationId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "messages", filter: `conversation_id=eq.${conversationId}` }, () => void load({ silent: true }))
+      .on("postgres_changes", { event: "*", schema: "public", table: "message_deletions" }, () => void load({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "message_attachments" }, () => void load({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "message_reactions" }, () => void load({ silent: true }))
       .subscribe();
@@ -76,6 +87,8 @@ export function useChat(target: ChatTarget | null) {
         kind: "text",
         content: trimmed,
         status: "sending",
+        deleted_for_everyone_at: null,
+        deleted_by: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         attachments: []
@@ -155,8 +168,71 @@ export function useChat(target: ChatTarget | null) {
     [load, supabase, user]
   );
 
+  const removeMessageForMe = useCallback(
+    async (messageId: string) => {
+      if (!supabase || !user) throw new Error("Sign in to delete messages.");
+      if (messageId.startsWith("local-")) throw new Error("Wait for the message to finish sending first.");
+      await deleteMessageForMe(supabase, { messageId, userId: user.uid });
+      await load({ silent: true });
+    },
+    [load, supabase, user]
+  );
+
+  const removeMessageForEveryone = useCallback(
+    async (messageId: string) => {
+      if (!supabase || !user) throw new Error("Sign in to delete messages.");
+      if (messageId.startsWith("local-")) throw new Error("Wait for the message to finish sending first.");
+      await deleteMessageForEveryone(supabase, { messageId, userId: user.uid });
+      await load({ silent: true });
+    },
+    [load, supabase, user]
+  );
+
+  const deleteHistoryForMe = useCallback(async () => {
+    if (!supabase || !user || !conversation) throw new Error("Choose a conversation first.");
+    await deleteConversationHistoryForMe(supabase, { conversationId: conversation.id, userId: user.uid });
+    await load({ silent: true });
+  }, [conversation, load, supabase, user]);
+
+  const deleteRangeForMe = useCallback(
+    async (from: string, to: string) => {
+      if (!supabase || !user || !conversation) throw new Error("Choose a conversation first.");
+      await deleteMessageRangeForMe(supabase, { conversationId: conversation.id, userId: user.uid, from, to });
+      await load({ silent: true });
+    },
+    [conversation, load, supabase, user]
+  );
+
   return useMemo(
-    () => ({ conversation, messages, loading, uploadProgress, sendText, sendFile, getDownloadUrl, reactToMessage, reload: load }),
-    [conversation, getDownloadUrl, loading, load, messages, reactToMessage, sendFile, sendText, uploadProgress]
+    () => ({
+      conversation,
+      messages,
+      loading,
+      uploadProgress,
+      sendText,
+      sendFile,
+      getDownloadUrl,
+      reactToMessage,
+      removeMessageForMe,
+      removeMessageForEveryone,
+      deleteHistoryForMe,
+      deleteRangeForMe,
+      reload: load
+    }),
+    [
+      conversation,
+      deleteHistoryForMe,
+      deleteRangeForMe,
+      getDownloadUrl,
+      loading,
+      load,
+      messages,
+      reactToMessage,
+      removeMessageForEveryone,
+      removeMessageForMe,
+      sendFile,
+      sendText,
+      uploadProgress
+    ]
   );
 }

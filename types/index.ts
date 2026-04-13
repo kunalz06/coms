@@ -91,6 +91,8 @@ export type Message = {
   kind: MessageKind;
   content: string | null;
   status: MessageStatus;
+  deleted_for_everyone_at: string | null;
+  deleted_by: string | null;
   created_at: string;
   updated_at: string;
   attachments?: Attachment[];

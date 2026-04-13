@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, MicOff, PhoneOff, Users, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff, PhoneIncoming, Users, Video, VideoOff } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -13,24 +13,30 @@ import { getGroup } from "@/services/group-service";
 import type { CallMode, GroupConversation, UserProfile } from "@/types";
 
 type GroupCallStatus = "idle" | "joining" | "connected" | "failed";
-type GroupCallStartResponse = { mode: CallMode; participantIds?: string[] };
+type GroupCallStartResponse = { mode: CallMode; hostId?: string; participantIds?: string[] };
+type GroupCallAvailablePayload = { conversationId: string; from: string; mode: CallMode; participantCount?: number; startedAt?: number };
+type GroupCallLeaveResponse = GroupCallAvailablePayload & { left: boolean; ended: boolean };
 type GroupCallResponse = { type: "group-call-response"; requestId: string; ok: boolean; data?: unknown; error?: string };
 type GroupCallEvent =
   | { type: "group-call-invite"; conversationId: string; from: string; mode: CallMode }
-  | { type: "group-call-ended"; conversationId: string; userId: string }
+  | ({ type: "group-call-available" } & GroupCallAvailablePayload)
+  | { type: "group-call-ended"; conversationId: string; userId: string; endedBy?: string }
   | { type: "group-call-peer-joined"; conversationId: string; userId: string }
   | { type: "group-call-peer-left"; conversationId: string; userId: string }
   | { type: "group-call-offer"; conversationId: string; from: string; to: string; offer: RTCSessionDescriptionInit }
   | { type: "group-call-answer"; conversationId: string; from: string; to: string; answer: RTCSessionDescriptionInit }
   | { type: "group-call-ice-candidate"; conversationId: string; from: string; to: string; candidate: RTCIceCandidateInit };
-type ActiveGroupCall = { conversation: GroupConversation; mode: CallMode };
+type ActiveGroupCall = { conversation: GroupConversation; mode: CallMode; hostId: string };
 type IncomingGroupCall = { conversation: GroupConversation; caller: UserProfile | null; mode: CallMode };
+type AvailableGroupCall = { conversation: GroupConversation; caller: UserProfile | null; mode: CallMode; participantCount: number; startedAt: number };
 type RemoteParticipant = { userId: string; profile?: UserProfile; stream: MediaStream | null; state: RTCPeerConnectionState | "waiting" };
 type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void };
 type GroupCallContextValue = {
   status: GroupCallStatus;
   active: ActiveGroupCall | null;
+  availableCalls: Map<string, AvailableGroupCall>;
   joinGroupCall: (conversation: GroupConversation, mode: CallMode) => Promise<void>;
+  joinAvailableGroupCall: (conversation: GroupConversation) => Promise<void>;
 };
 
 const GroupCallContext = createContext<GroupCallContextValue | null>(null);
@@ -56,6 +62,10 @@ function profileFor(group: GroupConversation | null, userId: string): UserProfil
 
 function isStartResponse(value: unknown): value is GroupCallStartResponse {
   return value !== null && typeof value === "object" && "mode" in value;
+}
+
+function isLeaveResponse(value: unknown): value is GroupCallLeaveResponse {
+  return value !== null && typeof value === "object" && "left" in value && "ended" in value && "conversationId" in value && "mode" in value;
 }
 
 function socketIsOpeningOrOpen(socket: WebSocket | null) {
@@ -88,6 +98,12 @@ function VideoTile({ stream, name, avatarUrl, muted = false, label }: { stream: 
   );
 }
 
+function canEndGroupCall(call: ActiveGroupCall | null, userId: string | undefined) {
+  if (!call || !userId) return false;
+  const myRole = call.conversation.members?.find((member) => member.user_id === userId)?.role;
+  return call.hostId === userId || myRole === "owner" || myRole === "admin";
+}
+
 export function GroupCallProvider({ children }: { children: ReactNode }) {
   const { user, profile, supabase } = useAuth();
   const { showToast } = useToast();
@@ -104,6 +120,8 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [active, setActive] = useState<ActiveGroupCall | null>(null);
   const [incoming, setIncoming] = useState<IncomingGroupCall | null>(null);
+  const [availableCalls, setAvailableCalls] = useState(new Map<string, AvailableGroupCall>());
+  const [dismissedAvailableCallIds, setDismissedAvailableCallIds] = useState(new Set<string>());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
   const [micEnabled, setMicEnabled] = useState(true);
@@ -224,9 +242,10 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const cleanup = useCallback(
     async (notify = true) => {
       const current = activeRef.current;
+      let leaveResponse: unknown = null;
       if (notify && current) {
         try {
-          await sendRequest("group-call-leave", { conversationId: current.conversation.id });
+          leaveResponse = await sendRequest("group-call-leave", { conversationId: current.conversation.id });
         } catch {
           // The signaling socket can already be gone; local media cleanup still has to run.
         }
@@ -244,8 +263,52 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       setCameraEnabled(true);
       setStatus("idle");
       stopRingtone();
+      if (current && isLeaveResponse(leaveResponse) && !leaveResponse.ended) {
+        const caller = profileFor(current.conversation, leaveResponse.from) ?? null;
+        setAvailableCalls((calls) => {
+          const nextCalls = new Map(calls);
+          nextCalls.set(current.conversation.id, {
+            conversation: current.conversation,
+            caller,
+            mode: leaveResponse.mode,
+            participantCount: leaveResponse.participantCount ?? 1,
+            startedAt: leaveResponse.startedAt ?? Date.now()
+          });
+          return nextCalls;
+        });
+        setDismissedAvailableCallIds((ids) => {
+          const nextIds = new Set(ids);
+          nextIds.delete(current.conversation.id);
+          return nextIds;
+        });
+      }
     },
     [sendRequest, stopRingtone]
+  );
+
+  const rememberAvailableCall = useCallback(
+    async (message: GroupCallAvailablePayload) => {
+      if (!supabase || !user || activeRef.current?.conversation.id === message.conversationId) return;
+      const conversation = await getGroup(supabase, message.conversationId, user.uid);
+      const caller = profileFor(conversation, message.from) ?? null;
+      setAvailableCalls((calls) => {
+        const nextCalls = new Map(calls);
+        nextCalls.set(conversation.id, {
+          conversation,
+          caller,
+          mode: message.mode,
+          participantCount: message.participantCount ?? 1,
+          startedAt: message.startedAt ?? Date.now()
+        });
+        return nextCalls;
+      });
+      setDismissedAvailableCallIds((ids) => {
+        const nextIds = new Set(ids);
+        nextIds.delete(conversation.id);
+        return nextIds;
+      });
+    },
+    [supabase, user]
   );
 
   const getMedia = useCallback(async (mode: CallMode) => {
@@ -328,7 +391,18 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (message.type === "group-call-invite") void handleIncomingInvite(message);
+      if (message.type === "group-call-available") void rememberAvailableCall(message);
       if (message.type === "group-call-ended") {
+        setAvailableCalls((calls) => {
+          const nextCalls = new Map(calls);
+          nextCalls.delete(message.conversationId);
+          return nextCalls;
+        });
+        setDismissedAvailableCallIds((ids) => {
+          const nextIds = new Set(ids);
+          nextIds.delete(message.conversationId);
+          return nextIds;
+        });
         setIncoming((current) => (current?.conversation.id === message.conversationId ? null : current));
         if (activeRef.current?.conversation.id === message.conversationId) void cleanup(false);
       }
@@ -340,7 +414,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       if (message.type === "group-call-answer") void handleAnswer(message);
       if (message.type === "group-call-ice-candidate") void handleIceCandidate(message);
     },
-    [cleanup, handleAnswer, handleIceCandidate, handleIncomingInvite, handleOffer, removePeer, setParticipant]
+    [cleanup, handleAnswer, handleIceCandidate, handleIncomingInvite, handleOffer, rememberAvailableCall, removePeer, setParticipant]
   );
 
   useEffect(() => {
@@ -416,13 +490,23 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       if (!user) return;
       setStatus("joining");
       await getMedia(mode);
-      const nextActive = { conversation, mode };
+      const nextActive = { conversation, mode, hostId: user.uid };
       setActive(nextActive);
       activeRef.current = nextActive;
       await waitForSocket();
       const response = await sendRequest<GroupCallStartResponse>(requestType, { conversationId: conversation.id, mode });
       if (!isStartResponse(response)) throw new Error("Group call server returned an invalid response.");
-      const joinedActive = { conversation, mode: response.mode };
+      const joinedActive = { conversation, mode: response.mode, hostId: response.hostId ?? user.uid };
+      setAvailableCalls((calls) => {
+        const nextCalls = new Map(calls);
+        nextCalls.delete(conversation.id);
+        return nextCalls;
+      });
+      setDismissedAvailableCallIds((ids) => {
+        const nextIds = new Set(ids);
+        nextIds.delete(conversation.id);
+        return nextIds;
+      });
       setActive(joinedActive);
       activeRef.current = joinedActive;
       setStatus("connected");
@@ -464,6 +548,49 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       window.setTimeout(() => setStatus("idle"), 600);
     }
   }, [cleanup, incoming, joinMeshCall, showToast, stopRingtone]);
+
+  const joinAvailableGroupCall = useCallback(
+    async (conversation: GroupConversation) => {
+      const availableCall = availableCalls.get(conversation.id);
+      if (!availableCall) {
+        showToast({ variant: "info", title: "No active call", description: "This group call has already ended." });
+        return;
+      }
+      if (status !== "idle") {
+        showToast({ variant: "info", title: "A group call is already active" });
+        return;
+      }
+      try {
+        await joinMeshCall(availableCall.conversation, availableCall.mode, "group-call-join");
+      } catch (error) {
+        showToast({ variant: "error", title: "Could not join group call", description: error instanceof Error ? error.message : "Check camera and microphone permissions." });
+        await cleanup(true);
+        setStatus("failed");
+        window.setTimeout(() => setStatus("idle"), 600);
+      }
+    },
+    [availableCalls, cleanup, joinMeshCall, showToast, status]
+  );
+
+  const dismissAvailableCall = useCallback((conversationId: string) => {
+    setDismissedAvailableCallIds((ids) => {
+      const nextIds = new Set(ids);
+      nextIds.add(conversationId);
+      return nextIds;
+    });
+  }, []);
+
+  const endCallForEveryone = useCallback(async () => {
+    const current = activeRef.current;
+    if (!current) return;
+    try {
+      await sendRequest("group-call-end", { conversationId: current.conversation.id });
+      await cleanup(false);
+      showToast({ variant: "success", title: "Group call ended" });
+    } catch (error) {
+      showToast({ variant: "error", title: "Could not end call", description: error instanceof Error ? error.message : "Try again." });
+    }
+  }, [cleanup, sendRequest, showToast]);
 
   const dismissIncoming = useCallback(() => {
     stopRingtone();
@@ -530,10 +657,12 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     };
   }, [connectSocket]);
 
-  const value = useMemo(() => ({ status, active, joinGroupCall }), [active, joinGroupCall, status]);
+  const value = useMemo(() => ({ status, active, availableCalls, joinGroupCall, joinAvailableGroupCall }), [active, availableCalls, joinAvailableGroupCall, joinGroupCall, status]);
   const group = active?.conversation ?? null;
   const currentProfile = group && user ? profileFor(group, user.uid) ?? profile : profile;
   const participantCount = participants.length + (active ? 1 : 0);
+  const availableCall = incoming ? null : [...availableCalls.values()].find((call) => !dismissedAvailableCallIds.has(call.conversation.id)) ?? null;
+  const mayEndForEveryone = canEndGroupCall(active, user?.uid);
 
   return (
     <GroupCallContext.Provider value={value}>
@@ -557,6 +686,27 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           </div>
         ) : null}
       </Modal>
+      <Modal open={Boolean(availableCall)} title="Group call active" onClose={() => availableCall && dismissAvailableCall(availableCall.conversation.id)}>
+        {availableCall ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Avatar name={availableCall.conversation.title ?? "Group"} src={availableCall.conversation.avatar_url} size="lg" />
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-ink dark:text-white">{availableCall.conversation.title}</p>
+                <p className="text-sm text-ink/60 dark:text-white/60">
+                  {availableCall.caller?.full_name ?? "A group member"} has an active {availableCall.mode} call
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={() => void joinAvailableGroupCall(availableCall.conversation)}>
+                <PhoneIncoming className="h-4 w-4" />
+                Join call
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
       {active ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/75 p-4 backdrop-blur-sm">
           <div className="flex h-[min(820px,calc(100vh-2rem))] w-[min(1120px,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-white/15 bg-neutral-950 text-white shadow-soft">
@@ -571,10 +721,18 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
                   </p>
                 </div>
               </div>
-              <Button variant="danger" onClick={() => void cleanup(true)}>
-                <PhoneOff className="h-4 w-4" />
-                Leave
-              </Button>
+              <div className="flex gap-2">
+                {mayEndForEveryone ? (
+                  <Button variant="danger" onClick={() => void endCallForEveryone()}>
+                    <PhoneOff className="h-4 w-4" />
+                    End call
+                  </Button>
+                ) : null}
+                <Button variant={mayEndForEveryone ? "secondary" : "danger"} onClick={() => void cleanup(true)}>
+                  <PhoneOff className="h-4 w-4" />
+                  Leave
+                </Button>
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               <div className="grid min-h-full auto-rows-fr gap-3 md:grid-cols-2">

@@ -1,10 +1,13 @@
 "use client";
 
-import { ArrowLeft, Bell, BellOff, ChevronDown, Info, Phone, Video } from "lucide-react";
+import { ArrowLeft, Bell, BellOff, ChevronDown, Info, Phone, PhoneIncoming, Trash2, Video } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { MessageComposer } from "@/features/chats/message-composer";
 import { MessageList } from "@/features/chats/message-list";
@@ -19,18 +22,23 @@ import type { CallSession, UserProfile } from "@/types";
 
 export function ChatPanel() {
   const { user, supabase } = useAuth();
+  const { showToast } = useToast();
   const target = useAppStore((state) => state.selectedChat);
   const setSelectedChat = useAppStore((state) => state.setSelectedChat);
   const chat = useChat(target);
   const { startCall, status } = useCalls();
-  const { joinGroupCall, status: groupCallStatus } = useGroupCalls();
+  const { joinGroupCall, joinAvailableGroupCall, availableCalls, status: groupCallStatus } = useGroupCalls();
   const { isConversationMuted, toggleConversationMute } = useNotifications();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [recentCalls, setRecentCalls] = useState<CallSession[]>([]);
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
   const directFriend = target?.kind === "direct" ? target.friend : null;
   const group = target?.kind === "group" ? target.conversation : null;
+  const availableGroupCall = group ? availableCalls.get(group.id) : null;
   const chatTitle = directFriend?.full_name ?? group?.title ?? "Conversation";
   const chatAvatar = directFriend?.avatar_url ?? group?.avatar_url ?? null;
   const groupMembers = group?.members;
@@ -59,6 +67,27 @@ export function ChatPanel() {
     if (!scroller) return;
     const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     setShowScrollButton(distanceFromBottom > 180);
+  }
+
+  async function runHistoryDelete(action: () => Promise<void>, title: string) {
+    try {
+      await action();
+      showToast({ variant: "success", title });
+      setHistoryOpen(false);
+      setRangeFrom("");
+      setRangeTo("");
+    } catch (error) {
+      showToast({ variant: "error", title: "Could not delete chat history", description: error instanceof Error ? error.message : "Try again." });
+    }
+  }
+
+  async function deleteRange() {
+    if (!rangeFrom || !rangeTo) throw new Error("Choose both start and end times.");
+    const from = new Date(rangeFrom);
+    const to = new Date(rangeTo);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) throw new Error("Choose a valid date range.");
+    if (from > to) throw new Error("Start time must be before end time.");
+    await chat.deleteRangeForMe(from.toISOString(), to.toISOString());
   }
 
   useEffect(() => {
@@ -135,6 +164,11 @@ export function ChatPanel() {
               {muted ? <BellOff className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
             </Button>
           ) : null}
+          {directFriend && chat.conversation ? (
+            <Button variant="ghost" className="h-10 w-10 px-0" onClick={() => setHistoryOpen(true)} aria-label="Delete chat history">
+              <Trash2 className="h-5 w-5" />
+            </Button>
+          ) : null}
           {directFriend ? (
             <>
               <Button variant="ghost" className="h-10 w-10 px-0" disabled={!chat.conversation || status !== "idle"} onClick={() => chat.conversation && void startCall(directFriend, chat.conversation.id, "audio")} aria-label="Start audio call">
@@ -146,12 +180,21 @@ export function ChatPanel() {
             </>
           ) : (
             <>
-              <Button variant="ghost" className="h-10 w-10 px-0" disabled={!group || groupCallStatus !== "idle"} onClick={() => group && void joinGroupCall(group, "audio")} aria-label="Start group audio call">
-                <Phone className="h-5 w-5" />
-              </Button>
-              <Button variant="ghost" className="h-10 w-10 px-0" disabled={!group || groupCallStatus !== "idle"} onClick={() => group && void joinGroupCall(group, "video")} aria-label="Start group video call">
-                <Video className="h-5 w-5" />
-              </Button>
+              {availableGroupCall ? (
+                <Button variant="secondary" disabled={!group || groupCallStatus !== "idle"} onClick={() => group && void joinAvailableGroupCall(group)} aria-label="Join active group call">
+                  <PhoneIncoming className="h-4 w-4" />
+                  Join call
+                </Button>
+              ) : (
+                <>
+                  <Button variant="ghost" className="h-10 w-10 px-0" disabled={!group || groupCallStatus !== "idle"} onClick={() => group && void joinGroupCall(group, "audio")} aria-label="Start group audio call">
+                    <Phone className="h-5 w-5" />
+                  </Button>
+                  <Button variant="ghost" className="h-10 w-10 px-0" disabled={!group || groupCallStatus !== "idle"} onClick={() => group && void joinGroupCall(group, "video")} aria-label="Start group video call">
+                    <Video className="h-5 w-5" />
+                  </Button>
+                </>
+              )}
               <Button variant="ghost" className="h-10 w-10 px-0" onClick={() => setGroupInfoOpen(true)} aria-label="Open group info">
                 <Info className="h-5 w-5" />
               </Button>
@@ -168,7 +211,17 @@ export function ChatPanel() {
             <Skeleton className="h-20 w-3/5" />
           </div>
         ) : (
-          <MessageList messages={chat.messages} currentUserId={user.uid} friend={directFriend ?? fallbackProfile} showSenderNames={Boolean(group)} senderProfiles={senderProfiles} getDownloadUrl={chat.getDownloadUrl} onReact={chat.reactToMessage} />
+          <MessageList
+            messages={chat.messages}
+            currentUserId={user.uid}
+            friend={directFriend ?? fallbackProfile}
+            showSenderNames={Boolean(group)}
+            senderProfiles={senderProfiles}
+            getDownloadUrl={chat.getDownloadUrl}
+            onReact={chat.reactToMessage}
+            onDeleteForMe={chat.removeMessageForMe}
+            onDeleteForEveryone={chat.removeMessageForEveryone}
+          />
         )}
         {showScrollButton ? (
           <Button
@@ -186,6 +239,29 @@ export function ChatPanel() {
 
       <MessageComposer disabled={!chat.conversation} uploadProgress={chat.uploadProgress} onSendText={chat.sendText} onSendFile={chat.sendFile} />
       {group ? <GroupInfoPanel group={group} open={groupInfoOpen} onClose={() => setGroupInfoOpen(false)} /> : null}
+      <Modal open={historyOpen} title="Delete chat history" onClose={() => setHistoryOpen(false)}>
+        <div className="space-y-5">
+          <p className="text-sm leading-6 text-ink/65 dark:text-white/65">These options delete messages from your chat history. Use each message menu to delete a recent sent message for everyone.</p>
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-ink dark:text-white">Full history</h3>
+            <Button variant="danger" onClick={() => void runHistoryDelete(chat.deleteHistoryForMe, "Chat history deleted")}>Delete full chat history</Button>
+          </div>
+          <form
+            className="space-y-3 border-t border-line pt-4 dark:border-white/10"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void runHistoryDelete(deleteRange, "Chat history range deleted");
+            }}
+          >
+            <h3 className="text-sm font-semibold text-ink dark:text-white">Delete within range</h3>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input type="datetime-local" value={rangeFrom} onChange={(event) => setRangeFrom(event.target.value)} aria-label="Delete range start" />
+              <Input type="datetime-local" value={rangeTo} onChange={(event) => setRangeTo(event.target.value)} aria-label="Delete range end" />
+            </div>
+            <Button variant="secondary" type="submit">Delete selected range</Button>
+          </form>
+        </div>
+      </Modal>
     </section>
   );
 }

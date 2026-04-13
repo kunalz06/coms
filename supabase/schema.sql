@@ -116,8 +116,21 @@ create table if not exists messages (
   kind text not null check (kind in ('text', 'image', 'document', 'voice')),
   content text,
   status text not null default 'sent' check (status in ('sent', 'failed', 'delivered', 'read')),
+  deleted_for_everyone_at timestamptz,
+  deleted_by text references user_profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+alter table messages add column if not exists deleted_for_everyone_at timestamptz;
+alter table messages add column if not exists deleted_by text references user_profiles(id) on delete set null;
+
+create table if not exists message_deletions (
+  id uuid primary key default gen_random_uuid(),
+  message_id uuid not null references messages(id) on delete cascade,
+  user_id text not null references user_profiles(id) on delete cascade,
+  deleted_at timestamptz not null default now(),
+  unique (message_id, user_id)
 );
 
 create table if not exists message_attachments (
@@ -198,6 +211,7 @@ create index if not exists conversations_type_idx on conversations(type);
 create index if not exists conversation_members_user_idx on conversation_members(user_id);
 create index if not exists conversation_members_conversation_idx on conversation_members(conversation_id);
 create index if not exists messages_conversation_created_idx on messages(conversation_id, created_at desc);
+create index if not exists message_deletions_user_message_idx on message_deletions(user_id, message_id);
 create index if not exists message_reactions_message_idx on message_reactions(message_id, created_at asc);
 create index if not exists message_reactions_user_idx on message_reactions(user_id);
 create index if not exists call_sessions_participants_idx on call_sessions(caller_id, callee_id, started_at desc);
@@ -234,6 +248,51 @@ for each row execute function touch_updated_at();
 drop trigger if exists messages_touch_updated_at on messages;
 create trigger messages_touch_updated_at before update on messages
 for each row execute function touch_updated_at();
+
+create or replace function enforce_message_update_rules()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.conversation_id is distinct from old.conversation_id
+    or new.sender_id is distinct from old.sender_id
+    or new.kind is distinct from old.kind
+    or new.created_at is distinct from old.created_at then
+    raise exception 'Message identity fields cannot be changed';
+  end if;
+
+  if old.deleted_for_everyone_at is not null then
+    new.deleted_for_everyone_at := old.deleted_for_everyone_at;
+    new.deleted_by := old.deleted_by;
+    new.content := old.content;
+    return new;
+  end if;
+
+  if new.deleted_for_everyone_at is distinct from old.deleted_for_everyone_at then
+    if new.deleted_for_everyone_at is null then
+      raise exception 'Deleted messages cannot be restored';
+    end if;
+    if old.sender_id <> app_user_id() then
+      raise exception 'Only the sender can delete this message for everyone';
+    end if;
+    if old.created_at < now() - interval '1 minute' then
+      raise exception 'Messages can only be deleted for everyone within one minute';
+    end if;
+    new.deleted_by := app_user_id();
+    new.content := null;
+  elsif new.content is distinct from old.content then
+    raise exception 'Message content cannot be edited';
+  elsif new.deleted_by is distinct from old.deleted_by then
+    raise exception 'Message deletion metadata cannot be changed directly';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists messages_enforce_update_rules on messages;
+create trigger messages_enforce_update_rules before update on messages
+for each row execute function enforce_message_update_rules();
 
 create or replace function set_conversation_last_message()
 returns trigger
@@ -396,6 +455,7 @@ alter table conversations enable row level security;
 alter table conversation_members enable row level security;
 alter table conversation_mutes enable row level security;
 alter table messages enable row level security;
+alter table message_deletions enable row level security;
 alter table message_attachments enable row level security;
 alter table message_reactions enable row level security;
 alter table call_sessions enable row level security;
@@ -538,7 +598,14 @@ for delete using (user_id = app_user_id());
 
 drop policy if exists "messages visible to participants" on messages;
 create policy "messages visible to participants" on messages
-for select using (user_is_conversation_participant(conversation_id, app_user_id()));
+for select using (
+  user_is_conversation_participant(conversation_id, app_user_id())
+  and not exists (
+    select 1 from message_deletions
+    where message_deletions.message_id = messages.id
+      and message_deletions.user_id = app_user_id()
+  )
+);
 
 drop policy if exists "messages inserted by sender" on messages;
 create policy "messages inserted by sender" on messages
@@ -558,12 +625,28 @@ create policy "message status update by participants" on messages
 for update using (user_is_conversation_participant(conversation_id, app_user_id()))
 with check (user_is_conversation_participant(conversation_id, app_user_id()));
 
+drop policy if exists "message deletions visible to owner" on message_deletions;
+create policy "message deletions visible to owner" on message_deletions
+for select using (user_id = app_user_id());
+
+drop policy if exists "message deletions created by owner" on message_deletions;
+create policy "message deletions created by owner" on message_deletions
+for insert with check (
+  user_id = app_user_id()
+  and exists (
+    select 1 from messages
+    where messages.id = message_id
+      and user_is_conversation_participant(messages.conversation_id, app_user_id())
+  )
+);
+
 drop policy if exists "attachments visible to participants" on message_attachments;
 create policy "attachments visible to participants" on message_attachments
 for select using (
   exists (
     select 1 from messages
     where messages.id = message_id
+      and messages.deleted_for_everyone_at is null
       and user_is_conversation_participant(messages.conversation_id, app_user_id())
   )
 );
@@ -585,6 +668,7 @@ for select using (
   exists (
     select 1 from messages
     where messages.id = message_id
+      and messages.deleted_for_everyone_at is null
       and user_is_conversation_participant(messages.conversation_id, app_user_id())
   )
 );
@@ -596,6 +680,7 @@ for insert with check (
   and exists (
     select 1 from messages
     where messages.id = message_id
+      and messages.deleted_for_everyone_at is null
       and user_is_conversation_participant(messages.conversation_id, app_user_id())
   )
 );
@@ -677,6 +762,7 @@ begin
     'conversation_members',
     'conversation_mutes',
     'messages',
+    'message_deletions',
     'message_attachments',
     'message_reactions',
     'call_sessions',

@@ -1,8 +1,9 @@
 "use client";
 
-import { FileText, SmilePlus } from "lucide-react";
+import { FileText, SmilePlus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { formatTime } from "@/lib/utils";
@@ -16,6 +17,8 @@ type MessageListProps = {
   senderProfiles?: Map<string, UserProfile>;
   getDownloadUrl: (url: string) => Promise<string>;
   onReact: (messageId: string, kind: MessageReactionKind, content: string) => Promise<void>;
+  onDeleteForMe: (messageId: string) => Promise<void>;
+  onDeleteForEveryone: (messageId: string) => Promise<void>;
 };
 
 const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F64F}"];
@@ -56,11 +59,64 @@ function ReactionsModal({ message, open, onClose }: { message: Message | null; o
   );
 }
 
-export function MessageList({ messages, currentUserId, friend, showSenderNames, senderProfiles, getDownloadUrl, onReact }: MessageListProps) {
+function canDeleteForEveryone(message: Message, currentUserId: string) {
+  return message.sender_id === currentUserId && !message.deleted_for_everyone_at && Date.now() - new Date(message.created_at).getTime() <= 60_000;
+}
+
+function DeleteMessageModal({
+  message,
+  currentUserId,
+  open,
+  onClose,
+  onDeleteForMe,
+  onDeleteForEveryone
+}: {
+  message: Message | null;
+  currentUserId: string;
+  open: boolean;
+  onClose: () => void;
+  onDeleteForMe: (messageId: string) => Promise<void>;
+  onDeleteForEveryone: (messageId: string) => Promise<void>;
+}) {
+  const { showToast } = useToast();
+  const deleteForEveryoneAllowed = message ? canDeleteForEveryone(message, currentUserId) : false;
+
+  async function run(action: () => Promise<void>, title: string) {
+    try {
+      await action();
+      showToast({ variant: "success", title });
+      onClose();
+    } catch (error) {
+      showToast({ variant: "error", title: "Could not delete message", description: error instanceof Error ? error.message : "Try again." });
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Delete message">
+      {message ? (
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-ink/65 dark:text-white/65">Delete this message from your chat history, or remove it for everyone if it was sent in the last minute.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => void run(() => onDeleteForMe(message.id), "Message deleted from your chat")}>Delete for me</Button>
+            {message.sender_id === currentUserId ? (
+              <Button variant="danger" disabled={!deleteForEveryoneAllowed} onClick={() => void run(() => onDeleteForEveryone(message.id), "Message deleted for everyone")}>
+                Delete for everyone
+              </Button>
+            ) : null}
+          </div>
+          {message.sender_id === currentUserId && !deleteForEveryoneAllowed ? <p className="text-xs text-ink/55 dark:text-white/55">Delete for everyone is available for one minute after sending.</p> : null}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+export function MessageList({ messages, currentUserId, friend, showSenderNames, senderProfiles, getDownloadUrl, onReact, onDeleteForMe, onDeleteForEveryone }: MessageListProps) {
   const { showToast } = useToast();
   const [customFor, setCustomFor] = useState<string | null>(null);
   const [customReaction, setCustomReaction] = useState("");
   const [reactionDetails, setReactionDetails] = useState<Message | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Message | null>(null);
   const [activeToolsFor, setActiveToolsFor] = useState<string | null>(null);
 
   async function react(messageId: string, kind: MessageReactionKind, content: string) {
@@ -92,7 +148,8 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
         const mine = message.sender_id === currentUserId;
         const attachment = message.attachments?.[0];
         const sender = senderProfiles?.get(message.sender_id);
-        const groupedReactions = reactionGroups(message.reactions);
+        const deletedForEveryone = Boolean(message.deleted_for_everyone_at);
+        const groupedReactions = deletedForEveryone ? [] : reactionGroups(message.reactions);
         const toolsOpen = activeToolsFor === message.id || customFor === message.id;
         return (
           <div key={message.id} className={`group/message flex ${mine ? "justify-end" : "justify-start"}`}>
@@ -104,30 +161,45 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
                 className={`absolute -top-9 z-10 items-center gap-1 rounded-lg border border-line bg-white/95 p-1 shadow-soft dark:border-white/10 dark:bg-neutral-950/95 ${mine ? "right-0" : "left-0"} ${toolsOpen ? "flex" : "hidden group-hover/message:flex group-focus-within/message:flex"}`}
                 onClick={(event) => event.stopPropagation()}
               >
-                {QUICK_REACTIONS.map((reaction) => (
-                  <button
-                    key={reaction}
-                    type="button"
-                    onClick={() => void react(message.id, "emoji", reaction)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-base transition hover:bg-ink/5 dark:hover:bg-white/10"
-                    aria-label={`React with ${reaction}`}
-                  >
-                    {reaction}
-                  </button>
-                ))}
+                {!deletedForEveryone ? (
+                  <>
+                    {QUICK_REACTIONS.map((reaction) => (
+                      <button
+                        key={reaction}
+                        type="button"
+                        onClick={() => void react(message.id, "emoji", reaction)}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-base transition hover:bg-ink/5 dark:hover:bg-white/10"
+                        aria-label={`React with ${reaction}`}
+                      >
+                        {reaction}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveToolsFor(message.id);
+                        setCustomFor((current) => (current === message.id ? null : message.id));
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-ink/65 transition hover:bg-ink/5 dark:text-white/65 dark:hover:bg-white/10"
+                      aria-label="Add custom reaction"
+                    >
+                      <SmilePlus className="h-4 w-4" />
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveToolsFor(message.id);
-                    setCustomFor((current) => (current === message.id ? null : message.id));
+                    setActiveToolsFor(null);
+                    setDeleteTarget(message);
                   }}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink/65 transition hover:bg-ink/5 dark:text-white/65 dark:hover:bg-white/10"
-                  aria-label="Add custom reaction"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-coral transition hover:bg-coral/10"
+                  aria-label="Delete message"
                 >
-                  <SmilePlus className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </div>
-              {customFor === message.id ? (
+              {customFor === message.id && !deletedForEveryone ? (
                 <form
                   className={`absolute -top-20 z-20 flex w-60 gap-1 rounded-lg border border-line bg-white/95 p-2 shadow-soft dark:border-white/10 dark:bg-neutral-950/95 ${mine ? "right-0" : "left-0"}`}
                   onClick={(event) => event.stopPropagation()}
@@ -149,12 +221,13 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
                 </form>
               ) : null}
               {showSenderNames && !mine ? <p className="mb-1 text-xs font-semibold text-moss dark:text-emerald-300">{sender?.full_name ?? "Group member"}</p> : null}
-              {message.kind === "image" && attachment ? (
+              {deletedForEveryone ? <p className={`italic ${mine ? "text-white/75" : "text-ink/55 dark:text-white/55"}`}>This message was deleted.</p> : null}
+              {!deletedForEveryone && message.kind === "image" && attachment ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={attachment.url} alt={attachment.file_name} className="mb-2 max-h-80 rounded-lg object-cover" onClick={(event) => event.stopPropagation()} />
               ) : null}
-              {message.kind === "voice" && attachment ? <audio controls src={attachment.url} className="mb-2 max-w-full" onClick={(event) => event.stopPropagation()} /> : null}
-              {message.kind === "document" && attachment ? (
+              {!deletedForEveryone && message.kind === "voice" && attachment ? <audio controls src={attachment.url} className="mb-2 max-w-full" onClick={(event) => event.stopPropagation()} /> : null}
+              {!deletedForEveryone && message.kind === "document" && attachment ? (
                 <button
                   type="button"
                   onClick={async (event) => {
@@ -183,7 +256,7 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
                   <span className="truncate">{attachment.file_name}</span>
                 </button>
               ) : null}
-              {message.content ? <p className="whitespace-pre-wrap break-words">{message.content}</p> : null}
+              {!deletedForEveryone && message.content ? <p className="whitespace-pre-wrap break-words">{message.content}</p> : null}
               <div className={`mt-1 flex items-center justify-end gap-2 text-[11px] ${mine ? "text-white/75" : "text-ink/45 dark:text-white/45"}`}>
                 <span>{formatTime(message.created_at)}</span>
                 {mine ? <span>{message.status}</span> : null}
@@ -209,6 +282,7 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
         );
       })}
       <ReactionsModal message={reactionDetails} open={Boolean(reactionDetails)} onClose={() => setReactionDetails(null)} />
+      <DeleteMessageModal message={deleteTarget} currentUserId={currentUserId} open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onDeleteForMe={onDeleteForMe} onDeleteForEveryone={onDeleteForEveryone} />
     </div>
   );
 }

@@ -72,6 +72,19 @@ async function userIsConversationMember(conversationId: string, userId: string) 
   return Boolean(data);
 }
 
+async function userCanModerateGroupCall(conversationId: string, userId: string) {
+  const supabase = serviceSupabase();
+  if (!supabase) return false;
+  const { data, error } = await supabase
+    .from("conversation_members")
+    .select("role")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", userId)
+    .maybeSingle<{ role: "owner" | "admin" | "member" }>();
+  if (error) return false;
+  return data?.role === "owner" || data?.role === "admin";
+}
+
 async function conversationMemberIds(conversationId: string) {
   const supabase = serviceSupabase();
   if (!supabase) return [];
@@ -132,7 +145,7 @@ function parseMessage(raw: RawData) {
   }
 }
 
-const groupCalls = new GroupCallInviteManager(userIsConversationMember, conversationMemberIds, sendToUser);
+const groupCalls = new GroupCallInviteManager(userIsConversationMember, conversationMemberIds, userCanModerateGroupCall, sendToUser);
 
 void app.prepare().then(() => {
   const handleUpgrade = app.getUpgradeHandler();
@@ -181,6 +194,7 @@ void app.prepare().then(() => {
           socket.userId = message.userId;
           addClient(message.userId, socket);
           console.log("Signaling client registered", { userId: message.userId, sockets: clients.get(message.userId)?.size ?? 0 });
+          groupCalls.notifyAvailableCallsForUser(message.userId);
           return;
         }
 

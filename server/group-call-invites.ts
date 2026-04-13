@@ -10,6 +10,7 @@ type GroupCallMessage =
   | { type: "group-call-start"; requestId: string; from: string; conversationId: string; mode: "audio" | "video" }
   | { type: "group-call-join"; requestId: string; from: string; conversationId: string; mode: "audio" | "video" }
   | { type: "group-call-leave"; requestId?: string; from: string; conversationId: string }
+  | { type: "group-call-end"; requestId?: string; from: string; conversationId: string }
   | { type: "group-call-offer"; from: string; to: string; conversationId: string; offer: unknown }
   | { type: "group-call-answer"; from: string; to: string; conversationId: string; answer: unknown }
   | { type: "group-call-ice-candidate"; from: string; to: string; conversationId: string; candidate: unknown };
@@ -26,6 +27,7 @@ type GroupCallSession = {
 type SendToUser = (userId: string, payload: unknown) => void;
 type VerifyMembership = (conversationId: string, userId: string) => Promise<boolean>;
 type ListMembers = (conversationId: string) => Promise<string[]>;
+type CanEndCall = (conversationId: string, userId: string) => Promise<boolean>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
@@ -46,6 +48,7 @@ export class GroupCallInviteManager {
   constructor(
     private readonly verifyMembership: VerifyMembership,
     private readonly listMembers: ListMembers,
+    private readonly canEndCall: CanEndCall,
     private readonly sendToUser: SendToUser
   ) {}
 
@@ -59,8 +62,10 @@ export class GroupCallInviteManager {
           await this.join(socket, message);
           return;
         case "group-call-leave":
-          this.leave(message.conversationId, message.from);
-          this.respond(message.from, message.requestId, true, { left: true });
+          this.leave(message.conversationId, message.from, message.requestId);
+          return;
+        case "group-call-end":
+          await this.end(message);
           return;
         case "group-call-offer":
         case "group-call-answer":
@@ -76,6 +81,20 @@ export class GroupCallInviteManager {
   leaveBySocket(socket: ClientSocket) {
     const conversationId = this.socketsByUser.get(socket);
     if (socket.userId && conversationId) this.leave(conversationId, socket.userId);
+  }
+
+  notifyAvailableCallsForUser(userId: string) {
+    this.sessions.forEach((session) => {
+      if (!session.invitedUserIds.has(userId) || session.participantIds.has(userId)) return;
+      this.sendToUser(userId, {
+        type: "group-call-available",
+        conversationId: session.conversationId,
+        from: session.hostId,
+        mode: session.mode,
+        participantCount: session.participantIds.size,
+        startedAt: session.startedAt
+      });
+    });
   }
 
   private async start(socket: ClientSocket, message: Extract<GroupCallMessage, { type: "group-call-start" }>) {
@@ -145,15 +164,52 @@ export class GroupCallInviteManager {
     return memberIds.slice(0, MAX_GROUP_CALL_PARTICIPANTS);
   }
 
-  private leave(conversationId: string, userId: string) {
+  private async end(message: Extract<GroupCallMessage, { type: "group-call-end" }>) {
+    const session = this.sessions.get(message.conversationId);
+    if (!session) {
+      this.respond(message.from, message.requestId, true, { ended: true });
+      return;
+    }
+    const canEnd = session.hostId === message.from || (await this.canEndCall(message.conversationId, message.from));
+    if (!canEnd) throw new Error("Only the call host, group owner, or group admins can end the call for everyone.");
+
+    this.notifyInvitees(session, { type: "group-call-ended", conversationId: message.conversationId, userId: message.from, endedBy: message.from });
+    this.respond(message.from, message.requestId, true, { ended: true });
+    this.sessions.delete(message.conversationId);
+  }
+
+  private leave(conversationId: string, userId: string, requestId?: string) {
     const session = this.sessions.get(conversationId);
-    if (!session || !session.participantIds.has(userId)) return;
+    if (!session || !session.participantIds.has(userId)) {
+      this.respond(userId, requestId, true, { left: true, ended: true });
+      return;
+    }
     session.participantIds.delete(userId);
     session.participantIds.forEach((participantId) => {
       this.sendToUser(participantId, { type: "group-call-peer-left", conversationId, userId });
     });
-    if (session.participantIds.size > 0) return;
+    if (session.participantIds.size > 0) {
+      this.respond(userId, requestId, true, {
+        left: true,
+        ended: false,
+        conversationId,
+        from: session.hostId,
+        mode: session.mode,
+        participantCount: session.participantIds.size,
+        startedAt: session.startedAt
+      });
+      this.sendToUser(userId, {
+        type: "group-call-available",
+        conversationId,
+        from: session.hostId,
+        mode: session.mode,
+        participantCount: session.participantIds.size,
+        startedAt: session.startedAt
+      });
+      return;
+    }
     this.notifyInvitees(session, { type: "group-call-ended", conversationId, userId });
+    this.respond(userId, requestId, true, { left: true, ended: true });
     this.sessions.delete(conversationId);
   }
 

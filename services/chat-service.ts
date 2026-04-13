@@ -153,3 +153,62 @@ export async function toggleMessageReaction(
   if (error) throw error;
   return data;
 }
+
+async function deleteMessagesForMe(supabase: SupabaseClient, userId: string, messageIds: string[]) {
+  const uniqueMessageIds = Array.from(new Set(messageIds));
+  if (!uniqueMessageIds.length) return;
+  const { error } = await supabase
+    .from("message_deletions")
+    .upsert(
+      uniqueMessageIds.map((messageId) => ({ message_id: messageId, user_id: userId })),
+      { onConflict: "message_id,user_id", ignoreDuplicates: true }
+    );
+  if (error) throw error;
+}
+
+export async function deleteMessageForMe(supabase: SupabaseClient, values: { messageId: string; userId: string }) {
+  await deleteMessagesForMe(supabase, values.userId, [values.messageId]);
+}
+
+export async function deleteConversationHistoryForMe(supabase: SupabaseClient, values: { conversationId: string; userId: string }) {
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", values.conversationId)
+    .returns<Array<{ id: string }>>();
+  if (error) throw error;
+  await deleteMessagesForMe(supabase, values.userId, data.map((message) => message.id));
+}
+
+export async function deleteMessageRangeForMe(
+  supabase: SupabaseClient,
+  values: {
+    conversationId: string;
+    userId: string;
+    from: string;
+    to: string;
+  }
+) {
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id")
+    .eq("conversation_id", values.conversationId)
+    .gte("created_at", values.from)
+    .lte("created_at", values.to)
+    .returns<Array<{ id: string }>>();
+  if (error) throw error;
+  await deleteMessagesForMe(supabase, values.userId, data.map((message) => message.id));
+}
+
+export async function deleteMessageForEveryone(supabase: SupabaseClient, values: { messageId: string; userId: string }) {
+  const { error } = await supabase
+    .from("messages")
+    .update({
+      deleted_for_everyone_at: new Date().toISOString(),
+      deleted_by: values.userId,
+      content: null
+    })
+    .eq("id", values.messageId)
+    .eq("sender_id", values.userId);
+  if (error) throw error;
+}
