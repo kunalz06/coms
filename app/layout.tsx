@@ -8,7 +8,10 @@ const inter = Inter({ subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
   title: "COMMS",
-  description: "Minimal messaging and calling for focused conversations."
+  description: "Minimal messaging and calling for focused conversations.",
+  icons: {
+    icon: "/favicon.ico"
+  }
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
