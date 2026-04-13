@@ -148,10 +148,16 @@ export function SettingsPanel({ open, onClose, blocked, unblock }: SettingsPanel
             <div className="border-t border-line pt-3 dark:border-white/10">
               <p className="font-medium text-ink dark:text-white">Install COMMS</p>
               <p className="text-ink/60 dark:text-white/60">Use COMMS from your home screen with an app-like shell when your browser supports installation.</p>
-              <Button className="mt-2 w-fit" variant="secondary" disabled={!pwa.installAvailable || pwa.installed} onClick={() => void pwa.install()}>
-                <Download className="h-4 w-4" />
-                {pwa.installed ? "Installed" : pwa.installAvailable ? "Install app" : "Install unavailable"}
-              </Button>
+              {pwa.installAvailable || pwa.installed ? (
+                <Button className="mt-2 w-fit" variant="secondary" disabled={pwa.installed} onClick={() => void pwa.install()}>
+                  <Download className="h-4 w-4" />
+                  {pwa.installed ? "Installed" : "Install app"}
+                </Button>
+              ) : (
+                <p className="mt-2 rounded-lg border border-line bg-white/70 p-2 text-xs text-ink/60 dark:border-white/10 dark:bg-white/10 dark:text-white/60">
+                  Open the browser menu and choose Install app or Add to home screen. If it is still missing, refresh once after this update finishes deploying.
+                </p>
+              )}
             </div>
           </div>
         </section>

@@ -10,6 +10,7 @@ type BeforeInstallPromptEvent = Event & {
 type PwaContextValue = {
   installAvailable: boolean;
   installed: boolean;
+  canUseManualInstall: boolean;
   install: () => Promise<void>;
 };
 
@@ -59,6 +60,7 @@ export function PwaProvider({ children }: { children: ReactNode }) {
     () => ({
       installAvailable: Boolean(installPrompt),
       installed,
+      canUseManualInstall: !installPrompt && !installed,
       install
     }),
     [install, installPrompt, installed]

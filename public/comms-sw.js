@@ -1,5 +1,5 @@
-const CACHE_VERSION = "comms-shell-v1";
-const APP_SHELL = ["/", "/app", "/login", "/register", "/reset-password", "/manifest.webmanifest", "/favicon.ico"];
+const CACHE_VERSION = "comms-shell-v2";
+const APP_SHELL = ["/", "/app", "/login", "/register", "/reset-password", "/manifest.webmanifest", "/favicon.ico", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
