@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { useNotifications } from "@/features/notifications/notification-provider";
 import { CALL_TIMEOUT_MS, canTransitionCall, readableCallStatus } from "@/lib/call-state";
+import { getCallMedia, getVideoStreamForFacing, type CameraFacing } from "@/lib/media-devices";
 import { signalingUrl, warmSignalingServer } from "@/lib/signaling-url";
 import { getProfile } from "@/services/profile-service";
 import type { CallMode, CallStatus, SignalingMessage, UserProfile } from "@/types";
@@ -97,7 +98,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
-  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
+  const [cameraFacing, setCameraFacing] = useState<CameraFacing>("user");
   const [isMobileBrowser] = useState(detectMobileBrowser);
   const statusRef = useRef(status);
   const activeRef = useRef(active);
@@ -306,7 +307,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
             if (connection.connectionState === "disconnected") void resetCall("failed");
           }, 8000);
         }
-        if (state === "failed" || state === "closed") {
+        if (state === "failed") {
           transitionTo("failed");
           void resetCall("failed");
         }
@@ -325,15 +326,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getMedia = useCallback(async (nextMode: CallMode) => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: nextMode === "video" ? { facingMode: { ideal: cameraFacing } } : false
-    });
+    const { stream, effectiveMode } = await getCallMedia(nextMode, cameraFacing);
     setLocalStream(stream);
     setMicEnabled(true);
-    setCameraEnabled(nextMode === "video");
-    return stream;
-  }, [cameraFacing]);
+    setMode(effectiveMode);
+    setCameraEnabled(effectiveMode === "video");
+    if (nextMode === "video" && effectiveMode === "audio") {
+      showToast({ variant: "info", title: "Camera unavailable", description: "Starting as an audio call instead." });
+    }
+    return { stream, effectiveMode };
+  }, [cameraFacing, showToast]);
 
   const handleOffer = useCallback(
     async (message: Extract<SignalingMessage, { type: "call-offer" }>) => {
@@ -358,11 +360,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
     try {
       stopRingtone();
       transitionTo("acquiring_media");
-      setMode(incoming.mode);
-      const stream = await getMedia(incoming.mode);
+      const { stream, effectiveMode } = await getMedia(incoming.mode);
       const peer = createPeer(incoming.callId, incoming.from.id);
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
-      setActive({ callId: incoming.callId, peer: incoming.from, conversationId: incoming.conversationId, mode: incoming.mode });
+      const nextActive = { callId: incoming.callId, peer: incoming.from, conversationId: incoming.conversationId, mode: effectiveMode };
+      setActive(nextActive);
+      activeRef.current = nextActive;
       setIncoming(null);
       transitionTo("connecting");
       if (pendingOfferRef.current) {
@@ -499,20 +502,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
       try {
         await waitForSignaling();
         transitionTo("acquiring_media");
-        setMode(nextMode);
-        const stream = await getMedia(nextMode);
+        const { stream, effectiveMode } = await getMedia(nextMode);
         const connection = createPeer(callId, peer.id);
         stream.getTracks().forEach((track) => connection.addTrack(track, stream));
-        setActive({ callId, peer, conversationId, mode: nextMode });
+        const nextActive = { callId, peer, conversationId, mode: effectiveMode };
+        setActive(nextActive);
+        activeRef.current = nextActive;
         await writeCallSession(callId, {
           conversation_id: conversationId,
           caller_id: user.uid,
           callee_id: peer.id,
-          mode: nextMode,
+          mode: effectiveMode,
           status: "ringing"
         });
         transitionTo("outgoing_ringing");
-        sendSignal({ type: "call-initiate", callId, from: user.uid, to: peer.id, mode: nextMode, conversationId });
+        sendSignal({ type: "call-initiate", callId, from: user.uid, to: peer.id, mode: effectiveMode, conversationId });
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
         sendSignal({ type: "call-offer", callId, from: user.uid, to: peer.id, offer });
@@ -544,7 +548,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!call || !peer || !user || !localStream) return;
     try {
       if (mode === "audio") {
-        const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacing } }, audio: false });
+        const videoStream = await getVideoStreamForFacing(cameraFacing);
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
         peer.addTrack(track, localStream);
@@ -572,21 +576,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const peer = peerRef.current;
     if (!localStream || !peer || !localStream.getVideoTracks().length) return;
     const nextFacing = cameraFacing === "user" ? "environment" : "user";
+    const currentTrack = localStream.getVideoTracks()[0];
+    const currentDeviceId = currentTrack?.getSettings().deviceId;
+    const sender = peer.getSenders().find((item) => item.track?.kind === "video");
+    localStream.removeTrack(currentTrack);
+    currentTrack.stop();
     try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacing } }, audio: false });
+      const videoStream = await getVideoStreamForFacing(nextFacing, { avoidDeviceId: currentDeviceId, requireDifferentDevice: true });
       const [nextTrack] = videoStream.getVideoTracks();
-      const previousTracks = localStream.getVideoTracks();
-      previousTracks.forEach((track) => {
-        localStream.removeTrack(track);
-        track.stop();
-      });
       localStream.addTrack(nextTrack);
-      const sender = peer.getSenders().find((item) => item.track?.kind === "video");
       await sender?.replaceTrack(nextTrack);
       setCameraFacing(nextFacing);
       setCameraEnabled(nextTrack.enabled);
       setLocalStream(new MediaStream(localStream.getTracks()));
     } catch {
+      try {
+        const restoreStream = await getVideoStreamForFacing(cameraFacing);
+        const [restoreTrack] = restoreStream.getVideoTracks();
+        localStream.addTrack(restoreTrack);
+        await sender?.replaceTrack(restoreTrack);
+        setLocalStream(new MediaStream(localStream.getTracks()));
+      } catch {
+        setCameraEnabled(false);
+      }
       showToast({ variant: "error", title: "Could not rotate camera", description: "Your browser did not provide another camera." });
     }
   }, [cameraFacing, localStream, showToast]);

@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { useNotifications } from "@/features/notifications/notification-provider";
+import { getCallMedia, getVideoStreamForFacing, type CameraFacing } from "@/lib/media-devices";
 import { signalingUrl, warmSignalingServer } from "@/lib/signaling-url";
 import { getGroup } from "@/services/group-service";
 import type { CallMode, GroupConversation, UserProfile } from "@/types";
@@ -131,7 +132,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
-  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
+  const [cameraFacing, setCameraFacing] = useState<CameraFacing>("user");
   const [isMobileBrowser] = useState(detectMobileBrowser);
 
   useEffect(() => {
@@ -320,16 +321,16 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   );
 
   const getMedia = useCallback(async (mode: CallMode) => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: mode === "video" ? { facingMode: { ideal: cameraFacing } } : false
-    });
+    const { stream, effectiveMode } = await getCallMedia(mode, cameraFacing);
     localStreamRef.current = stream;
     setLocalStream(stream);
     setMicEnabled(true);
-    setCameraEnabled(mode === "video");
-    return stream;
-  }, [cameraFacing]);
+    setCameraEnabled(effectiveMode === "video");
+    if (mode === "video" && effectiveMode === "audio") {
+      showToast({ variant: "info", title: "Camera unavailable", description: "Joining as audio only." });
+    }
+    return { stream, effectiveMode };
+  }, [cameraFacing, showToast]);
 
   const handleIncomingInvite = useCallback(
     async (message: Extract<GroupCallEvent, { type: "group-call-invite" }>) => {
@@ -500,14 +501,14 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     async (conversation: GroupConversation, mode: CallMode, requestType: "group-call-start" | "group-call-join") => {
       if (!user) return;
       setStatus("joining");
-      await getMedia(mode);
-      const nextActive = { conversation, mode, hostId: user.uid };
+      const { effectiveMode } = await getMedia(mode);
+      const nextActive = { conversation, mode: effectiveMode, hostId: user.uid };
       setActive(nextActive);
       activeRef.current = nextActive;
       await waitForSocket();
-      const response = await sendRequest<GroupCallStartResponse>(requestType, { conversationId: conversation.id, mode });
+      const response = await sendRequest<GroupCallStartResponse>(requestType, { conversationId: conversation.id, mode: effectiveMode });
       if (!isStartResponse(response)) throw new Error("Group call server returned an invalid response.");
-      const joinedActive = { conversation, mode: response.mode, hostId: response.hostId ?? user.uid };
+      const joinedActive = { conversation, mode: effectiveMode, hostId: response.hostId ?? user.uid };
       setAvailableCalls((calls) => {
         const nextCalls = new Map(calls);
         nextCalls.delete(conversation.id);
@@ -626,7 +627,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     if (!localStream || !activeRef.current) return;
     try {
       if (activeRef.current.mode === "audio") {
-        const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacing } }, audio: false });
+        const videoStream = await getVideoStreamForFacing(cameraFacing);
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
         peersRef.current.forEach((peer) => peer.addTrack(track, localStream));
@@ -657,25 +658,31 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const rotateCamera = useCallback(async () => {
     if (!localStream || !localStream.getVideoTracks().length) return;
     const nextFacing = cameraFacing === "user" ? "environment" : "user";
+    const currentTrack = localStream.getVideoTracks()[0];
+    const currentDeviceId = currentTrack?.getSettings().deviceId;
+    const videoSenders = [...peersRef.current.values()]
+      .map((peer) => peer.getSenders().find((item) => item.track?.kind === "video"))
+      .filter((sender): sender is RTCRtpSender => Boolean(sender));
+    localStream.removeTrack(currentTrack);
+    currentTrack.stop();
     try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacing } }, audio: false });
+      const videoStream = await getVideoStreamForFacing(nextFacing, { avoidDeviceId: currentDeviceId, requireDifferentDevice: true });
       const [nextTrack] = videoStream.getVideoTracks();
-      const previousTracks = localStream.getVideoTracks();
-      previousTracks.forEach((track) => {
-        localStream.removeTrack(track);
-        track.stop();
-      });
       localStream.addTrack(nextTrack);
-      await Promise.all(
-        [...peersRef.current.values()].map((peer) => {
-          const sender = peer.getSenders().find((item) => item.track?.kind === "video");
-          return sender?.replaceTrack(nextTrack) ?? Promise.resolve();
-        })
-      );
+      await Promise.all(videoSenders.map((sender) => sender.replaceTrack(nextTrack)));
       setCameraFacing(nextFacing);
       setCameraEnabled(nextTrack.enabled);
       setLocalStream(new MediaStream(localStream.getTracks()));
     } catch {
+      try {
+        const restoreStream = await getVideoStreamForFacing(cameraFacing);
+        const [restoreTrack] = restoreStream.getVideoTracks();
+        localStream.addTrack(restoreTrack);
+        await Promise.all(videoSenders.map((sender) => sender.replaceTrack(restoreTrack)));
+        setLocalStream(new MediaStream(localStream.getTracks()));
+      } catch {
+        setCameraEnabled(false);
+      }
       showToast({ variant: "error", title: "Could not rotate camera", description: "Your browser did not provide another camera." });
     }
   }, [cameraFacing, localStream, showToast]);
