@@ -1,11 +1,12 @@
 "use client";
 
-import { FileText, Share2, SmilePlus, Trash2 } from "lucide-react";
+import { FileText, Pencil, Share2, SmilePlus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { formatTime } from "@/lib/utils";
 import type { ChatTarget, Message, MessageReaction, MessageReactionKind, UserProfile } from "@/types";
@@ -20,6 +21,7 @@ type MessageListProps = {
   onReact: (messageId: string, kind: MessageReactionKind, content: string) => Promise<void>;
   onDeleteForMe: (messageId: string) => Promise<void>;
   onDeleteForEveryone: (messageId: string) => Promise<void>;
+  onEditMessage: (messageId: string, content: string) => Promise<void>;
   shareTargets: ChatTarget[];
   onShareToTarget: (message: Message, target: ChatTarget) => Promise<void>;
 };
@@ -64,6 +66,10 @@ function ReactionsModal({ message, open, onClose }: { message: Message | null; o
 
 function canDeleteForEveryone(message: Message, currentUserId: string) {
   return message.sender_id === currentUserId && !message.deleted_for_everyone_at && Date.now() - new Date(message.created_at).getTime() <= 60_000;
+}
+
+function canEditMessage(message: Message, currentUserId: string) {
+  return message.sender_id === currentUserId && message.kind === "text" && !message.deleted_for_everyone_at && Date.now() - new Date(message.created_at).getTime() <= 120_000;
 }
 
 function shareTextForMessage(message: Message) {
@@ -145,6 +151,75 @@ function DeleteMessageModal({
           </div>
           {message.sender_id === currentUserId && !deleteForEveryoneAllowed ? <p className="text-xs text-ink/55 dark:text-white/55">Delete for everyone is available for one minute after sending.</p> : null}
         </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function EditMessageModal({
+  message,
+  currentUserId,
+  open,
+  onClose,
+  onEditMessage
+}: {
+  message: Message | null;
+  currentUserId: string;
+  open: boolean;
+  onClose: () => void;
+  onEditMessage: (messageId: string, content: string) => Promise<void>;
+}) {
+  const { showToast } = useToast();
+  const [content, setContent] = useState<string | null>(null);
+  const editAllowed = message ? canEditMessage(message, currentUserId) : false;
+
+  function close() {
+    setContent(null);
+    onClose();
+  }
+
+  async function submit() {
+    if (!message) return;
+    const trimmed = (content ?? message.content ?? "").trim();
+    if (!trimmed) {
+      showToast({ variant: "error", title: "Message cannot be empty" });
+      return;
+    }
+    try {
+      await onEditMessage(message.id, trimmed);
+      showToast({ variant: "success", title: "Message edited" });
+      close();
+    } catch (error) {
+      showToast({ variant: "error", title: "Could not edit message", description: error instanceof Error ? error.message : "Try again." });
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={close} title="Edit message">
+      {message ? (
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <Textarea
+            value={content ?? message.content ?? ""}
+            onChange={(event) => setContent(event.target.value)}
+            maxLength={4000}
+            rows={4}
+            disabled={!editAllowed}
+            aria-label="Edit message content"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" disabled={!editAllowed}>Save edit</Button>
+            <Button type="button" variant="secondary" onClick={close}>Cancel</Button>
+          </div>
+          <p className="text-xs text-ink/55 dark:text-white/55">
+            {editAllowed ? "You can edit your text message for two minutes after sending." : "This message can no longer be edited."}
+          </p>
+        </form>
       ) : null}
     </Modal>
   );
@@ -266,6 +341,7 @@ export function MessageList({
   onReact,
   onDeleteForMe,
   onDeleteForEveryone,
+  onEditMessage,
   shareTargets,
   onShareToTarget
 }: MessageListProps) {
@@ -274,6 +350,7 @@ export function MessageList({
   const [customReaction, setCustomReaction] = useState("");
   const [reactionDetails, setReactionDetails] = useState<Message | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Message | null>(null);
+  const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [shareTarget, setShareTarget] = useState<Message | null>(null);
   const [activeToolsFor, setActiveToolsFor] = useState<string | null>(null);
 
@@ -354,6 +431,19 @@ export function MessageList({
                     >
                       <Share2 className="h-4 w-4" />
                     </button>
+                    {canEditMessage(message, currentUserId) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveToolsFor(null);
+                          setEditTarget(message);
+                        }}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink/65 transition hover:bg-ink/5 dark:text-white/65 dark:hover:bg-white/10"
+                        aria-label="Edit message"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                    ) : null}
                   </>
                 ) : null}
                 <button
@@ -428,6 +518,7 @@ export function MessageList({
               {!deletedForEveryone && message.content ? <p className="whitespace-pre-wrap break-words">{message.content}</p> : null}
               <div className={`mt-1 flex items-center justify-end gap-2 text-[11px] ${mine ? "text-white/75" : "text-ink/45 dark:text-white/45"}`}>
                 <span>{formatTime(message.created_at)}</span>
+                {message.edited_at && !deletedForEveryone ? <span>edited</span> : null}
                 {mine ? <span>{message.status}</span> : null}
               </div>
               {groupedReactions.length ? (
@@ -452,6 +543,7 @@ export function MessageList({
       })}
       <ReactionsModal message={reactionDetails} open={Boolean(reactionDetails)} onClose={() => setReactionDetails(null)} />
       <DeleteMessageModal message={deleteTarget} currentUserId={currentUserId} open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onDeleteForMe={onDeleteForMe} onDeleteForEveryone={onDeleteForEveryone} />
+      <EditMessageModal message={editTarget} currentUserId={currentUserId} open={Boolean(editTarget)} onClose={() => setEditTarget(null)} onEditMessage={onEditMessage} />
       <ShareMessageModal message={shareTarget} targets={shareTargets} open={Boolean(shareTarget)} onClose={() => setShareTarget(null)} onShareToTarget={onShareToTarget} />
     </div>
   );

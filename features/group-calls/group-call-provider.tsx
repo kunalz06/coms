@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, MicOff, PhoneOff, PhoneIncoming, Users, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff, PhoneIncoming, RotateCcw, Users, Video, VideoOff } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -72,6 +72,11 @@ function socketIsOpeningOrOpen(socket: WebSocket | null) {
   return socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING;
 }
 
+function detectMobileBrowser() {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+}
+
 function VideoTile({ stream, name, avatarUrl, muted = false, label }: { stream: MediaStream | null; name: string; avatarUrl?: string | null; muted?: boolean; label?: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -85,7 +90,7 @@ function VideoTile({ stream, name, avatarUrl, muted = false, label }: { stream: 
   const hasVideo = Boolean(stream?.getVideoTracks().some((track) => track.readyState === "live"));
 
   return (
-    <div className="relative min-h-[180px] overflow-hidden rounded-lg bg-black">
+    <div className="relative aspect-video min-h-[120px] overflow-hidden rounded-lg bg-black sm:min-h-[180px]">
       <video ref={videoRef} autoPlay muted={muted} playsInline className={`h-full w-full object-cover ${hasVideo ? "block" : "hidden"}`} />
       {!hasVideo ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-neutral-900">
@@ -126,6 +131,8 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
+  const [isMobileBrowser] = useState(detectMobileBrowser);
 
   useEffect(() => {
     activeRef.current = active;
@@ -261,6 +268,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       setActive(null);
       setMicEnabled(true);
       setCameraEnabled(true);
+      setCameraFacing("user");
       setStatus("idle");
       stopRingtone();
       if (current && isLeaveResponse(leaveResponse) && !leaveResponse.ended) {
@@ -312,13 +320,16 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   );
 
   const getMedia = useCallback(async (mode: CallMode) => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: mode === "video" });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: mode === "video" ? { facingMode: { ideal: cameraFacing } } : false
+    });
     localStreamRef.current = stream;
     setLocalStream(stream);
     setMicEnabled(true);
     setCameraEnabled(mode === "video");
     return stream;
-  }, []);
+  }, [cameraFacing]);
 
   const handleIncomingInvite = useCallback(
     async (message: Extract<GroupCallEvent, { type: "group-call-invite" }>) => {
@@ -615,7 +626,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     if (!localStream || !activeRef.current) return;
     try {
       if (activeRef.current.mode === "audio") {
-        const videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacing } }, audio: false });
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
         peersRef.current.forEach((peer) => peer.addTrack(track, localStream));
@@ -641,7 +652,33 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     } catch {
       showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to switch to video." });
     }
-  }, [localStream, sendOfferToPeer, showToast]);
+  }, [cameraFacing, localStream, sendOfferToPeer, showToast]);
+
+  const rotateCamera = useCallback(async () => {
+    if (!localStream || !localStream.getVideoTracks().length) return;
+    const nextFacing = cameraFacing === "user" ? "environment" : "user";
+    try {
+      const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacing } }, audio: false });
+      const [nextTrack] = videoStream.getVideoTracks();
+      const previousTracks = localStream.getVideoTracks();
+      previousTracks.forEach((track) => {
+        localStream.removeTrack(track);
+        track.stop();
+      });
+      localStream.addTrack(nextTrack);
+      await Promise.all(
+        [...peersRef.current.values()].map((peer) => {
+          const sender = peer.getSenders().find((item) => item.track?.kind === "video");
+          return sender?.replaceTrack(nextTrack) ?? Promise.resolve();
+        })
+      );
+      setCameraFacing(nextFacing);
+      setCameraEnabled(nextTrack.enabled);
+      setLocalStream(new MediaStream(localStream.getTracks()));
+    } catch {
+      showToast({ variant: "error", title: "Could not rotate camera", description: "Your browser did not provide another camera." });
+    }
+  }, [cameraFacing, localStream, showToast]);
 
   useEffect(() => {
     shouldReconnectRef.current = true;
@@ -708,9 +745,9 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         ) : null}
       </Modal>
       {active ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/75 p-4 backdrop-blur-sm">
-          <div className="flex h-[min(820px,calc(100vh-2rem))] w-[min(1120px,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-white/15 bg-neutral-950 text-white shadow-soft">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/75 p-0 backdrop-blur-sm sm:p-4">
+          <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/15 bg-neutral-950 text-white shadow-soft sm:h-[min(820px,calc(100vh-2rem))] sm:w-[min(1120px,calc(100vw-2rem))] sm:rounded-lg">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-3 sm:px-4">
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar name={active.conversation.title ?? "Group"} src={active.conversation.avatar_url} />
                 <div className="min-w-0">
@@ -721,21 +758,21 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-1 justify-end gap-2 sm:flex-none">
                 {mayEndForEveryone ? (
-                  <Button variant="danger" onClick={() => void endCallForEveryone()}>
+                  <Button variant="danger" className="h-9 px-3" onClick={() => void endCallForEveryone()}>
                     <PhoneOff className="h-4 w-4" />
                     End call
                   </Button>
                 ) : null}
-                <Button variant={mayEndForEveryone ? "secondary" : "danger"} onClick={() => void cleanup(true)}>
+                <Button variant={mayEndForEveryone ? "secondary" : "danger"} className="h-9 px-3" onClick={() => void cleanup(true)}>
                   <PhoneOff className="h-4 w-4" />
                   Leave
                 </Button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="grid min-h-full auto-rows-fr gap-3 md:grid-cols-2">
+            <div className="min-h-0 flex-1 overflow-y-auto p-2 sm:p-3">
+              <div className="grid auto-rows-fr grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-3">
                 <VideoTile stream={localStream} name={currentProfile?.full_name ?? "You"} avatarUrl={currentProfile?.avatar_url} muted label="You" />
                 {participants.map((participant) => (
                   <VideoTile
@@ -748,10 +785,16 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
                 ))}
               </div>
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-2 border-t border-white/10 px-4 py-3">
-              <Button variant="secondary" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
-              <Button variant="secondary" onClick={toggleCamera} disabled={!localStream?.getVideoTracks().length}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
-              <Button variant="secondary" onClick={() => void switchMode()}>
+            <div className="grid grid-cols-2 gap-2 border-t border-white/10 px-3 py-3 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:px-4">
+              <Button variant="secondary" className="h-9 px-3" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
+              <Button variant="secondary" className="h-9 px-3" onClick={toggleCamera} disabled={!localStream?.getVideoTracks().length}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
+              {isMobileBrowser && localStream?.getVideoTracks().length ? (
+                <Button variant="secondary" className="h-9 px-3 sm:hidden" onClick={() => void rotateCamera()}>
+                  <RotateCcw className="h-4 w-4" />
+                  Rotate
+                </Button>
+              ) : null}
+              <Button variant="secondary" className="h-9 px-3" onClick={() => void switchMode()}>
                 {active.mode === "audio" ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                 {active.mode === "audio" ? "Switch to video" : "Switch to audio"}
               </Button>

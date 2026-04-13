@@ -235,6 +235,7 @@ export function ChatPanel() {
             onReact={chat.reactToMessage}
             onDeleteForMe={chat.removeMessageForMe}
             onDeleteForEveryone={chat.removeMessageForEveryone}
+            onEditMessage={chat.editTextMessage}
             shareTargets={shareTargets}
             onShareToTarget={chat.shareMessageToTarget}
           />

@@ -6,6 +6,7 @@ import {
   deleteMessageForEveryone,
   deleteMessageForMe,
   deleteMessageRangeForMe,
+  editMessage,
   getMessages,
   getOrCreateConversation,
   markConversationRead,
@@ -90,6 +91,7 @@ export function useChat(target: ChatTarget | null) {
         status: "sending",
         deleted_for_everyone_at: null,
         deleted_by: null,
+        edited_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         attachments: []
@@ -189,6 +191,16 @@ export function useChat(target: ChatTarget | null) {
     [load, supabase, user]
   );
 
+  const editTextMessage = useCallback(
+    async (messageId: string, content: string) => {
+      if (!supabase || !user) throw new Error("Sign in to edit messages.");
+      if (messageId.startsWith("local-")) throw new Error("Wait for the message to finish sending first.");
+      await editMessage(supabase, { messageId, userId: user.uid, content });
+      await load({ silent: true });
+    },
+    [load, supabase, user]
+  );
+
   const deleteHistoryForMe = useCallback(async () => {
     if (!supabase || !user || !conversation) throw new Error("Choose a conversation first.");
     await deleteConversationHistoryForMe(supabase, { conversationId: conversation.id, userId: user.uid });
@@ -233,6 +245,7 @@ export function useChat(target: ChatTarget | null) {
       reactToMessage,
       removeMessageForMe,
       removeMessageForEveryone,
+      editTextMessage,
       deleteHistoryForMe,
       deleteRangeForMe,
       shareMessageToTarget,
@@ -242,6 +255,7 @@ export function useChat(target: ChatTarget | null) {
       conversation,
       deleteHistoryForMe,
       deleteRangeForMe,
+      editTextMessage,
       getDownloadUrl,
       loading,
       load,

@@ -129,12 +129,16 @@ create table if not exists messages (
   status text not null default 'sent' check (status in ('sent', 'failed', 'delivered', 'read')),
   deleted_for_everyone_at timestamptz,
   deleted_by text references user_profiles(id) on delete set null,
+  edited_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table messages add column if not exists deleted_for_everyone_at timestamptz;
 alter table messages add column if not exists deleted_by text references user_profiles(id) on delete set null;
+alter table messages add column if not exists edited_at timestamptz;
+alter table messages drop constraint if exists messages_content_length_check;
+alter table messages add constraint messages_content_length_check check (content is null or char_length(content) <= 4000);
 
 create table if not exists message_deletions (
   id uuid primary key default gen_random_uuid(),
@@ -280,6 +284,7 @@ begin
   if old.deleted_for_everyone_at is not null then
     new.deleted_for_everyone_at := old.deleted_for_everyone_at;
     new.deleted_by := old.deleted_by;
+    new.edited_at := old.edited_at;
     new.content := old.content;
     return new;
   end if;
@@ -296,10 +301,26 @@ begin
     end if;
     new.deleted_by := app_user_id();
     new.content := null;
+    new.edited_at := old.edited_at;
   elsif new.content is distinct from old.content then
-    raise exception 'Message content cannot be edited';
+    if old.sender_id <> app_user_id() then
+      raise exception 'Only the sender can edit this message';
+    end if;
+    if old.kind <> 'text' then
+      raise exception 'Only text messages can be edited';
+    end if;
+    if old.created_at < now() - interval '2 minutes' then
+      raise exception 'Messages can only be edited within two minutes';
+    end if;
+    if new.content is null or char_length(btrim(new.content)) = 0 then
+      raise exception 'Edited message content cannot be empty';
+    end if;
+    new.content := btrim(new.content);
+    new.edited_at := now();
   elsif new.deleted_by is distinct from old.deleted_by then
     raise exception 'Message deletion metadata cannot be changed directly';
+  elsif new.edited_at is distinct from old.edited_at then
+    raise exception 'Message edit metadata cannot be changed directly';
   end if;
 
   return new;

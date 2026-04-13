@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff, RotateCcw, Video, VideoOff } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -67,6 +67,11 @@ function socketIsOpeningOrOpen(socket: WebSocket | null) {
   return socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING;
 }
 
+function detectMobileBrowser() {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+}
+
 export function CallProvider({ children }: { children: ReactNode }) {
   const { user, supabase } = useAuth();
   const { showToast } = useToast();
@@ -92,6 +97,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
+  const [isMobileBrowser] = useState(detectMobileBrowser);
   const statusRef = useRef(status);
   const activeRef = useRef(active);
   const incomingRef = useRef(incoming);
@@ -226,6 +233,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setMode("audio");
       setMicEnabled(true);
       setCameraEnabled(true);
+      setCameraFacing("user");
       if (callId) {
         await updateCallSession(callId, {
           status: reason,
@@ -317,12 +325,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getMedia = useCallback(async (nextMode: CallMode) => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: nextMode === "video" });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: nextMode === "video" ? { facingMode: { ideal: cameraFacing } } : false
+    });
     setLocalStream(stream);
     setMicEnabled(true);
     setCameraEnabled(nextMode === "video");
     return stream;
-  }, []);
+  }, [cameraFacing]);
 
   const handleOffer = useCallback(
     async (message: Extract<SignalingMessage, { type: "call-offer" }>) => {
@@ -533,7 +544,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!call || !peer || !user || !localStream) return;
     try {
       if (mode === "audio") {
-        const videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cameraFacing } }, audio: false });
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
         peer.addTrack(track, localStream);
@@ -555,7 +566,30 @@ export function CallProvider({ children }: { children: ReactNode }) {
     } catch {
       showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to switch to video." });
     }
-  }, [localStream, mode, sendSignal, showToast, user]);
+  }, [cameraFacing, localStream, mode, sendSignal, showToast, user]);
+
+  const rotateCamera = useCallback(async () => {
+    const peer = peerRef.current;
+    if (!localStream || !peer || !localStream.getVideoTracks().length) return;
+    const nextFacing = cameraFacing === "user" ? "environment" : "user";
+    try {
+      const videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: nextFacing } }, audio: false });
+      const [nextTrack] = videoStream.getVideoTracks();
+      const previousTracks = localStream.getVideoTracks();
+      previousTracks.forEach((track) => {
+        localStream.removeTrack(track);
+        track.stop();
+      });
+      localStream.addTrack(nextTrack);
+      const sender = peer.getSenders().find((item) => item.track?.kind === "video");
+      await sender?.replaceTrack(nextTrack);
+      setCameraFacing(nextFacing);
+      setCameraEnabled(nextTrack.enabled);
+      setLocalStream(new MediaStream(localStream.getTracks()));
+    } catch {
+      showToast({ variant: "error", title: "Could not rotate camera", description: "Your browser did not provide another camera." });
+    }
+  }, [cameraFacing, localStream, showToast]);
 
   const value = useMemo(() => ({ status, mode, startCall }), [mode, startCall, status]);
 
@@ -581,8 +615,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       </Modal>
 
       {active ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/70 p-4 backdrop-blur-sm">
-          <div className="flex h-[min(760px,calc(100vh-2rem))] w-[min(1040px,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-white/15 bg-neutral-950 text-white shadow-soft">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/70 p-0 backdrop-blur-sm sm:p-4">
+          <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/15 bg-neutral-950 text-white shadow-soft sm:h-[min(760px,calc(100vh-2rem))] sm:w-[min(1040px,calc(100vw-2rem))] sm:rounded-lg">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div className="flex items-center gap-3">
                 <Avatar name={active.peer.full_name} src={active.peer.avatar_url} />
@@ -615,6 +649,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 <div className="grid grid-cols-2 gap-2">
                   <Button variant="secondary" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
                   <Button variant="secondary" onClick={toggleCamera} disabled={!localStream?.getVideoTracks().length}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
+                  {isMobileBrowser && localStream?.getVideoTracks().length ? (
+                    <Button variant="secondary" className="col-span-2 md:hidden" onClick={() => void rotateCamera()}>
+                      <RotateCcw className="h-4 w-4" />
+                      Rotate camera
+                    </Button>
+                  ) : null}
                   <Button variant="secondary" className="col-span-2" onClick={() => void switchMode()}>
                     {mode === "audio" ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                     {mode === "audio" ? "Switch to video" : "Switch to audio"}

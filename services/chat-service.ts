@@ -114,6 +114,20 @@ export async function shareMessageToConversation(
   });
 }
 
+export async function editMessage(supabase: SupabaseClient, values: { messageId: string; userId: string; content: string }) {
+  const content = values.content.replace(/\s+/g, " ").trim();
+  if (!content) throw new Error("Message cannot be empty.");
+  if (content.length > 4000) throw new Error("Messages must be 4000 characters or fewer.");
+
+  const { error } = await supabase
+    .from("messages")
+    .update({ content })
+    .eq("id", values.messageId)
+    .eq("sender_id", values.userId)
+    .eq("kind", "text");
+  if (error) throw error;
+}
+
 export async function markConversationRead(supabase: SupabaseClient, conversationId: string, userId: string) {
   const { data: conversation, error: conversationError } = await supabase
     .from("conversations")
