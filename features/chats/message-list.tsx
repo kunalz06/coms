@@ -3,7 +3,6 @@
 import { FileText, SmilePlus } from "lucide-react";
 import { useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { formatTime } from "@/lib/utils";
@@ -19,7 +18,7 @@ type MessageListProps = {
   onReact: (messageId: string, kind: MessageReactionKind, content: string) => Promise<void>;
 };
 
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "🙏"];
+const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F64F}"];
 
 function reactionGroups(reactions: MessageReaction[] = []) {
   const groups = new Map<string, { key: string; content: string; count: number }>();
@@ -53,9 +52,6 @@ function ReactionsModal({ message, open, onClose }: { message: Message | null; o
       ) : (
         <p className="text-sm text-ink/60 dark:text-white/60">No reactions yet.</p>
       )}
-      <div className="mt-4 flex justify-end">
-        <Button variant="secondary" onClick={onClose}>Close</Button>
-      </div>
     </Modal>
   );
 }
@@ -65,12 +61,14 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
   const [customFor, setCustomFor] = useState<string | null>(null);
   const [customReaction, setCustomReaction] = useState("");
   const [reactionDetails, setReactionDetails] = useState<Message | null>(null);
+  const [activeToolsFor, setActiveToolsFor] = useState<string | null>(null);
 
   async function react(messageId: string, kind: MessageReactionKind, content: string) {
     try {
       await onReact(messageId, kind, content);
       setCustomReaction("");
       setCustomFor(null);
+      setActiveToolsFor(null);
     } catch (error) {
       showToast({ variant: "error", title: "Could not react", description: error instanceof Error ? error.message : "Try again." });
     }
@@ -95,10 +93,17 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
         const attachment = message.attachments?.[0];
         const sender = senderProfiles?.get(message.sender_id);
         const groupedReactions = reactionGroups(message.reactions);
+        const toolsOpen = activeToolsFor === message.id || customFor === message.id;
         return (
           <div key={message.id} className={`group/message flex ${mine ? "justify-end" : "justify-start"}`}>
-            <div className={`relative max-w-[78%] rounded-lg border px-3 py-2 text-sm shadow-sm ${mine ? "border-moss/30 bg-moss text-white" : "border-line bg-white/80 text-ink dark:border-white/10 dark:bg-white/10 dark:text-white"}`}>
-              <div className={`absolute -top-9 z-10 hidden items-center gap-1 rounded-lg border border-line bg-white/95 p-1 shadow-soft group-hover/message:flex group-focus-within/message:flex dark:border-white/10 dark:bg-neutral-950/95 ${mine ? "right-0" : "left-0"}`}>
+            <div
+              className={`relative max-w-[86%] cursor-pointer rounded-lg border px-3 py-2 text-sm shadow-sm md:max-w-[78%] ${mine ? "border-moss/30 bg-moss text-white" : "border-line bg-white/80 text-ink dark:border-white/10 dark:bg-white/10 dark:text-white"}`}
+              onClick={() => setActiveToolsFor((current) => (current === message.id ? null : message.id))}
+            >
+              <div
+                className={`absolute -top-9 z-10 items-center gap-1 rounded-lg border border-line bg-white/95 p-1 shadow-soft dark:border-white/10 dark:bg-neutral-950/95 ${mine ? "right-0" : "left-0"} ${toolsOpen ? "flex" : "hidden group-hover/message:flex group-focus-within/message:flex"}`}
+                onClick={(event) => event.stopPropagation()}
+              >
                 {QUICK_REACTIONS.map((reaction) => (
                   <button
                     key={reaction}
@@ -112,7 +117,10 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
                 ))}
                 <button
                   type="button"
-                  onClick={() => setCustomFor((current) => (current === message.id ? null : message.id))}
+                  onClick={() => {
+                    setActiveToolsFor(message.id);
+                    setCustomFor((current) => (current === message.id ? null : message.id));
+                  }}
                   className="flex h-7 w-7 items-center justify-center rounded-md text-ink/65 transition hover:bg-ink/5 dark:text-white/65 dark:hover:bg-white/10"
                   aria-label="Add custom reaction"
                 >
@@ -122,6 +130,7 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
               {customFor === message.id ? (
                 <form
                   className={`absolute -top-20 z-20 flex w-60 gap-1 rounded-lg border border-line bg-white/95 p-2 shadow-soft dark:border-white/10 dark:bg-neutral-950/95 ${mine ? "right-0" : "left-0"}`}
+                  onClick={(event) => event.stopPropagation()}
                   onSubmit={(event) => {
                     event.preventDefault();
                     const kind: MessageReactionKind = customReaction.length <= 16 && /\p{Extended_Pictographic}/u.test(customReaction) ? "emoji" : "text";
@@ -142,13 +151,14 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
               {showSenderNames && !mine ? <p className="mb-1 text-xs font-semibold text-moss dark:text-emerald-300">{sender?.full_name ?? "Group member"}</p> : null}
               {message.kind === "image" && attachment ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={attachment.url} alt={attachment.file_name} className="mb-2 max-h-80 rounded-lg object-cover" />
+                <img src={attachment.url} alt={attachment.file_name} className="mb-2 max-h-80 rounded-lg object-cover" onClick={(event) => event.stopPropagation()} />
               ) : null}
-              {message.kind === "voice" && attachment ? <audio controls src={attachment.url} className="mb-2 max-w-full" /> : null}
+              {message.kind === "voice" && attachment ? <audio controls src={attachment.url} className="mb-2 max-w-full" onClick={(event) => event.stopPropagation()} /> : null}
               {message.kind === "document" && attachment ? (
                 <button
                   type="button"
-                  onClick={async () => {
+                  onClick={async (event) => {
+                    event.stopPropagation();
                     const popup = window.open("about:blank", "_blank");
                     try {
                       const url = await getDownloadUrl(attachment.url);
@@ -181,7 +191,10 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
               {groupedReactions.length ? (
                 <button
                   type="button"
-                  onClick={() => setReactionDetails(message)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setReactionDetails(message);
+                  }}
                   className={`mt-2 flex max-w-full flex-wrap gap-1 rounded-md text-left ${mine ? "text-white" : "text-ink dark:text-white"}`}
                 >
                   {groupedReactions.map((reaction) => (

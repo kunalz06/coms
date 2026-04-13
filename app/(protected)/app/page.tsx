@@ -5,7 +5,7 @@ import { ContactsSidebar } from "@/features/contacts/contacts-sidebar";
 export default function AppPage() {
   return (
     <AuthGuard>
-      <main className="flex h-screen min-h-[680px] overflow-hidden">
+      <main className="flex h-dvh min-h-0 overflow-hidden">
         <div className="grid w-full grid-cols-1 md:grid-cols-[380px_minmax(0,1fr)]">
           <ContactsSidebar />
           <ChatPanel />

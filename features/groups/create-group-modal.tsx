@@ -104,7 +104,6 @@ export function CreateGroupModal({ open, friends, onClose, onCreate, onCreated }
           </div>
         </div>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button onClick={() => void submit()} disabled={submitting}>{submitting ? "Creating" : "Create group"}</Button>
         </div>
       </div>

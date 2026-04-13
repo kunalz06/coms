@@ -134,11 +134,6 @@ export function SettingsPanel({ open, onClose, blocked, unblock }: SettingsPanel
             )}
           </div>
         </section>
-        <div className="flex justify-end border-t border-line pt-4 dark:border-white/10">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Close settings
-          </Button>
-        </div>
       </div>
     </Modal>
   );

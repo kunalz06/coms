@@ -85,7 +85,7 @@ export function ContactsSidebar() {
   }
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-r border-line/80 bg-paper/70 p-4 backdrop-blur dark:border-white/10 dark:bg-neutral-950/65">
+    <aside className={`${selectedChat ? "hidden md:flex" : "flex"} h-full min-h-0 flex-col border-r border-line/80 bg-paper/70 p-3 backdrop-blur dark:border-white/10 dark:bg-neutral-950/65 sm:p-4`}>
       <div className="mb-4">
         <p className="text-xs font-semibold tracking-[0.16em] text-moss dark:text-emerald-300">COMMS</p>
         <h1 className="mt-1 text-2xl font-semibold text-ink dark:text-white">Messages</h1>

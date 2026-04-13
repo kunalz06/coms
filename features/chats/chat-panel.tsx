@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Info, Phone, Video } from "lucide-react";
+import { ArrowLeft, ChevronDown, Info, Phone, Video } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import type { CallSession, UserProfile } from "@/types";
 export function ChatPanel() {
   const { user, supabase } = useAuth();
   const target = useAppStore((state) => state.selectedChat);
+  const setSelectedChat = useAppStore((state) => state.setSelectedChat);
   const chat = useChat(target);
   const { startCall, status } = useCalls();
   const { joinGroupCall, status: groupCallStatus } = useGroupCalls();
@@ -87,7 +88,7 @@ export function ChatPanel() {
 
   if (!target || !user) {
     return (
-      <section className="flex h-full min-h-0 flex-1 items-center justify-center">
+      <section className="hidden h-full min-h-0 flex-1 items-center justify-center md:flex">
         <div className="max-w-sm text-center">
           <h2 className="text-2xl font-semibold text-ink dark:text-white">Choose a conversation</h2>
           <p className="mt-2 text-sm text-ink/60 dark:text-white/60">Search for a friend by email or open an existing chat.</p>
@@ -98,8 +99,11 @@ export function ChatPanel() {
 
   return (
     <section className="flex h-full min-h-0 flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-line bg-paper/80 px-4 py-3 backdrop-blur dark:border-white/10 dark:bg-neutral-950/80">
+      <header className="flex items-center justify-between border-b border-line bg-paper/80 px-3 py-3 backdrop-blur dark:border-white/10 dark:bg-neutral-950/80 sm:px-4">
         <div className="flex min-w-0 items-center gap-3">
+          <Button variant="ghost" className="h-10 w-10 px-0 md:hidden" onClick={() => setSelectedChat(null)} aria-label="Back to chats">
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
           <Avatar name={chatTitle} src={chatAvatar} />
           <div className="min-w-0">
             <h2 className="truncate font-semibold text-ink dark:text-white">{chatTitle}</h2>
