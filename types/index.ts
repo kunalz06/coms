@@ -19,6 +19,8 @@ export type Friendship = {
   friend?: UserProfile;
   latest_message?: Message | null;
   unread_count?: number;
+  conversation_id?: string;
+  pinned_at?: string | null;
 };
 
 export type Conversation = {
@@ -51,6 +53,7 @@ export type GroupConversation = Conversation & {
   members?: ConversationMember[];
   latest_message?: Message | null;
   unread_count?: number;
+  pinned_at?: string | null;
 };
 
 export type ChatTarget =
@@ -133,6 +136,13 @@ export type ConversationMute = {
   conversation_id: string;
   user_id: string;
   muted_until: string | null;
+  created_at: string;
+};
+
+export type ConversationPin = {
+  id: string;
+  conversation_id: string;
+  user_id: string;
   created_at: string;
 };
 

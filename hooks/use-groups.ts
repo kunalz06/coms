@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useState } from "react";
 import { addGroupMember, createGroup, deleteGroup, getGroups, removeGroupMember, updateGroup, updateGroupMemberRole } from "@/services/group-service";
+import { setConversationPinned } from "@/services/pin-service";
 import { searchProfileByEmail } from "@/services/profile-service";
 import type { GroupConversation } from "@/types";
 import { useAuth } from "@/features/auth/auth-provider";
@@ -43,6 +44,7 @@ export function useGroups() {
       .on("postgres_changes", { event: "*", schema: "public", table: "conversation_members" }, () => void refresh({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => void refresh({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => void refresh({ silent: true }))
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_pins", filter: `user_id=eq.${user.uid}` }, () => void refresh({ silent: true }))
       .subscribe();
 
     return () => {
@@ -118,5 +120,14 @@ export function useGroups() {
     [refresh, supabase]
   );
 
-  return { groups, loading, refresh, create, rename, leave, addMemberByEmail, removeMember, setRole, deleteConversation };
+  const togglePin = useCallback(
+    async (conversationId: string, pinned: boolean) => {
+      if (!supabase || !user) return;
+      await setConversationPinned(supabase, user.uid, conversationId, pinned);
+      await refresh({ silent: true });
+    },
+    [refresh, supabase, user]
+  );
+
+  return { groups, loading, refresh, create, rename, leave, addMemberByEmail, removeMember, setRole, deleteConversation, togglePin };
 }

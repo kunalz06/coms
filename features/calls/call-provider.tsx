@@ -527,12 +527,38 @@ export function CallProvider({ children }: { children: ReactNode }) {
     });
   }, [localStream]);
 
-  const toggleCamera = useCallback(() => {
-    localStream?.getVideoTracks().forEach((track) => {
-      track.enabled = !track.enabled;
-      setCameraEnabled(track.enabled);
-    });
-  }, [localStream]);
+  const toggleCamera = useCallback(async () => {
+    const call = activeRef.current;
+    const peer = peerRef.current;
+    if (!call || !peer || !user || !localStream || mode !== "video") return;
+
+    try {
+      if (cameraEnabled) {
+        localStream.getVideoTracks().forEach((track) => {
+          const sender = peer.getSenders().find((item) => item.track === track);
+          if (sender) peer.removeTrack(sender);
+          localStream.removeTrack(track);
+          track.stop();
+        });
+        setCameraEnabled(false);
+      } else {
+        const videoStream = await getVideoStream();
+        const [track] = videoStream.getVideoTracks();
+        localStream.addTrack(track);
+        peer.addTrack(track, localStream);
+        setCameraEnabled(true);
+      }
+
+      const nextStream = new MediaStream(localStream.getTracks());
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      sendSignal({ type: "call-offer", callId: call.callId, from: user.uid, to: call.peer.id, offer });
+    } catch {
+      showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to turn video on." });
+    }
+  }, [cameraEnabled, localStream, mode, sendSignal, showToast, user]);
 
   const switchMode = useCallback(async () => {
     const call = activeRef.current;
@@ -546,6 +572,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         peer.addTrack(track, localStream);
         setMode("video");
         setCameraEnabled(true);
+        const nextStream = new MediaStream(localStream.getTracks());
+        localStreamRef.current = nextStream;
+        setLocalStream(nextStream);
       } else {
         localStream.getVideoTracks().forEach((track) => {
           track.stop();
@@ -555,6 +584,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         });
         setMode("audio");
         setCameraEnabled(false);
+        const nextStream = new MediaStream(localStream.getTracks());
+        localStreamRef.current = nextStream;
+        setLocalStream(nextStream);
       }
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
@@ -621,7 +653,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Button variant="secondary" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
-                  <Button variant="secondary" onClick={toggleCamera} disabled={!localStream?.getVideoTracks().length}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
+                  <Button variant="secondary" onClick={() => void toggleCamera()} disabled={mode === "audio"}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
                   <Button variant="secondary" className="col-span-2" onClick={() => void switchMode()}>
                     {mode === "audio" ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                     {mode === "audio" ? "Switch to video" : "Switch to audio"}

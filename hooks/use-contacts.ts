@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useState } from "react";
 import { addFriendByEmail, blockUser, deleteFriend, getBlockedContacts, getFriends, unblockUser } from "@/services/contact-service";
+import { setConversationPinned } from "@/services/pin-service";
 import { searchProfileByEmail } from "@/services/profile-service";
 import type { Block, Friendship, UserProfile } from "@/types";
 import { useAuth } from "@/features/auth/auth-provider";
@@ -53,6 +54,7 @@ export function useContacts() {
       .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, () => void refresh({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "blocks" }, () => void refresh({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => void refresh({ silent: true }))
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_pins", filter: `user_id=eq.${user.uid}` }, () => void refresh({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "user_profiles" }, () => void refresh({ silent: true }))
       .subscribe();
 
@@ -106,5 +108,14 @@ export function useContacts() {
     [refresh, supabase, user]
   );
 
-  return { friends, blocked, loading, refresh, search, addFriend, removeFriend, block, unblock };
+  const togglePin = useCallback(
+    async (conversationId: string, pinned: boolean) => {
+      if (!supabase || !user) return;
+      await setConversationPinned(supabase, user.uid, conversationId, pinned);
+      await refresh({ silent: true });
+    },
+    [refresh, supabase, user]
+  );
+
+  return { friends, blocked, loading, refresh, search, addFriend, removeFriend, block, unblock, togglePin };
 }

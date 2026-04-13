@@ -105,6 +105,14 @@ create table if not exists conversation_mutes (
   unique (conversation_id, user_id)
 );
 
+create table if not exists conversation_pins (
+  id uuid primary key default gen_random_uuid(),
+  conversation_id uuid not null references conversations(id) on delete cascade,
+  user_id text not null references user_profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (conversation_id, user_id)
+);
+
 alter table conversations add column if not exists type text not null default 'direct';
 alter table conversations add column if not exists title text;
 alter table conversations add column if not exists avatar_url text;
@@ -220,6 +228,8 @@ create index if not exists blocks_blocker_idx on blocks(blocker_id);
 create index if not exists blocks_blocked_idx on blocks(blocked_id);
 create index if not exists conversation_mutes_user_idx on conversation_mutes(user_id);
 create index if not exists conversation_mutes_conversation_idx on conversation_mutes(conversation_id);
+create index if not exists conversation_pins_user_idx on conversation_pins(user_id, created_at desc);
+create index if not exists conversation_pins_conversation_idx on conversation_pins(conversation_id);
 create index if not exists push_subscriptions_user_idx on push_subscriptions(user_id);
 create index if not exists conversations_user_one_idx on conversations(user_one_id);
 create index if not exists conversations_user_two_idx on conversations(user_two_id);
@@ -492,6 +502,7 @@ alter table blocks enable row level security;
 alter table conversations enable row level security;
 alter table conversation_members enable row level security;
 alter table conversation_mutes enable row level security;
+alter table conversation_pins enable row level security;
 alter table messages enable row level security;
 alter table message_deletions enable row level security;
 alter table message_attachments enable row level security;
@@ -649,6 +660,18 @@ with check (user_id = app_user_id() and user_is_conversation_participant(convers
 
 drop policy if exists "conversation mutes removed by owner" on conversation_mutes;
 create policy "conversation mutes removed by owner" on conversation_mutes
+for delete using (user_id = app_user_id());
+
+drop policy if exists "conversation pins visible to owner" on conversation_pins;
+create policy "conversation pins visible to owner" on conversation_pins
+for select using (user_id = app_user_id());
+
+drop policy if exists "conversation pins created by owner" on conversation_pins;
+create policy "conversation pins created by owner" on conversation_pins
+for insert with check (user_id = app_user_id() and user_is_conversation_participant(conversation_id, app_user_id()));
+
+drop policy if exists "conversation pins removed by owner" on conversation_pins;
+create policy "conversation pins removed by owner" on conversation_pins
 for delete using (user_id = app_user_id());
 
 drop policy if exists "messages visible to participants" on messages;
@@ -817,6 +840,7 @@ begin
     'conversations',
     'conversation_members',
     'conversation_mutes',
+    'conversation_pins',
     'messages',
     'message_deletions',
     'message_attachments',

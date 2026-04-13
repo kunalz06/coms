@@ -608,12 +608,37 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     });
   }, [localStream]);
 
-  const toggleCamera = useCallback(() => {
-    localStream?.getVideoTracks().forEach((track) => {
-      track.enabled = !track.enabled;
-      setCameraEnabled(track.enabled);
-    });
-  }, [localStream]);
+  const toggleCamera = useCallback(async () => {
+    const current = activeRef.current;
+    if (!localStream || !current || current.mode !== "video") return;
+
+    try {
+      if (cameraEnabled) {
+        localStream.getVideoTracks().forEach((track) => {
+          peersRef.current.forEach((peer) => {
+            const sender = peer.getSenders().find((item) => item.track === track);
+            if (sender) peer.removeTrack(sender);
+          });
+          localStream.removeTrack(track);
+          track.stop();
+        });
+        setCameraEnabled(false);
+      } else {
+        const videoStream = await getVideoStream();
+        const [track] = videoStream.getVideoTracks();
+        localStream.addTrack(track);
+        peersRef.current.forEach((peer) => peer.addTrack(track, localStream));
+        setCameraEnabled(true);
+      }
+
+      const nextStream = new MediaStream(localStream.getTracks());
+      localStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      await Promise.all([...peersRef.current.keys()].map((peerId) => sendOfferToPeer(peerId)));
+    } catch {
+      showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to turn video on." });
+    }
+  }, [cameraEnabled, localStream, sendOfferToPeer, showToast]);
 
   const switchMode = useCallback(async () => {
     if (!localStream || !activeRef.current) return;
@@ -627,6 +652,9 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         setActive(nextActive);
         activeRef.current = nextActive;
         setCameraEnabled(true);
+        const nextStream = new MediaStream(localStream.getTracks());
+        localStreamRef.current = nextStream;
+        setLocalStream(nextStream);
       } else {
         localStream.getVideoTracks().forEach((track) => {
           track.stop();
@@ -640,6 +668,9 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         setActive(nextActive);
         activeRef.current = nextActive;
         setCameraEnabled(false);
+        const nextStream = new MediaStream(localStream.getTracks());
+        localStreamRef.current = nextStream;
+        setLocalStream(nextStream);
       }
       await Promise.all([...peersRef.current.keys()].map((peerId) => sendOfferToPeer(peerId)));
     } catch {
@@ -754,7 +785,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
             </div>
             <div className="grid grid-cols-2 gap-2 border-t border-white/10 px-3 py-3 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:px-4">
               <Button variant="secondary" className="h-9 px-3" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
-              <Button variant="secondary" className="h-9 px-3" onClick={toggleCamera} disabled={!localStream?.getVideoTracks().length}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
+              <Button variant="secondary" className="h-9 px-3" onClick={() => void toggleCamera()} disabled={active.mode === "audio"}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
               <Button variant="secondary" className="h-9 px-3" onClick={() => void switchMode()}>
                 {active.mode === "audio" ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                 {active.mode === "audio" ? "Switch to video" : "Switch to audio"}

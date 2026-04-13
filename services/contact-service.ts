@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Block, Friendship, Message, UserProfile } from "@/types";
 import { getOrCreateConversation } from "@/services/chat-service";
+import { getConversationPins } from "@/services/pin-service";
 import { searchProfileByEmail } from "@/services/profile-service";
 
 export async function getFriends(supabase: SupabaseClient, userId: string): Promise<Friendship[]> {
@@ -27,7 +28,7 @@ export async function getFriends(supabase: SupabaseClient, userId: string): Prom
   if (profileError) throw profileError;
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
 
-  return Promise.all(
+  const items = await Promise.all(
     friendships
       .filter((friendship) => visibleFriendIds.includes(friendship.requester_id === userId ? friendship.addressee_id : friendship.requester_id))
       .map(async (friendship) => {
@@ -48,12 +49,25 @@ export async function getFriends(supabase: SupabaseClient, userId: string): Prom
           .in("status", ["sent", "delivered"]);
         return {
           ...friendship,
+          conversation_id: conversation.id,
           friend: profileMap.get(friendId),
           latest_message: latest ?? null,
           unread_count: count ?? 0
         };
       })
   );
+  const pinMap = await getConversationPins(supabase, userId, items.flatMap((item) => (item.conversation_id ? [item.conversation_id] : [])));
+  return items
+    .map((item) => ({ ...item, pinned_at: item.conversation_id ? pinMap.get(item.conversation_id) ?? null : null }))
+    .sort((a, b) => {
+      const pinned = Number(Boolean(b.pinned_at)) - Number(Boolean(a.pinned_at));
+      if (pinned) return pinned;
+      const unread = Number(Boolean(b.unread_count)) - Number(Boolean(a.unread_count));
+      if (unread) return unread;
+      const bTime = b.latest_message?.created_at ?? b.updated_at;
+      const aTime = a.latest_message?.created_at ?? a.updated_at;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
 }
 
 export async function addFriendByEmail(supabase: SupabaseClient, userId: string, email: string) {

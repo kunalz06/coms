@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ConversationMember, GroupConversation, Message, UserProfile } from "@/types";
+import { getConversationPins } from "@/services/pin-service";
 
 export const MAX_GROUP_MEMBERS = 10;
 
@@ -58,7 +59,22 @@ export async function getGroups(supabase: SupabaseClient, userId: string) {
     .returns<GroupConversation[]>();
   if (groupsError) throw groupsError;
 
-  return Promise.all(groups.map((group) => attachGroupMetadata(supabase, group, userId)));
+  const [items, pinMap] = await Promise.all([
+    Promise.all(groups.map((group) => attachGroupMetadata(supabase, group, userId))),
+    getConversationPins(supabase, userId, groups.map((group) => group.id))
+  ]);
+
+  return items
+    .map((group) => ({ ...group, pinned_at: pinMap.get(group.id) ?? null }))
+    .sort((a, b) => {
+      const pinned = Number(Boolean(b.pinned_at)) - Number(Boolean(a.pinned_at));
+      if (pinned) return pinned;
+      const unread = Number(Boolean(b.unread_count)) - Number(Boolean(a.unread_count));
+      if (unread) return unread;
+      const bTime = b.latest_message?.created_at ?? b.last_message_at ?? b.updated_at;
+      const aTime = a.latest_message?.created_at ?? a.last_message_at ?? a.updated_at;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
 }
 
 export async function getGroup(supabase: SupabaseClient, conversationId: string, userId: string) {
