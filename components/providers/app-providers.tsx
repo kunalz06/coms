@@ -6,6 +6,7 @@ import { AuthProvider } from "@/features/auth/auth-provider";
 import { CallProvider } from "@/features/calls/call-provider";
 import { GroupCallProvider } from "@/features/group-calls/group-call-provider";
 import { NotificationProvider } from "@/features/notifications/notification-provider";
+import { PwaProvider } from "@/features/pwa/pwa-provider";
 import { useAppStore } from "@/store/app-store";
 
 function ThemeBridge() {
@@ -22,14 +23,16 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <ToastProvider>
       <AuthProvider>
-        <NotificationProvider>
-          <CallProvider>
-            <GroupCallProvider>
-              <ThemeBridge />
-              {children}
-            </GroupCallProvider>
-          </CallProvider>
-        </NotificationProvider>
+        <PwaProvider>
+          <NotificationProvider>
+            <CallProvider>
+              <GroupCallProvider>
+                <ThemeBridge />
+                {children}
+              </GroupCallProvider>
+            </CallProvider>
+          </NotificationProvider>
+        </PwaProvider>
       </AuthProvider>
     </ToastProvider>
   );

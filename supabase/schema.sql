@@ -113,6 +113,42 @@ create table if not exists conversation_pins (
   unique (conversation_id, user_id)
 );
 
+create table if not exists backup_preferences (
+  user_id text primary key references user_profiles(id) on delete cascade,
+  provider text check (provider in ('google_drive')),
+  enabled boolean not null default false,
+  status text not null default 'disabled' check (status in ('disabled', 'connecting', 'enabled', 'syncing', 'success', 'failed', 'reconnect_required')),
+  google_drive_email text,
+  drive_scope text,
+  drive_access_token_enc text,
+  drive_refresh_token_enc text,
+  drive_token_expires_at timestamptz,
+  last_successful_backup_at timestamptz,
+  last_backup_error text,
+  reconnect_required boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists archive_batches (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references user_profiles(id) on delete cascade,
+  conversation_id uuid not null references conversations(id) on delete cascade,
+  provider text not null check (provider in ('google_drive')),
+  batch_key text not null,
+  archive_version integer not null default 1,
+  provider_file_id text,
+  provider_file_name text,
+  status text not null default 'pending' check (status in ('pending', 'uploading', 'success', 'failed', 'missing')),
+  message_count integer not null default 0,
+  started_at timestamptz,
+  completed_at timestamptz,
+  error_message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, conversation_id, provider, batch_key)
+);
+
 alter table conversations add column if not exists type text not null default 'direct';
 alter table conversations add column if not exists title text;
 alter table conversations add column if not exists avatar_url text;
@@ -138,6 +174,9 @@ create table if not exists messages (
   deleted_for_everyone_at timestamptz,
   deleted_by text references user_profiles(id) on delete set null,
   edited_at timestamptz,
+  retention_expires_at timestamptz not null default (now() + interval '3 days'),
+  content_redacted_at timestamptz,
+  archive_status text not null default 'pending' check (archive_status in ('pending', 'partial', 'archived', 'redacted', 'skipped')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -145,6 +184,11 @@ create table if not exists messages (
 alter table messages add column if not exists deleted_for_everyone_at timestamptz;
 alter table messages add column if not exists deleted_by text references user_profiles(id) on delete set null;
 alter table messages add column if not exists edited_at timestamptz;
+alter table messages add column if not exists retention_expires_at timestamptz not null default (now() + interval '3 days');
+alter table messages add column if not exists content_redacted_at timestamptz;
+alter table messages add column if not exists archive_status text not null default 'pending';
+alter table messages drop constraint if exists messages_archive_status_check;
+alter table messages add constraint messages_archive_status_check check (archive_status in ('pending', 'partial', 'archived', 'redacted', 'skipped'));
 alter table messages drop constraint if exists messages_content_length_check;
 alter table messages add constraint messages_content_length_check check (content is null or char_length(content) <= 4000);
 
@@ -166,6 +210,15 @@ create table if not exists message_attachments (
   mime_type text not null,
   size_bytes integer not null check (size_bytes <= 10485760),
   created_at timestamptz not null default now()
+);
+
+create table if not exists message_archives (
+  id uuid primary key default gen_random_uuid(),
+  message_id uuid not null references messages(id) on delete cascade,
+  user_id text not null references user_profiles(id) on delete cascade,
+  archive_batch_id uuid not null references archive_batches(id) on delete cascade,
+  archived_at timestamptz not null default now(),
+  unique (message_id, user_id)
 );
 
 create table if not exists message_reactions (
@@ -230,6 +283,11 @@ create index if not exists conversation_mutes_user_idx on conversation_mutes(use
 create index if not exists conversation_mutes_conversation_idx on conversation_mutes(conversation_id);
 create index if not exists conversation_pins_user_idx on conversation_pins(user_id, created_at desc);
 create index if not exists conversation_pins_conversation_idx on conversation_pins(conversation_id);
+create index if not exists backup_preferences_status_idx on backup_preferences(status, enabled);
+create index if not exists archive_batches_user_status_idx on archive_batches(user_id, status, completed_at desc);
+create index if not exists archive_batches_conversation_idx on archive_batches(conversation_id, batch_key);
+create index if not exists message_archives_user_message_idx on message_archives(user_id, message_id);
+create index if not exists message_archives_batch_idx on message_archives(archive_batch_id);
 create index if not exists push_subscriptions_user_idx on push_subscriptions(user_id);
 create index if not exists conversations_user_one_idx on conversations(user_one_id);
 create index if not exists conversations_user_two_idx on conversations(user_two_id);
@@ -237,6 +295,7 @@ create index if not exists conversations_type_idx on conversations(type);
 create index if not exists conversation_members_user_idx on conversation_members(user_id);
 create index if not exists conversation_members_conversation_idx on conversation_members(conversation_id);
 create index if not exists messages_conversation_created_idx on messages(conversation_id, created_at desc);
+create index if not exists messages_retention_idx on messages(retention_expires_at, archive_status, content_redacted_at);
 create index if not exists message_deletions_user_message_idx on message_deletions(user_id, message_id);
 create index if not exists message_reactions_message_idx on message_reactions(message_id, created_at asc);
 create index if not exists message_reactions_user_idx on message_reactions(user_id);
@@ -265,6 +324,14 @@ for each row execute function touch_updated_at();
 
 drop trigger if exists push_subscriptions_touch_updated_at on push_subscriptions;
 create trigger push_subscriptions_touch_updated_at before update on push_subscriptions
+for each row execute function touch_updated_at();
+
+drop trigger if exists backup_preferences_touch_updated_at on backup_preferences;
+create trigger backup_preferences_touch_updated_at before update on backup_preferences
+for each row execute function touch_updated_at();
+
+drop trigger if exists archive_batches_touch_updated_at on archive_batches;
+create trigger archive_batches_touch_updated_at before update on archive_batches
 for each row execute function touch_updated_at();
 
 drop trigger if exists friendships_touch_updated_at on friendships;
@@ -311,6 +378,16 @@ begin
     end if;
     new.deleted_by := app_user_id();
     new.content := null;
+    new.edited_at := old.edited_at;
+  elsif new.content_redacted_at is distinct from old.content_redacted_at then
+    if app_user_id() is not null then
+      raise exception 'Only the retention job can redact archived message content';
+    end if;
+    if new.content_redacted_at is null then
+      raise exception 'Redacted message content cannot be restored';
+    end if;
+    new.content := null;
+    new.archive_status := 'redacted';
     new.edited_at := old.edited_at;
   elsif new.content is distinct from old.content then
     if old.sender_id <> app_user_id() then
@@ -497,6 +574,9 @@ grant execute on function get_or_create_direct_conversation(text) to anon, authe
 alter table user_profiles enable row level security;
 alter table notification_settings enable row level security;
 alter table push_subscriptions enable row level security;
+alter table backup_preferences enable row level security;
+alter table archive_batches enable row level security;
+alter table message_archives enable row level security;
 alter table friendships enable row level security;
 alter table blocks enable row level security;
 alter table conversations enable row level security;
@@ -553,6 +633,27 @@ with check (user_id = app_user_id());
 drop policy if exists "push subscriptions removed by owner" on push_subscriptions;
 create policy "push subscriptions removed by owner" on push_subscriptions
 for delete using (user_id = app_user_id());
+
+drop policy if exists "backup preferences visible to owner" on backup_preferences;
+create policy "backup preferences visible to owner" on backup_preferences
+for select using (user_id = app_user_id());
+
+drop policy if exists "backup preferences created by owner" on backup_preferences;
+create policy "backup preferences created by owner" on backup_preferences
+for insert with check (user_id = app_user_id());
+
+drop policy if exists "backup preferences updated by owner" on backup_preferences;
+create policy "backup preferences updated by owner" on backup_preferences
+for update using (user_id = app_user_id())
+with check (user_id = app_user_id());
+
+drop policy if exists "archive batches visible to owner" on archive_batches;
+create policy "archive batches visible to owner" on archive_batches
+for select using (user_id = app_user_id());
+
+drop policy if exists "message archives visible to owner" on message_archives;
+create policy "message archives visible to owner" on message_archives
+for select using (user_id = app_user_id());
 
 drop policy if exists "friendships visible to participants" on friendships;
 create policy "friendships visible to participants" on friendships
@@ -835,6 +936,9 @@ begin
     'user_profiles',
     'notification_settings',
     'push_subscriptions',
+    'backup_preferences',
+    'archive_batches',
+    'message_archives',
     'friendships',
     'blocks',
     'conversations',

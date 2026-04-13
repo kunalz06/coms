@@ -8,6 +8,8 @@ COMMS is a minimal messaging and audio/video calling app.
 - **Firebase Authentication** owns account creation, sign in, persistence, password reset, email updates, password updates, and profile identity.
 - **Supabase** stores user profiles, friends, blocks, conversations, messages, attachments, call logs, and presence metadata. The SQL in `supabase/schema.sql` enables RLS and realtime.
 - **Cloudinary** stores profile pictures, chat images, documents, and voice recordings. Signed uploads are available through `app/api/cloudinary/sign/route.ts`; an unsigned restricted preset can be used for local development.
+- **Google Drive backup** stores user-enabled batched chat archives in the user's app-specific Drive storage. Supabase keeps archive metadata and retention pointers.
+- **PWA support** is provided by `app/manifest.ts` and `public/comms-sw.js`, with installability and offline shell caching.
 - **WebRTC** carries direct and small-group call media between peers. The custom Node server in `server/index.ts` uses WebSocket for direct and group-call signaling.
 - **Zustand** stores app UI selection and theme.
 - **Zod + React Hook Form** validate auth, settings, and composer forms.
@@ -25,6 +27,7 @@ server/              Next.js custom server with WebSocket signaling
 store/               Zustand stores
 supabase/            Database schema and RLS policies
 types/               Shared TypeScript types
+public/comms-sw.js   Service worker for PWA shell and push notification handling
 ```
 
 ## Database Setup
@@ -38,6 +41,9 @@ The schema includes:
 
 - `user_profiles`
 - `notification_settings`
+- `backup_preferences`
+- `archive_batches`
+- `message_archives`
 - `friendships`
 - `blocks`
 - `conversations`
@@ -58,6 +64,7 @@ Important notes:
 
 - `NEXT_PUBLIC_*` values are safe browser configuration values.
 - `SUPABASE_SERVICE_ROLE_KEY`, `FIREBASE_PRIVATE_KEY`, and `CLOUDINARY_API_SECRET` must remain server-only.
+- `GOOGLE_DRIVE_CLIENT_SECRET`, `BACKUP_OAUTH_STATE_SECRET`, `BACKUP_TOKEN_ENCRYPTION_KEY`, and `BACKUP_RETENTION_SECRET` must remain server-only.
 - `NEXT_PUBLIC_TURN_URLS`, `NEXT_PUBLIC_TURN_USERNAME`, and `NEXT_PUBLIC_TURN_CREDENTIAL` are placeholders for production TURN service credentials. TURN is especially important for reliable group calls.
 - Local default signaling URL: `ws://localhost:3000/ws`.
 
@@ -82,6 +89,66 @@ Development fallback:
 3. Restrict allowed formats and max file size in Cloudinary as a second line of defense.
 
 COMMS also validates upload size and MIME type before sending files.
+
+## Google Drive Backup Setup
+
+COMMS uses the Google Drive `appDataFolder` scope so archive files stay in app-specific hidden storage instead of cluttering the user's Drive.
+
+1. Open Google Cloud Console and create or select a project.
+2. Enable the Google Drive API.
+3. Configure the OAuth consent screen.
+4. Create an OAuth Client ID with type `Web application`.
+5. Add redirect URIs:
+   - `http://localhost:3000/api/backup/google/callback`
+   - `https://your-production-domain.com/api/backup/google/callback`
+6. Add the client values to `.env.local`:
+
+```bash
+GOOGLE_DRIVE_CLIENT_ID=...
+GOOGLE_DRIVE_CLIENT_SECRET=...
+BACKUP_OAUTH_STATE_SECRET=long-random-string
+BACKUP_TOKEN_ENCRYPTION_KEY=long-random-string
+BACKUP_RETENTION_SECRET=long-random-string
+```
+
+Backup flow:
+
+- Users open Settings and choose `Enable backup`.
+- COMMS sends them through Google OAuth with the Drive app-data scope.
+- Refresh/access tokens are encrypted server-side before storage in `backup_preferences`.
+- `Backup now` and background backup after sending messages call `/api/backup/run`.
+- Archives are batched by conversation and message date as JSON files.
+- Archive metadata is stored in `archive_batches`; per-user message pointers are stored in `message_archives`.
+
+Restore flow:
+
+- The chat hook loads Supabase messages first.
+- If older message content has been redacted, COMMS checks IndexedDB via `lib/archive-cache.ts`.
+- If not cached, COMMS calls `/api/backup/restore?conversationId=...`, fetches the Drive archive server-side, reconstructs message content, and caches the restored payload locally.
+
+Retention cleanup:
+
+- Call `POST /api/backup/retention` from a scheduler with `Authorization: Bearer $BACKUP_RETENTION_SECRET`.
+- The cleanup job scans messages past `retention_expires_at`.
+- It only redacts message content when every backup-enabled participant has a successful archive pointer for that message.
+- It removes primary `message_attachments` rows for redacted messages after archive coverage exists, while the archive keeps attachment metadata for restore.
+- It preserves conversation/message metadata and marks skipped or partial messages without deleting conversation structure.
+
+For Render, run the retention endpoint from a cron service or external scheduler every few hours. For local testing:
+
+```bash
+curl -X POST http://localhost:3000/api/backup/retention -H "Authorization: Bearer your-secret"
+```
+
+## PWA Setup
+
+PWA files are already included:
+
+- `app/manifest.ts` defines install metadata, theme color, and standalone behavior.
+- `public/comms-sw.js` caches safe shell/static assets and handles push notification clicks.
+- `features/pwa/pwa-provider.tsx` registers the service worker and exposes the install prompt in Settings.
+
+The service worker intentionally avoids caching `/api/*` so authenticated dynamic data is not stored incorrectly. Restored archives use IndexedDB through `lib/archive-cache.ts` instead.
 
 ## Run
 
@@ -113,6 +180,8 @@ npm run start
 - Send text, images, documents up to 5 MB, and voice notes.
 - React to messages with quick emojis, custom emoji, or short text reactions.
 - Turn browser notifications and call ringtone on or off, and mute specific direct chats or groups.
+- Enable Google Drive backup once, run manual backup, and restore older archived messages from Drive.
+- Install COMMS as a PWA on supported browsers.
 - Start one-to-one or group audio/video calls.
 - Accept, reject, end, mute mic, toggle camera, and switch between audio and video.
 
@@ -133,4 +202,5 @@ npm run start
 - The custom Node server is the simplest stable WebSocket signaling layer. On serverless-only hosting, deploy the signaling server as a separate Node service or use a managed realtime signaling provider.
 - Friend adding is immediate rather than request/accept. The schema can support pending requests later by adding another `friendships.status` value.
 - Uploads include client-side validation and a virus-scan hook placeholder in `services/upload-service.ts`; wire that hook to a malware scanning service before allowing high-risk document types in production.
+- Retention cleanup removes archived attachment references from Supabase, but it does not delete Cloudinary objects yet. Add Cloudinary Admin API deletion once your retention policy for media objects is finalized.
 - Group chats reuse `conversations` with `type = 'group'` plus `conversation_members`, instead of creating parallel group message tables. This keeps direct and group messaging on the same engine.

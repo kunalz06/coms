@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { getCachedArchiveMessages, setCachedArchiveMessages } from "@/lib/archive-cache";
+import { restoreArchivedMessages, runBackupNow } from "@/services/backup-service";
 import {
   deleteConversationHistoryForMe,
   deleteMessageForEveryone,
@@ -28,6 +30,45 @@ export function useChat(target: ChatTarget | null) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const conversationId = conversation?.id ?? null;
 
+  const hydrateArchivedMessages = useCallback(
+    async (nextConversationId: string, nextMessages: Message[]) => {
+      if (!nextMessages.some((message) => message.content_redacted_at)) return nextMessages;
+      const mergeArchived = (archivedMessages: Awaited<ReturnType<typeof restoreArchivedMessages>>) => {
+        const archivedById = new Map(archivedMessages.map((message) => [message.id, message]));
+        return nextMessages.map((message) => {
+          const archived = archivedById.get(message.id);
+          if (!archived) return message;
+          return {
+            ...message,
+            content: message.content ?? archived.content,
+            attachments: message.content_redacted_at ? archived.attachments : message.attachments?.length ? message.attachments : archived.attachments
+          };
+        });
+      };
+
+      const cached = await getCachedArchiveMessages(nextConversationId);
+      if (cached) return mergeArchived(cached);
+
+      try {
+        const token = await getIdToken();
+        const restored = await restoreArchivedMessages(token, nextConversationId);
+        await setCachedArchiveMessages(nextConversationId, restored);
+        return mergeArchived(restored);
+      } catch {
+        return nextMessages;
+      }
+    },
+    [getIdToken]
+  );
+
+  const triggerBackgroundBackup = useCallback(() => {
+    window.setTimeout(() => {
+      void getIdToken()
+        .then((token) => runBackupNow(token))
+        .catch(() => undefined);
+    }, 1200);
+  }, [getIdToken]);
+
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (!supabase || !user || !target) {
       setConversation(null);
@@ -42,13 +83,13 @@ export function useChat(target: ChatTarget | null) {
           : target.conversation;
       setConversation(nextConversation);
       const nextMessages = await getMessages(supabase, nextConversation.id);
-      setMessages(nextMessages);
+      setMessages(await hydrateArchivedMessages(nextConversation.id, nextMessages));
       await markConversationRead(supabase, nextConversation.id, user.uid);
       window.dispatchEvent(new CustomEvent("comms:messages-read", { detail: { conversationId: nextConversation.id } }));
     } finally {
       if (!options?.silent) setLoading(false);
     }
-  }, [supabase, target, user]);
+  }, [hydrateArchivedMessages, supabase, target, user]);
 
   useEffect(() => {
     void load();
@@ -94,18 +135,22 @@ export function useChat(target: ChatTarget | null) {
         edited_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        retention_expires_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        content_redacted_at: null,
+        archive_status: "pending",
         attachments: []
       };
       setMessages((items) => [...items, optimistic]);
       try {
         await sendMessage(supabase, { conversationId: conversation.id, senderId: user.uid, kind: "text", content: trimmed });
+        triggerBackgroundBackup();
         await load({ silent: true });
       } catch (error) {
         setMessages((items) => items.map((item) => (item.id === optimistic.id ? { ...item, status: "failed" } : item)));
         throw error;
       }
     },
-    [conversation, load, supabase, user]
+    [conversation, load, supabase, triggerBackgroundBackup, user]
   );
 
   const sendFile = useCallback(
@@ -135,12 +180,13 @@ export function useChat(target: ChatTarget | null) {
             size_bytes: result.sizeBytes
           }
         });
+        triggerBackgroundBackup();
         await load({ silent: true });
       } finally {
         setUploadProgress(0);
       }
     },
-    [conversation, getIdToken, load, supabase, user]
+    [conversation, getIdToken, load, supabase, triggerBackgroundBackup, user]
   );
 
   const getDownloadUrl = useCallback(

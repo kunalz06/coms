@@ -516,6 +516,9 @@ export function MessageList({
                 </button>
               ) : null}
               {!deletedForEveryone && message.content ? <p className="whitespace-pre-wrap break-words">{message.content}</p> : null}
+              {!deletedForEveryone && message.content_redacted_at && !message.content ? (
+                <p className={`italic ${mine ? "text-white/75" : "text-ink/55 dark:text-white/55"}`}>Archived message unavailable. Reconnect Google Drive and try again.</p>
+              ) : null}
               <div className={`mt-1 flex items-center justify-end gap-2 text-[11px] ${mine ? "text-white/75" : "text-ink/45 dark:text-white/45"}`}>
                 <span>{formatTime(message.created_at)}</span>
                 {message.edited_at && !deletedForEveryone ? <span>edited</span> : null}

@@ -97,10 +97,84 @@ export type Message = {
   deleted_for_everyone_at: string | null;
   deleted_by: string | null;
   edited_at: string | null;
+  retention_expires_at: string;
+  content_redacted_at: string | null;
+  archive_status: "pending" | "partial" | "archived" | "redacted" | "skipped";
   created_at: string;
   updated_at: string;
   attachments?: Attachment[];
   reactions?: MessageReaction[];
+};
+
+export type BackupStatus = "disabled" | "connecting" | "enabled" | "syncing" | "success" | "failed" | "reconnect_required";
+export type BackupProvider = "google_drive";
+
+export type BackupPreference = {
+  user_id: string;
+  provider: BackupProvider | null;
+  enabled: boolean;
+  status: BackupStatus;
+  google_drive_email: string | null;
+  drive_scope: string | null;
+  last_successful_backup_at: string | null;
+  last_backup_error: string | null;
+  reconnect_required: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ArchiveBatchStatus = "pending" | "uploading" | "success" | "failed" | "missing";
+
+export type ArchiveBatch = {
+  id: string;
+  user_id: string;
+  conversation_id: string;
+  provider: BackupProvider;
+  batch_key: string;
+  archive_version: number;
+  provider_file_id: string | null;
+  provider_file_name: string | null;
+  status: ArchiveBatchStatus;
+  message_count: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MessageArchive = {
+  id: string;
+  message_id: string;
+  user_id: string;
+  archive_batch_id: string;
+  archived_at: string;
+};
+
+export type ArchivedMessagePayload = {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  kind: MessageKind;
+  content: string | null;
+  status: MessageStatus;
+  deleted_for_everyone_at: string | null;
+  deleted_by: string | null;
+  edited_at: string | null;
+  created_at: string;
+  updated_at: string;
+  attachments?: Attachment[];
+};
+
+export type ArchiveFilePayload = {
+  version: 1;
+  provider: "google_drive";
+  userId: string;
+  conversationId: string;
+  batchId: string;
+  batchKey: string;
+  generatedAt: string;
+  messages: ArchivedMessagePayload[];
 };
 
 export type Block = {
