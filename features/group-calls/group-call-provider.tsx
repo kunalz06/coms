@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, MicOff, PhoneOff, PhoneIncoming, RotateCcw, Users, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff, PhoneIncoming, Users, Video, VideoOff } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/features/auth/auth-provider";
 import { useNotifications } from "@/features/notifications/notification-provider";
-import { getCallMedia, getVideoStreamForFacing, type CameraFacing } from "@/lib/media-devices";
+import { getCallMedia, getVideoStream } from "@/lib/media-devices";
 import { signalingUrl, warmSignalingServer } from "@/lib/signaling-url";
 import { getGroup } from "@/services/group-service";
 import type { CallMode, GroupConversation, UserProfile } from "@/types";
@@ -73,11 +73,6 @@ function socketIsOpeningOrOpen(socket: WebSocket | null) {
   return socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING;
 }
 
-function detectMobileBrowser() {
-  if (typeof navigator === "undefined") return false;
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
-}
-
 function VideoTile({ stream, name, avatarUrl, muted = false, label }: { stream: MediaStream | null; name: string; avatarUrl?: string | null; muted?: boolean; label?: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -132,8 +127,6 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
-  const [cameraFacing, setCameraFacing] = useState<CameraFacing>("user");
-  const [isMobileBrowser] = useState(detectMobileBrowser);
 
   useEffect(() => {
     activeRef.current = active;
@@ -269,7 +262,6 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       setActive(null);
       setMicEnabled(true);
       setCameraEnabled(true);
-      setCameraFacing("user");
       setStatus("idle");
       stopRingtone();
       if (current && isLeaveResponse(leaveResponse) && !leaveResponse.ended) {
@@ -321,7 +313,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   );
 
   const getMedia = useCallback(async (mode: CallMode) => {
-    const { stream, effectiveMode } = await getCallMedia(mode, cameraFacing);
+    const { stream, effectiveMode } = await getCallMedia(mode);
     localStreamRef.current = stream;
     setLocalStream(stream);
     setMicEnabled(true);
@@ -330,7 +322,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       showToast({ variant: "info", title: "Camera unavailable", description: "Joining as audio only." });
     }
     return { stream, effectiveMode };
-  }, [cameraFacing, showToast]);
+  }, [showToast]);
 
   const handleIncomingInvite = useCallback(
     async (message: Extract<GroupCallEvent, { type: "group-call-invite" }>) => {
@@ -627,7 +619,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     if (!localStream || !activeRef.current) return;
     try {
       if (activeRef.current.mode === "audio") {
-        const videoStream = await getVideoStreamForFacing(cameraFacing);
+        const videoStream = await getVideoStream();
         const [track] = videoStream.getVideoTracks();
         localStream.addTrack(track);
         peersRef.current.forEach((peer) => peer.addTrack(track, localStream));
@@ -653,39 +645,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     } catch {
       showToast({ variant: "error", title: "Camera unavailable", description: "Allow camera access to switch to video." });
     }
-  }, [cameraFacing, localStream, sendOfferToPeer, showToast]);
-
-  const rotateCamera = useCallback(async () => {
-    if (!localStream || !localStream.getVideoTracks().length) return;
-    const nextFacing = cameraFacing === "user" ? "environment" : "user";
-    const currentTrack = localStream.getVideoTracks()[0];
-    const currentDeviceId = currentTrack?.getSettings().deviceId;
-    const videoSenders = [...peersRef.current.values()]
-      .map((peer) => peer.getSenders().find((item) => item.track?.kind === "video"))
-      .filter((sender): sender is RTCRtpSender => Boolean(sender));
-    localStream.removeTrack(currentTrack);
-    currentTrack.stop();
-    try {
-      const videoStream = await getVideoStreamForFacing(nextFacing, { avoidDeviceId: currentDeviceId, requireDifferentDevice: true });
-      const [nextTrack] = videoStream.getVideoTracks();
-      localStream.addTrack(nextTrack);
-      await Promise.all(videoSenders.map((sender) => sender.replaceTrack(nextTrack)));
-      setCameraFacing(nextFacing);
-      setCameraEnabled(nextTrack.enabled);
-      setLocalStream(new MediaStream(localStream.getTracks()));
-    } catch {
-      try {
-        const restoreStream = await getVideoStreamForFacing(cameraFacing);
-        const [restoreTrack] = restoreStream.getVideoTracks();
-        localStream.addTrack(restoreTrack);
-        await Promise.all(videoSenders.map((sender) => sender.replaceTrack(restoreTrack)));
-        setLocalStream(new MediaStream(localStream.getTracks()));
-      } catch {
-        setCameraEnabled(false);
-      }
-      showToast({ variant: "error", title: "Could not rotate camera", description: "Your browser did not provide another camera." });
-    }
-  }, [cameraFacing, localStream, showToast]);
+  }, [localStream, sendOfferToPeer, showToast]);
 
   useEffect(() => {
     shouldReconnectRef.current = true;
@@ -795,12 +755,6 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
             <div className="grid grid-cols-2 gap-2 border-t border-white/10 px-3 py-3 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:px-4">
               <Button variant="secondary" className="h-9 px-3" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
               <Button variant="secondary" className="h-9 px-3" onClick={toggleCamera} disabled={!localStream?.getVideoTracks().length}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
-              {isMobileBrowser && localStream?.getVideoTracks().length ? (
-                <Button variant="secondary" className="h-9 px-3 sm:hidden" onClick={() => void rotateCamera()}>
-                  <RotateCcw className="h-4 w-4" />
-                  Rotate
-                </Button>
-              ) : null}
               <Button variant="secondary" className="h-9 px-3" onClick={() => void switchMode()}>
                 {active.mode === "audio" ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                 {active.mode === "audio" ? "Switch to video" : "Switch to audio"}
