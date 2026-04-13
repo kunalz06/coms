@@ -54,6 +54,17 @@ create table if not exists notification_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references user_profiles(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  user_agent text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists conversations (
   id uuid primary key default gen_random_uuid(),
   type text not null default 'direct' check (type in ('direct', 'group')),
@@ -205,6 +216,7 @@ create index if not exists blocks_blocker_idx on blocks(blocker_id);
 create index if not exists blocks_blocked_idx on blocks(blocked_id);
 create index if not exists conversation_mutes_user_idx on conversation_mutes(user_id);
 create index if not exists conversation_mutes_conversation_idx on conversation_mutes(conversation_id);
+create index if not exists push_subscriptions_user_idx on push_subscriptions(user_id);
 create index if not exists conversations_user_one_idx on conversations(user_one_id);
 create index if not exists conversations_user_two_idx on conversations(user_two_id);
 create index if not exists conversations_type_idx on conversations(type);
@@ -235,6 +247,10 @@ for each row execute function touch_updated_at();
 
 drop trigger if exists notification_settings_touch_updated_at on notification_settings;
 create trigger notification_settings_touch_updated_at before update on notification_settings
+for each row execute function touch_updated_at();
+
+drop trigger if exists push_subscriptions_touch_updated_at on push_subscriptions;
+create trigger push_subscriptions_touch_updated_at before update on push_subscriptions
 for each row execute function touch_updated_at();
 
 drop trigger if exists friendships_touch_updated_at on friendships;
@@ -449,6 +465,7 @@ grant execute on function get_or_create_direct_conversation(text) to anon, authe
 
 alter table user_profiles enable row level security;
 alter table notification_settings enable row level security;
+alter table push_subscriptions enable row level security;
 alter table friendships enable row level security;
 alter table blocks enable row level security;
 alter table conversations enable row level security;
@@ -487,6 +504,23 @@ drop policy if exists "notification settings updated by owner" on notification_s
 create policy "notification settings updated by owner" on notification_settings
 for update using (user_id = app_user_id())
 with check (user_id = app_user_id());
+
+drop policy if exists "push subscriptions visible to owner" on push_subscriptions;
+create policy "push subscriptions visible to owner" on push_subscriptions
+for select using (user_id = app_user_id());
+
+drop policy if exists "push subscriptions created by owner" on push_subscriptions;
+create policy "push subscriptions created by owner" on push_subscriptions
+for insert with check (user_id = app_user_id());
+
+drop policy if exists "push subscriptions updated by owner" on push_subscriptions;
+create policy "push subscriptions updated by owner" on push_subscriptions
+for update using (user_id = app_user_id())
+with check (user_id = app_user_id());
+
+drop policy if exists "push subscriptions removed by owner" on push_subscriptions;
+create policy "push subscriptions removed by owner" on push_subscriptions
+for delete using (user_id = app_user_id());
 
 drop policy if exists "friendships visible to participants" on friendships;
 create policy "friendships visible to participants" on friendships
@@ -756,6 +790,7 @@ begin
   foreach table_name in array array[
     'user_profiles',
     'notification_settings',
+    'push_subscriptions',
     'friendships',
     'blocks',
     'conversations',

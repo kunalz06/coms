@@ -28,6 +28,8 @@ type SendToUser = (userId: string, payload: unknown) => void;
 type VerifyMembership = (conversationId: string, userId: string) => Promise<boolean>;
 type ListMembers = (conversationId: string) => Promise<string[]>;
 type CanEndCall = (conversationId: string, userId: string) => Promise<boolean>;
+type IsUserOnline = (userId: string) => boolean;
+type SendPush = (userId: string) => Promise<boolean>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
@@ -49,7 +51,9 @@ export class GroupCallInviteManager {
     private readonly verifyMembership: VerifyMembership,
     private readonly listMembers: ListMembers,
     private readonly canEndCall: CanEndCall,
-    private readonly sendToUser: SendToUser
+    private readonly sendToUser: SendToUser,
+    private readonly isUserOnline: IsUserOnline,
+    private readonly sendPush: SendPush
   ) {}
 
   async handle(socket: ClientSocket, message: GroupCallMessage) {
@@ -117,6 +121,7 @@ export class GroupCallInviteManager {
     for (const userId of memberIds) {
       if (userId !== message.from) {
         this.sendToUser(userId, { type: "group-call-invite", conversationId: message.conversationId, from: message.from, mode: session.mode });
+        if (!this.isUserOnline(userId)) void this.sendPush(userId);
       }
     }
   }

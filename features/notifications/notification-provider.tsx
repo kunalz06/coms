@@ -11,6 +11,8 @@ import {
   getOrCreateNotificationSettings,
   getUserProfileForNotification,
   isNotificationStorageMissingError,
+  removePushSubscription,
+  savePushSubscription,
   setConversationMute,
   updateNotificationSettings
 } from "@/services/notification-service";
@@ -38,6 +40,19 @@ const localMutesKey = (userId: string) => `comms:conversation-mutes:${userId}`;
 function currentPermission(): NotificationPermission | "unsupported" {
   if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
   return Notification.permission;
+}
+
+function pushIsSupported() {
+  return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window;
+}
+
+function publicVapidKeyBytes() {
+  const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
+  if (!key) return null;
+  const padding = "=".repeat((4 - (key.length % 4)) % 4);
+  const base64 = `${key}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
 }
 
 function isMuteActive(mute: ConversationMute) {
@@ -207,6 +222,32 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     return audioContextRef.current;
   }, []);
 
+  const ensurePushSubscription = useCallback(async () => {
+    if (!user || !supabase || !pushIsSupported()) return;
+    const applicationServerKey = publicVapidKeyBytes();
+    if (!applicationServerKey) {
+      showToast({ variant: "info", title: "Foreground notifications enabled", description: "Add VAPID keys to enable call alerts when COMMS is closed." });
+      return;
+    }
+    const registration = await navigator.serviceWorker.register("/comms-sw.js", { scope: "/" });
+    const subscription =
+      (await registration.pushManager.getSubscription()) ??
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey
+      }));
+    await savePushSubscription(supabase, { userId: user.uid, subscription: subscription.toJSON(), userAgent: navigator.userAgent });
+  }, [showToast, supabase, user]);
+
+  const removeCurrentPushSubscription = useCallback(async () => {
+    if (!user || !supabase || !pushIsSupported()) return;
+    const registration = await navigator.serviceWorker.getRegistration("/");
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) return;
+    await removePushSubscription(supabase, user.uid, subscription.endpoint).catch(() => undefined);
+    await subscription.unsubscribe().catch(() => undefined);
+  }, [supabase, user]);
+
   const enableBrowserNotifications = useCallback(async () => {
     unlockAudio();
     if (!user || !supabase) return;
@@ -218,18 +259,20 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
     const nextPermission = await Notification.requestPermission();
     setPermission(nextPermission);
+    if (nextPermission === "granted") await ensurePushSubscription().catch((error) => showToast({ variant: "error", title: "Background alerts unavailable", description: error instanceof Error ? error.message : "Try again." }));
     await saveSettings({ browser_notifications_enabled: nextPermission === "granted", notifications_prompted_at: new Date().toISOString() });
     showToast({
       variant: nextPermission === "granted" ? "success" : "info",
       title: nextPermission === "granted" ? "Notifications enabled" : "Notifications kept off"
     });
-  }, [saveSettings, showToast, supabase, unlockAudio, user]);
+  }, [ensurePushSubscription, saveSettings, showToast, supabase, unlockAudio, user]);
 
   const disableBrowserNotifications = useCallback(async () => {
+    await removeCurrentPushSubscription();
     await saveSettings({ browser_notifications_enabled: false, notifications_prompted_at: new Date().toISOString() });
     setPromptOpen(false);
     showToast({ variant: "info", title: "Notifications off" });
-  }, [saveSettings, showToast]);
+  }, [removeCurrentPushSubscription, saveSettings, showToast]);
 
   const setRingtoneEnabled = useCallback(
     async (enabled: boolean) => {

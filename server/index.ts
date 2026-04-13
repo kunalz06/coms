@@ -1,4 +1,5 @@
 import { createServer, type ServerResponse } from "node:http";
+import { createPrivateKey, sign } from "node:crypto";
 import next from "next";
 import { createClient } from "@supabase/supabase-js";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
@@ -16,6 +17,20 @@ type Signal =
   | { type: "call-unavailable"; callId: string; from: string; to: string; reason?: string };
 
 type RoutedSignal = Exclude<Signal, { type: "register" }>;
+type PendingDirectCall = {
+  callId: string;
+  from: string;
+  to: string;
+  conversationId: string;
+  mode: "audio" | "video";
+  expiresAt: number;
+  signals: RoutedSignal[];
+};
+type PushSubscriptionRow = {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+};
 
 type ClientSocket = WebSocket & {
   userId?: string;
@@ -30,6 +45,7 @@ const handle = app.getRequestHandler();
 const clients = new Map<string, Set<ClientSocket>>();
 const activeCallsByUser = new Map<string, string>();
 const participantsByCall = new Map<string, Set<string>>();
+const pendingDirectCallsByUser = new Map<string, PendingDirectCall[]>();
 
 function writeCorsHeaders(response: ServerResponse) {
   response.setHeader("access-control-allow-origin", process.env.ALLOWED_ORIGIN ?? "*");
@@ -129,10 +145,101 @@ function clearCall(callId: string) {
     if (currentCallId === callId) activeCallsByUser.delete(userId);
   }
   participantsByCall.delete(callId);
+  for (const [userId, calls] of pendingDirectCallsByUser.entries()) {
+    const nextCalls = calls.filter((call) => call.callId !== callId);
+    if (nextCalls.length) pendingDirectCallsByUser.set(userId, nextCalls);
+    else pendingDirectCallsByUser.delete(userId);
+  }
 }
 
 function forward(message: RoutedSignal) {
   sendToUser(message.to, message);
+}
+
+function pendingCallForUser(userId: string, callId: string) {
+  return pendingDirectCallsByUser.get(userId)?.find((call) => call.callId === callId);
+}
+
+function queuePendingSignal(message: RoutedSignal) {
+  const call = pendingCallForUser(message.to, message.callId);
+  if (!call) return false;
+  if (Date.now() > call.expiresAt) {
+    clearCall(message.callId);
+    return false;
+  }
+  call.signals.push(message);
+  return true;
+}
+
+function flushPendingDirectCallsForUser(userId: string) {
+  const calls = pendingDirectCallsByUser.get(userId);
+  if (!calls?.length) return;
+  const now = Date.now();
+  const activeCalls = calls.filter((call) => call.expiresAt > now);
+  pendingDirectCallsByUser.delete(userId);
+  activeCalls.forEach((call) => {
+    call.signals.forEach((signal) => sendToUser(userId, signal));
+  });
+}
+
+function base64Url(input: Buffer | string) {
+  return Buffer.from(input).toString("base64url");
+}
+
+function vapidPrivateKey() {
+  try {
+    const privateKey = process.env.VAPID_PRIVATE_KEY?.trim();
+    const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
+    if (!privateKey || !publicKey) return null;
+    const publicBytes = Buffer.from(publicKey, "base64url");
+    if (publicBytes.length !== 65 || publicBytes[0] !== 4) return null;
+    return createPrivateKey({
+      key: {
+        kty: "EC",
+        crv: "P-256",
+        d: privateKey,
+        x: publicBytes.subarray(1, 33).toString("base64url"),
+        y: publicBytes.subarray(33, 65).toString("base64url")
+      },
+      format: "jwk"
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function sendPushToUser(userId: string) {
+  const supabase = serviceSupabase();
+  const key = vapidPrivateKey();
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
+  if (!supabase || !key || !publicKey) return false;
+
+  const { data, error } = await supabase.from("push_subscriptions").select("endpoint,p256dh,auth").eq("user_id", userId).returns<PushSubscriptionRow[]>();
+  if (error || !data?.length) return false;
+
+  const subject = process.env.VAPID_SUBJECT ?? "mailto:admin@comms.local";
+  const results = await Promise.all(
+    data.map(async (subscription) => {
+      const endpoint = new URL(subscription.endpoint);
+      const jwtHeader = base64Url(JSON.stringify({ typ: "JWT", alg: "ES256" }));
+      const jwtPayload = base64Url(JSON.stringify({ aud: endpoint.origin, exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60, sub: subject }));
+      const signature = sign("sha256", Buffer.from(`${jwtHeader}.${jwtPayload}`), { key, dsaEncoding: "ieee-p1363" }).toString("base64url");
+      const response = await fetch(subscription.endpoint, {
+        method: "POST",
+        headers: {
+          authorization: `vapid t=${jwtHeader}.${jwtPayload}.${signature}, k=${publicKey}`,
+          ttl: "60",
+          urgency: "high"
+        }
+      });
+      if (response.status === 404 || response.status === 410) {
+        await supabase.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
+      }
+      return response.ok || response.status === 201 || response.status === 202;
+    })
+  );
+
+  return results.some(Boolean);
 }
 
 function parseMessage(raw: RawData) {
@@ -145,7 +252,7 @@ function parseMessage(raw: RawData) {
   }
 }
 
-const groupCalls = new GroupCallInviteManager(userIsConversationMember, conversationMemberIds, userCanModerateGroupCall, sendToUser);
+const groupCalls = new GroupCallInviteManager(userIsConversationMember, conversationMemberIds, userCanModerateGroupCall, sendToUser, hasClient, sendPushToUser);
 
 void app.prepare().then(() => {
   const handleUpgrade = app.getUpgradeHandler();
@@ -195,6 +302,7 @@ void app.prepare().then(() => {
           addClient(message.userId, socket);
           console.log("Signaling client registered", { userId: message.userId, sockets: clients.get(message.userId)?.size ?? 0 });
           groupCalls.notifyAvailableCallsForUser(message.userId);
+          flushPendingDirectCallsForUser(message.userId);
           return;
         }
 
@@ -223,8 +331,28 @@ void app.prepare().then(() => {
             return;
           }
           if (!hasClient(directMessage.to)) {
-            console.log("Direct call unavailable", { callId: directMessage.callId, from: directMessage.from, to: directMessage.to, reason: "offline" });
-            send(socket, { type: "call-unavailable", callId: directMessage.callId, from: directMessage.to, to: directMessage.from, reason: "offline" });
+            const pushSent = await sendPushToUser(directMessage.to);
+            if (!pushSent) {
+              console.log("Direct call unavailable", { callId: directMessage.callId, from: directMessage.from, to: directMessage.to, reason: "offline" });
+              send(socket, { type: "call-unavailable", callId: directMessage.callId, from: directMessage.to, to: directMessage.from, reason: "offline" });
+              return;
+            }
+            pendingDirectCallsByUser.set(directMessage.to, [
+              ...(pendingDirectCallsByUser.get(directMessage.to) ?? []),
+              {
+                callId: directMessage.callId,
+                from: directMessage.from,
+                to: directMessage.to,
+                conversationId: directMessage.conversationId,
+                mode: directMessage.mode,
+                expiresAt: Date.now() + 45_000,
+                signals: [directMessage]
+              }
+            ]);
+            activeCallsByUser.set(directMessage.from, directMessage.callId);
+            activeCallsByUser.set(directMessage.to, directMessage.callId);
+            participantsByCall.set(directMessage.callId, new Set([directMessage.from, directMessage.to]));
+            console.log("Direct call push sent to offline recipient", { callId: directMessage.callId, from: directMessage.from, to: directMessage.to });
             return;
           }
           activeCallsByUser.set(directMessage.from, directMessage.callId);
@@ -240,7 +368,7 @@ void app.prepare().then(() => {
           return;
         }
 
-        forward(directMessage as RoutedSignal);
+        if (!queuePendingSignal(directMessage as RoutedSignal)) forward(directMessage as RoutedSignal);
       })();
     });
 

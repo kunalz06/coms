@@ -4,7 +4,7 @@ import type { Conversation, ConversationMute, NotificationSettings, UserProfile 
 export function isNotificationStorageMissingError(error: unknown) {
   const candidate = error as { code?: string; message?: string; details?: string; status?: number } | null;
   const message = `${candidate?.message ?? ""} ${candidate?.details ?? ""}`.toLowerCase();
-  const tableMentioned = message.includes("notification_settings") || message.includes("conversation_mutes");
+  const tableMentioned = message.includes("notification_settings") || message.includes("conversation_mutes") || message.includes("push_subscriptions");
 
   return (
     candidate?.code === "PGRST205" ||
@@ -44,6 +44,29 @@ export async function updateNotificationSettings(
     .single<NotificationSettings>();
   if (error) throw error;
   return data;
+}
+
+export async function savePushSubscription(supabase: SupabaseClient, values: { userId: string; subscription: PushSubscriptionJSON; userAgent?: string }) {
+  const p256dh = values.subscription.keys?.p256dh;
+  const auth = values.subscription.keys?.auth;
+  if (!values.subscription.endpoint || !p256dh || !auth) throw new Error("Browser push subscription is incomplete.");
+
+  const { error } = await supabase.from("push_subscriptions").upsert(
+    {
+      user_id: values.userId,
+      endpoint: values.subscription.endpoint,
+      p256dh,
+      auth,
+      user_agent: values.userAgent ?? null
+    },
+    { onConflict: "endpoint" }
+  );
+  if (error) throw error;
+}
+
+export async function removePushSubscription(supabase: SupabaseClient, userId: string, endpoint: string) {
+  const { error } = await supabase.from("push_subscriptions").delete().eq("user_id", userId).eq("endpoint", endpoint);
+  if (error) throw error;
 }
 
 export async function getConversationMutes(supabase: SupabaseClient, userId: string) {
