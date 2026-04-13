@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { addFriendByEmail, blockUser, deleteFriend, getBlockedContacts, getFriends, unblockUser } from "@/services/contact-service";
 import { searchProfileByEmail } from "@/services/profile-service";
 import type { Block, Friendship, UserProfile } from "@/types";
@@ -10,6 +10,7 @@ const REFRESH_INTERVAL_MS = 10_000;
 
 export function useContacts() {
   const { user, supabase } = useAuth();
+  const hookId = useId();
   const [friends, setFriends] = useState<Friendship[]>([]);
   const [blocked, setBlocked] = useState<Array<Block & { blocked_profile?: UserProfile }>>([]);
   const [loading, setLoading] = useState(true);
@@ -46,8 +47,9 @@ export function useContacts() {
 
   useEffect(() => {
     if (!supabase || !user) return;
+    const safeHookId = hookId.replace(/[^a-zA-Z0-9_-]/g, "");
     const channel = supabase
-      .channel(`contacts:${user.uid}`)
+      .channel(`contacts:${user.uid}:${safeHookId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, () => void refresh({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "blocks" }, () => void refresh({ silent: true }))
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => void refresh({ silent: true }))
@@ -57,7 +59,7 @@ export function useContacts() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [refresh, supabase, user]);
+  }, [hookId, refresh, supabase, user]);
 
   const search = useCallback(
     async (email: string) => {
