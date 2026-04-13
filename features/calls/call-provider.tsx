@@ -76,7 +76,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const handleMessageRef = useRef<(event: MessageEvent<string>) => void>(() => undefined);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
-  const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const pendingOfferRef = useRef<Extract<SignalingMessage, { type: "call-offer" }> | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const connectSocketRef = useRef<() => Promise<void>>(async () => undefined);
@@ -333,7 +333,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     async (message: Extract<SignalingMessage, { type: "call-offer" }>) => {
       if (!user || !supabase) return;
       if (!activeRef.current || activeRef.current.callId !== message.callId) {
-        pendingOfferRef.current = message.offer;
+        const currentIncoming = incomingRef.current;
+        if (!currentIncoming || (currentIncoming.callId === message.callId && currentIncoming.from.id === message.from)) {
+          pendingOfferRef.current = message;
+        }
         return;
       }
       const peer = createPeer(message.callId, message.from);
@@ -346,6 +349,27 @@ export function CallProvider({ children }: { children: ReactNode }) {
     },
     [addPendingCandidates, createPeer, sendSignal, supabase, transitionTo, user]
   );
+
+  const waitForPendingOffer = useCallback(async (callId: string, fromId: string) => {
+    const existing = pendingOfferRef.current;
+    if (existing?.callId === callId && existing.from === fromId) return existing;
+
+    return new Promise<Extract<SignalingMessage, { type: "call-offer" }> | null>((resolve) => {
+      const startedAt = Date.now();
+      const interval = window.setInterval(() => {
+        const pending = pendingOfferRef.current;
+        if (pending?.callId === callId && pending.from === fromId) {
+          window.clearInterval(interval);
+          resolve(pending);
+          return;
+        }
+        if (Date.now() - startedAt > 5000) {
+          window.clearInterval(interval);
+          resolve(null);
+        }
+      }, 50);
+    });
+  }, []);
 
   const acceptCall = useCallback(async () => {
     if (!incoming || !user) return;
@@ -360,20 +384,27 @@ export function CallProvider({ children }: { children: ReactNode }) {
       activeRef.current = nextActive;
       setIncoming(null);
       transitionTo("connecting");
-      if (pendingOfferRef.current) {
-        await peer.setRemoteDescription(pendingOfferRef.current);
+      const pendingOffer = await waitForPendingOffer(incoming.callId, incoming.from.id);
+      if (pendingOffer) {
+        await peer.setRemoteDescription(pendingOffer.offer);
         pendingOfferRef.current = null;
         await addPendingCandidates();
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
-        sendSignal({ type: "call-answer", callId: incoming.callId, from: user.uid, to: incoming.from.id, answer });
+        sendSignal({ type: "call-answer", callId: pendingOffer.callId, from: user.uid, to: pendingOffer.from, answer });
+      } else if (!peer.remoteDescription) {
+        throw new Error("Call offer was not received.");
       }
     } catch {
       showToast({ variant: "error", title: "Call failed", description: "Check camera and microphone permissions." });
-      sendSignal({ type: "call-reject", callId: incoming.callId, from: user.uid, to: incoming.from.id, reason: "media-denied" });
+      try {
+        sendSignal({ type: "call-reject", callId: incoming.callId, from: user.uid, to: incoming.from.id, reason: "media-denied" });
+      } catch {
+        // The caller may already be disconnected; local cleanup still needs to finish.
+      }
       await resetCall("failed");
     }
-  }, [addPendingCandidates, createPeer, getMedia, incoming, resetCall, sendSignal, showToast, stopRingtone, transitionTo, user]);
+  }, [addPendingCandidates, createPeer, getMedia, incoming, resetCall, sendSignal, showToast, stopRingtone, transitionTo, user, waitForPendingOffer]);
 
   const rejectCall = useCallback(async () => {
     if (!incoming || !user) return;
@@ -659,9 +690,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
                     {mode === "audio" ? "Switch to video" : "Switch to audio"}
                   </Button>
                 </div>
-                <p className="text-xs leading-5 text-white/55">
-                  WebRTC carries media directly. The WebSocket only exchanges offers, answers, and ICE candidates.
-                </p>
               </div>
             </div>
           </div>

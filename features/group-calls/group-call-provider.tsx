@@ -122,7 +122,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<ActiveGroupCall | null>(null);
   const [incoming, setIncoming] = useState<IncomingGroupCall | null>(null);
   const [availableCalls, setAvailableCalls] = useState(new Map<string, AvailableGroupCall>());
-  const [dismissedAvailableCallIds, setDismissedAvailableCallIds] = useState(new Set<string>());
+  const [minimizedAvailableCallIds, setMinimizedAvailableCallIds] = useState(new Set<string>());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
   const [micEnabled, setMicEnabled] = useState(true);
@@ -277,7 +277,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           });
           return nextCalls;
         });
-        setDismissedAvailableCallIds((ids) => {
+        setMinimizedAvailableCallIds((ids) => {
           const nextIds = new Set(ids);
           nextIds.delete(current.conversation.id);
           return nextIds;
@@ -303,7 +303,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         });
         return nextCalls;
       });
-      setDismissedAvailableCallIds((ids) => {
+      setMinimizedAvailableCallIds((ids) => {
         const nextIds = new Set(ids);
         nextIds.delete(conversation.id);
         return nextIds;
@@ -330,6 +330,22 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       try {
         const conversation = await getGroup(supabase, message.conversationId, user.uid);
         const caller = profileFor(conversation, message.from) ?? null;
+        setAvailableCalls((calls) => {
+          const nextCalls = new Map(calls);
+          nextCalls.set(conversation.id, {
+            conversation,
+            caller,
+            mode: message.mode,
+            participantCount: 1,
+            startedAt: Date.now()
+          });
+          return nextCalls;
+        });
+        setMinimizedAvailableCallIds((ids) => {
+          const nextIds = new Set(ids);
+          nextIds.delete(conversation.id);
+          return nextIds;
+        });
         setIncoming({ conversation, caller, mode: message.mode });
         notifyIncomingCall({
           conversationId: conversation.id,
@@ -402,7 +418,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           nextCalls.delete(message.conversationId);
           return nextCalls;
         });
-        setDismissedAvailableCallIds((ids) => {
+        setMinimizedAvailableCallIds((ids) => {
           const nextIds = new Set(ids);
           nextIds.delete(message.conversationId);
           return nextIds;
@@ -506,7 +522,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
         nextCalls.delete(conversation.id);
         return nextCalls;
       });
-      setDismissedAvailableCallIds((ids) => {
+      setMinimizedAvailableCallIds((ids) => {
         const nextIds = new Set(ids);
         nextIds.delete(conversation.id);
         return nextIds;
@@ -576,14 +592,6 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     [availableCalls, cleanup, joinMeshCall, showToast, status]
   );
 
-  const dismissAvailableCall = useCallback((conversationId: string) => {
-    setDismissedAvailableCallIds((ids) => {
-      const nextIds = new Set(ids);
-      nextIds.add(conversationId);
-      return nextIds;
-    });
-  }, []);
-
   const endCallForEveryone = useCallback(async () => {
     const current = activeRef.current;
     if (!current) return;
@@ -600,6 +608,22 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     stopRingtone();
     setIncoming(null);
   }, [stopRingtone]);
+
+  const minimizeAvailableCall = useCallback((conversationId: string) => {
+    setMinimizedAvailableCallIds((ids) => {
+      const nextIds = new Set(ids);
+      nextIds.add(conversationId);
+      return nextIds;
+    });
+  }, []);
+
+  const openAvailableCallPrompt = useCallback((conversationId: string) => {
+    setMinimizedAvailableCallIds((ids) => {
+      const nextIds = new Set(ids);
+      nextIds.delete(conversationId);
+      return nextIds;
+    });
+  }, []);
 
   const toggleMic = useCallback(() => {
     localStream?.getAudioTracks().forEach((track) => {
@@ -696,7 +720,8 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const group = active?.conversation ?? null;
   const currentProfile = group && user ? profileFor(group, user.uid) ?? profile : profile;
   const participantCount = participants.length + (active ? 1 : 0);
-  const availableCall = incoming ? null : [...availableCalls.values()].find((call) => !dismissedAvailableCallIds.has(call.conversation.id)) ?? null;
+  const availableCall = incoming ? null : [...availableCalls.values()].find((call) => !minimizedAvailableCallIds.has(call.conversation.id)) ?? null;
+  const minimizedAvailableCall = incoming ? null : [...availableCalls.values()].find((call) => minimizedAvailableCallIds.has(call.conversation.id)) ?? null;
   const mayEndForEveryone = canEndGroupCall(active, user?.uid);
 
   return (
@@ -721,7 +746,7 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           </div>
         ) : null}
       </Modal>
-      <Modal open={Boolean(availableCall)} title="Group call active" onClose={() => availableCall && dismissAvailableCall(availableCall.conversation.id)}>
+      <Modal open={Boolean(availableCall)} title="Group call active" onClose={() => availableCall && minimizeAvailableCall(availableCall.conversation.id)}>
         {availableCall ? (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
@@ -742,6 +767,26 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
           </div>
         ) : null}
       </Modal>
+      {minimizedAvailableCall && !active ? (
+        <div className="fixed bottom-4 left-1/2 z-40 w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 rounded-lg border border-emerald-400/30 bg-ink px-3 py-3 text-white shadow-soft dark:bg-neutral-950 sm:bottom-5">
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              onClick={() => openAvailableCallPrompt(minimizedAvailableCall.conversation.id)}
+            >
+              <Avatar name={minimizedAvailableCall.conversation.title ?? "Group"} src={minimizedAvailableCall.conversation.avatar_url} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold">{minimizedAvailableCall.conversation.title}</span>
+                <span className="block truncate text-xs text-white/65">Group {minimizedAvailableCall.mode} call is active</span>
+              </span>
+            </button>
+            <Button variant="secondary" className="h-9 px-3" onClick={() => void joinAvailableGroupCall(minimizedAvailableCall.conversation)}>
+              Join
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {active ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/75 p-0 backdrop-blur-sm sm:p-4">
           <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/15 bg-neutral-950 text-white shadow-soft sm:h-[min(820px,calc(100vh-2rem))] sm:w-[min(1120px,calc(100vw-2rem))] sm:rounded-lg">
