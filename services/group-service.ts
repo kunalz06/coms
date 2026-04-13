@@ -123,8 +123,11 @@ export async function updateGroup(supabase: SupabaseClient, conversationId: stri
 
 export async function addGroupMember(supabase: SupabaseClient, conversationId: string, userId: string) {
   const members = await getGroupMembers(supabase, conversationId);
+  if (members.some((member) => member.user_id === userId)) throw new Error("That person is already in this group.");
   if (members.length >= MAX_GROUP_MEMBERS) throw new Error(`Groups are limited to ${MAX_GROUP_MEMBERS} people for now.`);
-  const { error } = await supabase.from("conversation_members").insert({ conversation_id: conversationId, user_id: userId, role: "member" });
+  const { error } = await supabase
+    .from("conversation_members")
+    .upsert({ conversation_id: conversationId, user_id: userId, role: "member" }, { onConflict: "conversation_id,user_id", ignoreDuplicates: true });
   if (error) throw error;
 }
 

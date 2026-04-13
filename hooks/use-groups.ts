@@ -90,7 +90,9 @@ export function useGroups() {
   const addMemberByEmail = useCallback(
     async (conversationId: string, email: string) => {
       if (!supabase) throw new Error("Supabase is not ready.");
-      const profile = await searchProfileByEmail(supabase, email);
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail) throw new Error("Enter an email address.");
+      const profile = await searchProfileByEmail(supabase, normalizedEmail);
       if (!profile) throw new Error("No COMMS user exists with that email.");
       await addGroupMember(supabase, conversationId, profile.id);
       await refresh({ silent: true });
