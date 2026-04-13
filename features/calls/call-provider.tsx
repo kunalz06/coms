@@ -72,12 +72,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const { showToast } = useToast();
   const { notifyIncomingCall, startRingtone, stopRingtone } = useNotifications();
   const socketRef = useRef<WebSocket | null>(null);
+  const handleMessageRef = useRef<(event: MessageEvent<string>) => void>(() => undefined);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const connectSocketRef = useRef<() => Promise<void>>(async () => undefined);
+  const resetCallRef = useRef<() => Promise<void>>(async () => undefined);
   const shouldReconnectRef = useRef(true);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
@@ -436,20 +438,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [addPendingCandidates, handleOffer, notifyIncomingCall, resetCall, sendSignal, showToast, startRingtone, supabase, transitionTo, user]
   );
 
+  useEffect(() => {
+    handleMessageRef.current = (event) => void handleMessage(event);
+  }, [handleMessage]);
+
+  useEffect(() => {
+    resetCallRef.current = () => resetCall();
+  }, [resetCall]);
+
   const connectSocket = useCallback(async () => {
-    if (!user || socketIsOpeningOrOpen(socketRef.current)) return;
+    const userId = user?.uid;
+    if (!userId || socketIsOpeningOrOpen(socketRef.current)) return;
     shouldReconnectRef.current = true;
     await warmSignalingServer();
-    if (!user || !shouldReconnectRef.current || socketIsOpeningOrOpen(socketRef.current)) return;
+    if (!shouldReconnectRef.current || socketIsOpeningOrOpen(socketRef.current)) return;
     const socket = new WebSocket(signalingUrl());
     socketRef.current = socket;
-    socket.onopen = () => socket.send(JSON.stringify({ type: "register", userId: user.uid } satisfies SignalingMessage));
-    socket.onmessage = (event) => void handleMessage(event);
+    socket.onopen = () => socket.send(JSON.stringify({ type: "register", userId } satisfies SignalingMessage));
+    socket.onmessage = (event) => handleMessageRef.current(event);
     socket.onclose = () => {
       socketRef.current = null;
-      if (user && shouldReconnectRef.current) window.setTimeout(() => void connectSocketRef.current(), 1500);
+      if (shouldReconnectRef.current) window.setTimeout(() => void connectSocketRef.current(), 1500);
     };
-  }, [handleMessage, user]);
+  }, [user?.uid]);
 
   useEffect(() => {
     connectSocketRef.current = connectSocket;
@@ -462,9 +473,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
       shouldReconnectRef.current = false;
       socketRef.current?.close();
       socketRef.current = null;
-      void resetCall();
+      void resetCallRef.current();
     };
-  }, [connectSocket, resetCall]);
+  }, [connectSocket]);
 
   const startCall = useCallback(
     async (peer: UserProfile, conversationId: string, nextMode: CallMode) => {

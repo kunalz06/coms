@@ -93,8 +93,10 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
   const { showToast } = useToast();
   const { notifyIncomingCall, startRingtone, stopRingtone } = useNotifications();
   const socketRef = useRef<WebSocket | null>(null);
+  const handleSocketMessageRef = useRef<(event: MessageEvent<string>) => void>(() => undefined);
   const shouldReconnectRef = useRef(true);
   const pendingRequestsRef = useRef(new Map<string, PendingRequest>());
+  const cleanupRef = useRef<(notify?: boolean) => Promise<void>>(async () => undefined);
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
   const pendingCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const activeRef = useRef<ActiveGroupCall | null>(null);
@@ -341,26 +343,35 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
     [cleanup, handleAnswer, handleIceCandidate, handleIncomingInvite, handleOffer, removePeer, setParticipant]
   );
 
+  useEffect(() => {
+    handleSocketMessageRef.current = handleSocketMessage;
+  }, [handleSocketMessage]);
+
+  useEffect(() => {
+    cleanupRef.current = cleanup;
+  }, [cleanup]);
+
   const connectSocket = useCallback(
     async function openGroupCallSocket() {
-      if (!user || socketIsOpeningOrOpen(socketRef.current)) return;
+      const userId = user?.uid;
+      if (!userId || socketIsOpeningOrOpen(socketRef.current)) return;
       shouldReconnectRef.current = true;
       await warmSignalingServer();
-      if (!user || !shouldReconnectRef.current || socketIsOpeningOrOpen(socketRef.current)) return;
+      if (!shouldReconnectRef.current || socketIsOpeningOrOpen(socketRef.current)) return;
       const socket = new WebSocket(signalingUrl());
       socketRef.current = socket;
-      socket.onopen = () => socket.send(JSON.stringify({ type: "register", userId: user.uid }));
-      socket.onmessage = handleSocketMessage;
+      socket.onopen = () => socket.send(JSON.stringify({ type: "register", userId }));
+      socket.onmessage = (event) => handleSocketMessageRef.current(event);
       socket.onclose = () => {
         socketRef.current = null;
         if (activeRef.current) {
           showToast({ variant: "error", title: "Group call disconnected", description: "The call was cleaned up locally. Rejoin when signaling reconnects." });
-          void cleanup(false);
+          void cleanupRef.current(false);
         }
-        if (user && shouldReconnectRef.current) window.setTimeout(() => void openGroupCallSocket(), 1500);
+        if (shouldReconnectRef.current) window.setTimeout(() => void openGroupCallSocket(), 1500);
       };
     },
-    [cleanup, handleSocketMessage, showToast, user]
+    [showToast, user?.uid]
   );
 
   const waitForSocket = useCallback(async () => {
@@ -515,9 +526,9 @@ export function GroupCallProvider({ children }: { children: ReactNode }) {
       socketRef.current = null;
       pendingRequests.forEach((pending) => pending.reject(new Error("Group call signaling closed.")));
       pendingRequests.clear();
-      void cleanup(false);
+      void cleanupRef.current(false);
     };
-  }, [cleanup, connectSocket]);
+  }, [connectSocket]);
 
   const value = useMemo(() => ({ status, active, joinGroupCall }), [active, joinGroupCall, status]);
   const group = active?.conversation ?? null;
