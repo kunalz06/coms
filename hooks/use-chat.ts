@@ -10,6 +10,7 @@ import {
   getOrCreateConversation,
   markConversationRead,
   sendMessage,
+  shareMessageToConversation,
   toggleMessageReaction
 } from "@/services/chat-service";
 import { uploadToCloudinary, type CloudinaryUploadResult } from "@/services/upload-service";
@@ -203,6 +204,23 @@ export function useChat(target: ChatTarget | null) {
     [conversation, load, supabase, user]
   );
 
+  const shareMessageToTarget = useCallback(
+    async (message: Message, shareTarget: ChatTarget) => {
+      if (!supabase || !user) throw new Error("Sign in to share messages.");
+      const destination =
+        shareTarget.kind === "direct"
+          ? await getOrCreateConversation(supabase, user.uid, shareTarget.friend.id)
+          : shareTarget.conversation;
+      await shareMessageToConversation(supabase, {
+        sourceMessage: message,
+        conversationId: destination.id,
+        senderId: user.uid
+      });
+      if (destination.id === conversation?.id) await load({ silent: true });
+    },
+    [conversation?.id, load, supabase, user]
+  );
+
   return useMemo(
     () => ({
       conversation,
@@ -217,6 +235,7 @@ export function useChat(target: ChatTarget | null) {
       removeMessageForEveryone,
       deleteHistoryForMe,
       deleteRangeForMe,
+      shareMessageToTarget,
       reload: load
     }),
     [
@@ -232,6 +251,7 @@ export function useChat(target: ChatTarget | null) {
       removeMessageForMe,
       sendFile,
       sendText,
+      shareMessageToTarget,
       uploadProgress
     ]
   );

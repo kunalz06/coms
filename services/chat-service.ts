@@ -84,6 +84,36 @@ export async function sendMessage(
   return message;
 }
 
+export async function shareMessageToConversation(
+  supabase: SupabaseClient,
+  values: {
+    sourceMessage: Message;
+    conversationId: string;
+    senderId: string;
+  }
+) {
+  if (values.sourceMessage.id.startsWith("local-")) throw new Error("Wait for the message to finish sending first.");
+  if (values.sourceMessage.deleted_for_everyone_at) throw new Error("Deleted messages cannot be shared.");
+
+  const attachment = values.sourceMessage.attachments?.[0];
+  await sendMessage(supabase, {
+    conversationId: values.conversationId,
+    senderId: values.senderId,
+    kind: values.sourceMessage.kind,
+    content: values.sourceMessage.content,
+    attachment: attachment
+      ? {
+          url: attachment.url,
+          public_id: attachment.public_id,
+          resource_type: attachment.resource_type,
+          file_name: attachment.file_name,
+          mime_type: attachment.mime_type,
+          size_bytes: attachment.size_bytes
+        }
+      : undefined
+  });
+}
+
 export async function markConversationRead(supabase: SupabaseClient, conversationId: string, userId: string) {
   const { data: conversation, error: conversationError } = await supabase
     .from("conversations")

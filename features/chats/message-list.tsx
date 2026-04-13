@@ -1,13 +1,14 @@
 "use client";
 
-import { FileText, SmilePlus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { FileText, Share2, SmilePlus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { formatTime } from "@/lib/utils";
-import type { Message, MessageReaction, MessageReactionKind, UserProfile } from "@/types";
+import type { ChatTarget, Message, MessageReaction, MessageReactionKind, UserProfile } from "@/types";
 
 type MessageListProps = {
   messages: Message[];
@@ -19,6 +20,8 @@ type MessageListProps = {
   onReact: (messageId: string, kind: MessageReactionKind, content: string) => Promise<void>;
   onDeleteForMe: (messageId: string) => Promise<void>;
   onDeleteForEveryone: (messageId: string) => Promise<void>;
+  shareTargets: ChatTarget[];
+  onShareToTarget: (message: Message, target: ChatTarget) => Promise<void>;
 };
 
 const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F64F}"];
@@ -61,6 +64,42 @@ function ReactionsModal({ message, open, onClose }: { message: Message | null; o
 
 function canDeleteForEveryone(message: Message, currentUserId: string) {
   return message.sender_id === currentUserId && !message.deleted_for_everyone_at && Date.now() - new Date(message.created_at).getTime() <= 60_000;
+}
+
+function shareTextForMessage(message: Message) {
+  const attachment = message.attachments?.[0];
+  if (message.content) return message.content;
+  if (attachment) return `${attachment.file_name} shared from COMMS`;
+  return `${message.kind} message shared from COMMS`;
+}
+
+function shareDataForMessage(message: Message): ShareData {
+  const attachment = message.attachments?.[0];
+  return {
+    title: "COMMS message",
+    text: shareTextForMessage(message),
+    url: attachment?.url
+  };
+}
+
+function shareFallbackText(data: ShareData) {
+  return [data.text, data.url].filter(Boolean).join("\n");
+}
+
+function targetTitle(target: ChatTarget) {
+  return target.kind === "direct" ? target.friend.full_name : target.conversation.title ?? "Group chat";
+}
+
+function targetSubtitle(target: ChatTarget) {
+  return target.kind === "direct" ? target.friend.email : `${target.conversation.members?.length ?? 0} members`;
+}
+
+function targetAvatar(target: ChatTarget) {
+  return target.kind === "direct" ? target.friend.avatar_url : target.conversation.avatar_url;
+}
+
+function targetKey(target: ChatTarget) {
+  return target.kind === "direct" ? `direct:${target.friend.id}` : `group:${target.conversation.id}`;
 }
 
 function DeleteMessageModal({
@@ -111,12 +150,131 @@ function DeleteMessageModal({
   );
 }
 
-export function MessageList({ messages, currentUserId, friend, showSenderNames, senderProfiles, getDownloadUrl, onReact, onDeleteForMe, onDeleteForEveryone }: MessageListProps) {
+function ShareMessageModal({
+  message,
+  targets,
+  open,
+  onClose,
+  onShareToTarget
+}: {
+  message: Message | null;
+  targets: ChatTarget[];
+  open: boolean;
+  onClose: () => void;
+  onShareToTarget: (message: Message, target: ChatTarget) => Promise<void>;
+}) {
+  const { showToast } = useToast();
+  const [query, setQuery] = useState("");
+  const [sharingKey, setSharingKey] = useState<string | null>(null);
+  const visibleTargets = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return targets;
+    return targets.filter((target) => `${targetTitle(target)} ${targetSubtitle(target)}`.toLowerCase().includes(normalized));
+  }, [query, targets]);
+
+  async function shareToTarget(target: ChatTarget) {
+    if (!message) return;
+    try {
+      setSharingKey(targetKey(target));
+      await onShareToTarget(message, target);
+      showToast({ variant: "success", title: `Shared to ${targetTitle(target)}` });
+      setQuery("");
+      onClose();
+    } catch (error) {
+      showToast({ variant: "error", title: "Could not share message", description: error instanceof Error ? error.message : "Try again." });
+    } finally {
+      setSharingKey(null);
+    }
+  }
+
+  async function shareToOtherApps() {
+    if (!message) return;
+    try {
+      const data = shareDataForMessage(message);
+      if (navigator.share) {
+        await navigator.share(data);
+        showToast({ variant: "success", title: "Shared" });
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareFallbackText(data));
+        showToast({ variant: "success", title: "Copied share text" });
+      } else {
+        throw new Error("Sharing is not available in this browser.");
+      }
+      setQuery("");
+      onClose();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      showToast({ variant: "error", title: "Could not share outside COMMS", description: error instanceof Error ? error.message : "Try copying the message instead." });
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Share to">
+      {message && !message.deleted_for_everyone_at ? (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-line bg-white/70 p-3 text-sm text-ink dark:border-white/10 dark:bg-white/10 dark:text-white">
+            <p className="line-clamp-2 break-words">{shareTextForMessage(message)}</p>
+            {message.attachments?.[0] ? <p className="mt-1 truncate text-xs text-ink/55 dark:text-white/55">{message.attachments[0].file_name}</p> : null}
+          </div>
+          <Button variant="secondary" className="w-full justify-center" onClick={() => void shareToOtherApps()}>
+            <Share2 className="h-4 w-4" />
+            Share to other apps
+          </Button>
+          <div className="space-y-3 border-t border-line pt-4 dark:border-white/10">
+            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats or groups" aria-label="Search share destinations" />
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              {visibleTargets.length ? (
+                visibleTargets.map((target) => {
+                  const key = targetKey(target);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => void shareToTarget(target)}
+                      disabled={sharingKey !== null}
+                      className="flex w-full items-center gap-3 rounded-lg border border-line bg-white/70 p-3 text-left transition hover:border-moss/50 hover:bg-white disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-white/10 dark:hover:border-emerald-300/50 dark:hover:bg-white/15"
+                    >
+                      <Avatar name={targetTitle(target)} src={targetAvatar(target)} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-ink dark:text-white">{targetTitle(target)}</p>
+                        <p className="truncate text-xs text-ink/55 dark:text-white/55">{targetSubtitle(target)}</p>
+                      </div>
+                      <span className="text-xs font-medium text-moss dark:text-emerald-300">{sharingKey === key ? "Sharing" : "Share"}</span>
+                    </button>
+                  );
+                })
+              ) : (
+                <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-ink/55 dark:border-white/10 dark:text-white/55">No chats found.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-ink/60 dark:text-white/60">Deleted messages cannot be shared.</p>
+      )}
+    </Modal>
+  );
+}
+
+export function MessageList({
+  messages,
+  currentUserId,
+  friend,
+  showSenderNames,
+  senderProfiles,
+  getDownloadUrl,
+  onReact,
+  onDeleteForMe,
+  onDeleteForEveryone,
+  shareTargets,
+  onShareToTarget
+}: MessageListProps) {
   const { showToast } = useToast();
   const [customFor, setCustomFor] = useState<string | null>(null);
   const [customReaction, setCustomReaction] = useState("");
   const [reactionDetails, setReactionDetails] = useState<Message | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Message | null>(null);
+  const [shareTarget, setShareTarget] = useState<Message | null>(null);
   const [activeToolsFor, setActiveToolsFor] = useState<string | null>(null);
 
   async function react(messageId: string, kind: MessageReactionKind, content: string) {
@@ -184,6 +342,17 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
                       aria-label="Add custom reaction"
                     >
                       <SmilePlus className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveToolsFor(null);
+                        setShareTarget(message);
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-ink/65 transition hover:bg-ink/5 dark:text-white/65 dark:hover:bg-white/10"
+                      aria-label="Share message"
+                    >
+                      <Share2 className="h-4 w-4" />
                     </button>
                   </>
                 ) : null}
@@ -283,6 +452,7 @@ export function MessageList({ messages, currentUserId, friend, showSenderNames, 
       })}
       <ReactionsModal message={reactionDetails} open={Boolean(reactionDetails)} onClose={() => setReactionDetails(null)} />
       <DeleteMessageModal message={deleteTarget} currentUserId={currentUserId} open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onDeleteForMe={onDeleteForMe} onDeleteForEveryone={onDeleteForEveryone} />
+      <ShareMessageModal message={shareTarget} targets={shareTargets} open={Boolean(shareTarget)} onClose={() => setShareTarget(null)} onShareToTarget={onShareToTarget} />
     </div>
   );
 }

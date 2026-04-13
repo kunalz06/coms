@@ -16,9 +16,11 @@ import { useCalls } from "@/features/calls/call-provider";
 import { useGroupCalls } from "@/features/group-calls/group-call-provider";
 import { useNotifications } from "@/features/notifications/notification-provider";
 import { useChat } from "@/hooks/use-chat";
+import { useContacts } from "@/hooks/use-contacts";
+import { useGroups } from "@/hooks/use-groups";
 import { formatRelativePresence } from "@/lib/utils";
 import { useAppStore } from "@/store/app-store";
-import type { CallSession, UserProfile } from "@/types";
+import type { CallSession, ChatTarget, UserProfile } from "@/types";
 
 export function ChatPanel() {
   const { user, supabase } = useAuth();
@@ -26,6 +28,8 @@ export function ChatPanel() {
   const target = useAppStore((state) => state.selectedChat);
   const setSelectedChat = useAppStore((state) => state.setSelectedChat);
   const chat = useChat(target);
+  const { friends } = useContacts();
+  const { groups } = useGroups();
   const { startCall, status } = useCalls();
   const { joinGroupCall, joinAvailableGroupCall, availableCalls, status: groupCallStatus } = useGroupCalls();
   const { isConversationMuted, toggleConversationMute } = useNotifications();
@@ -56,6 +60,16 @@ export function ChatPanel() {
     if (!groupMembers) return undefined;
     return new Map(groupMembers.flatMap((member) => (member.profile ? [[member.user_id, member.profile] as const] : [])));
   }, [groupMembers]);
+  const shareTargets = useMemo<ChatTarget[]>(() => {
+    const directTargets: ChatTarget[] = friends.flatMap((friendship) => (friendship.friend ? [{ kind: "direct", friend: friendship.friend }] : []));
+    const groupTargets: ChatTarget[] = groups.map((item) => ({ kind: "group", conversation: item }));
+    return [...directTargets, ...groupTargets].filter((item) => {
+      if (!target) return true;
+      if (target.kind === "direct" && item.kind === "direct") return item.friend.id !== target.friend.id;
+      if (target.kind === "group" && item.kind === "group") return item.conversation.id !== target.conversation.id;
+      return true;
+    });
+  }, [friends, groups, target]);
   const muted = isConversationMuted(chat.conversation?.id);
 
   function scrollToLatest(behavior: ScrollBehavior = "smooth") {
@@ -221,6 +235,8 @@ export function ChatPanel() {
             onReact={chat.reactToMessage}
             onDeleteForMe={chat.removeMessageForMe}
             onDeleteForEveryone={chat.removeMessageForEveryone}
+            shareTargets={shareTargets}
+            onShareToTarget={chat.shareMessageToTarget}
           />
         )}
         {showScrollButton ? (
