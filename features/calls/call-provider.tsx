@@ -354,7 +354,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           void updateCallSession(callId, { status: "reconnecting" }).catch(() => undefined);
           window.setTimeout(() => {
             if (connection.connectionState === "disconnected") void resetCall("failed");
-          }, 8000);
+          }, 15_000);
         }
         if (state === "failed") {
           transitionTo("failed");
@@ -444,7 +444,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           resolve(pending);
           return;
         }
-        if (Date.now() - startedAt > 5000) {
+        if (Date.now() - startedAt > CALL_TIMEOUT_MS) {
           window.clearInterval(interval);
           resolve(null);
         }
@@ -497,15 +497,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, [incoming, resetCall, sendSignal, user]);
 
   const leaveCall = useCallback(async () => {
-    const call = activeRef.current;
-    if (!call || !user) return;
-    try {
-      sendSignal({ type: "call-left", callId: call.callId, from: user.uid, to: call.peer.id, reason: "left" });
-    } catch {
-      // The peer may already be gone; we still park the local call state.
-    }
-    await parkActiveCall("left");
-  }, [parkActiveCall, sendSignal, user]);
+    if (!activeRef.current) return;
+    // Collapse the call surface without tearing down the peer connection.
+    setIsCallMinimized(true);
+  }, []);
 
   const joinAvailableCall = useCallback(async () => {
     const call = parkedCallRef.current;
@@ -927,10 +922,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
               <Maximize2 className="h-4 w-4" />
               Open
             </Button>
-            <Button variant="secondary" className="h-9 px-3" onClick={() => void leaveCall()}>
-              <PhoneOff className="h-4 w-4" />
-              Leave
-            </Button>
             <Button variant="danger" className="h-9 px-3" onClick={() => void endCall()}>
               <PhoneOff className="h-4 w-4" />
             </Button>
@@ -941,24 +932,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
       {active && !isCallMinimized ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/70 p-0 backdrop-blur-sm sm:p-4">
           <div className="flex h-[100dvh] w-full flex-col overflow-hidden border border-white/15 bg-neutral-950 text-white shadow-soft sm:h-[min(760px,calc(100vh-2rem))] sm:w-[min(1040px,calc(100vw-2rem))] sm:rounded-lg">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
                 <Avatar name={active.peer.full_name} src={active.peer.avatar_url} />
-                <div>
-                  <p className="font-semibold">{active.peer.full_name}</p>
-                  <p className="capitalize text-sm text-white/60">{readableCallStatus(status)}</p>
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{active.peer.full_name}</p>
+                  <p className="truncate text-sm text-white/60">{readableCallStatus(status)}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" className="h-9 px-3" onClick={() => setIsCallMinimized(true)}>
+              <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+                <Button variant="secondary" className="h-9 flex-1 px-3 sm:flex-none" onClick={() => void leaveCall()}>
                   <Minimize2 className="h-4 w-4" />
                   Minimize
                 </Button>
-                <Button variant="secondary" className="h-9 px-3" onClick={() => void leaveCall()}>
-                  <PhoneOff className="h-4 w-4" />
-                  Leave
-                </Button>
-                <Button variant="danger" className="h-9 px-3" onClick={() => void endCall()}>
+                <Button variant="danger" className="h-9 flex-1 px-3 sm:flex-none" onClick={() => void endCall()}>
                   <PhoneOff className="h-4 w-4" />
                   End
                 </Button>
@@ -981,13 +968,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   ) : null}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <Button variant="secondary" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
-                  <Button variant="secondary" onClick={() => void toggleCamera()} disabled={mode === "audio" || isScreenSharing}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
-                  <Button variant="secondary" className="col-span-2" onClick={() => void toggleScreenShare()}>
+                  <Button variant="secondary" className="min-w-0" onClick={toggleMic}>{micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />} Mic</Button>
+                  <Button variant="secondary" className="min-w-0" onClick={() => void toggleCamera()} disabled={mode === "audio" || isScreenSharing}>{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Camera</Button>
+                  <Button variant="secondary" className="col-span-2 min-w-0" onClick={() => void toggleScreenShare()}>
                     {isScreenSharing ? <ScreenShareOff className="h-4 w-4" /> : <ScreenShare className="h-4 w-4" />}
                     {isScreenSharing ? "Stop sharing" : "Share screen"}
                   </Button>
-                  <Button variant="secondary" className="col-span-2" onClick={() => void switchMode()} disabled={isScreenSharing}>
+                  <Button variant="secondary" className="col-span-2 min-w-0" onClick={() => void switchMode()} disabled={isScreenSharing}>
                     {mode === "audio" ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                     {mode === "audio" ? "Switch to video" : "Switch to audio"}
                   </Button>

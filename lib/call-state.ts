@@ -1,6 +1,6 @@
 import type { CallStatus } from "@/types";
 
-export const CALL_TIMEOUT_MS = 40_000;
+export const CALL_TIMEOUT_MS = 45_000;
 
 const allowedTransitions: Record<CallStatus, CallStatus[]> = {
   idle: ["incoming_ringing", "acquiring_media"],
