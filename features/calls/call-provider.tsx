@@ -93,6 +93,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<CallMode>("audio");
   const [incoming, setIncoming] = useState<IncomingCall | null>(null);
   const [active, setActive] = useState<ActiveCall | null>(null);
+  const [parkedCall, setParkedCall] = useState<ActiveCall | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [micEnabled, setMicEnabled] = useState(true);
@@ -102,6 +103,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const statusRef = useRef(status);
   const activeRef = useRef(active);
   const incomingRef = useRef(incoming);
+  const parkedCallRef = useRef(parkedCall);
 
   useEffect(() => {
     statusRef.current = status;
@@ -137,6 +139,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     incomingRef.current = incoming;
   }, [incoming]);
+
+  useEffect(() => {
+    parkedCallRef.current = parkedCall;
+  }, [parkedCall]);
 
   useEffect(() => attachStream(localStream, localVideoRef.current), [isCallMinimized, localStream]);
   useEffect(() => attachStream(remoteStream, remoteVideoRef.current), [isCallMinimized, remoteStream]);
@@ -207,6 +213,42 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [supabase]
   );
 
+  const parkActiveCall = useCallback(
+    async (reason: "left" | "disconnect" = "left") => {
+      const call = activeRef.current;
+      if (!call) return;
+      clearCallTimeout();
+      peerRef.current?.close();
+      if (screenTrackRef.current) {
+        screenTrackRef.current.onended = null;
+        screenTrackRef.current.stop();
+      }
+      peerRef.current = null;
+      videoSenderRef.current = null;
+      pendingCandidatesRef.current = [];
+      pendingOfferRef.current = null;
+      localStreamRef.current?.getTracks().forEach((track) => track.stop());
+      remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+      remoteStreamRef.current = null;
+      setLocalStream(null);
+      setRemoteStream(null);
+      setIncoming(null);
+      setActive(null);
+      setParkedCall(call);
+      setMode(call.mode);
+      setMicEnabled(true);
+      setCameraEnabled(call.mode === "video");
+      setIsScreenSharing(false);
+      setIsCallMinimized(false);
+      forceStatus("idle");
+      if (reason === "disconnect") {
+        showToast({ variant: "info", title: "Call paused", description: "The other person left. You can rejoin while the call remains active." });
+      }
+    },
+    [clearCallTimeout, forceStatus, showToast]
+  );
+
   const resetCall = useCallback(
     async (reason: "ended" | "failed" | "missed" | "rejected" | "busy" = "ended") => {
       const call = activeRef.current;
@@ -236,6 +278,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setRemoteStream(null);
       setIncoming(null);
       setActive(null);
+      setParkedCall(null);
       setMode("audio");
       setMicEnabled(true);
       setCameraEnabled(true);
@@ -453,9 +496,50 @@ export function CallProvider({ children }: { children: ReactNode }) {
     await resetCall("rejected");
   }, [incoming, resetCall, sendSignal, user]);
 
+  const leaveCall = useCallback(async () => {
+    const call = activeRef.current;
+    if (!call || !user) return;
+    try {
+      sendSignal({ type: "call-left", callId: call.callId, from: user.uid, to: call.peer.id, reason: "left" });
+    } catch {
+      // The peer may already be gone; we still park the local call state.
+    }
+    await parkActiveCall("left");
+  }, [parkActiveCall, sendSignal, user]);
+
+  const joinAvailableCall = useCallback(async () => {
+    const call = parkedCallRef.current;
+    if (!call || !user || !supabase) return;
+    try {
+      await waitForSignaling();
+      transitionTo("acquiring_media");
+      const { stream, effectiveMode } = await getMedia(call.mode);
+      const peer = createPeer(call.callId, call.peer.id);
+      stream.getTracks().forEach((track) => {
+        const sender = peer.addTrack(track, stream);
+        if (track.kind === "video") videoSenderRef.current = sender;
+      });
+      const nextActive = { ...call, mode: effectiveMode };
+      setActive(nextActive);
+      activeRef.current = nextActive;
+      setParkedCall(null);
+      setMode(effectiveMode);
+      setCameraEnabled(effectiveMode === "video");
+      transitionTo("connecting");
+      await updateCallSession(call.callId, { status: "connecting" }).catch(() => undefined);
+      sendSignal({ type: "call-join", callId: call.callId, from: user.uid, to: call.peer.id, mode: effectiveMode, conversationId: call.conversationId });
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      sendSignal({ type: "call-offer", callId: call.callId, from: user.uid, to: call.peer.id, offer });
+    } catch (error) {
+      showToast({ variant: "error", title: "Could not rejoin call", description: error instanceof Error ? error.message : "Check camera and microphone permissions." });
+      await parkActiveCall("left");
+    }
+  }, [createPeer, getMedia, parkActiveCall, sendSignal, showToast, supabase, transitionTo, updateCallSession, user, waitForSignaling]);
+
   const endCall = useCallback(
     async (reason = "ended") => {
-      const call = activeRef.current;
+      const call = activeRef.current ?? parkedCallRef.current;
       if (call && user) {
         sendSignal({ type: "call-end", callId: call.callId, from: user.uid, to: call.peer.id, reason });
       }
@@ -492,6 +576,38 @@ export function CallProvider({ children }: { children: ReactNode }) {
         await addPendingCandidates();
         transitionTo("connecting");
       }
+      if (message.type === "call-left") {
+        if (activeRef.current?.callId === message.callId) {
+          peerRef.current?.close();
+          peerRef.current = null;
+          videoSenderRef.current = null;
+          pendingCandidatesRef.current = [];
+          pendingOfferRef.current = null;
+          remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
+          remoteStreamRef.current = null;
+          setRemoteStream(null);
+          setCameraEnabled(activeRef.current.mode === "video");
+          transitionTo("reconnecting");
+          void updateCallSession(message.callId, { status: "reconnecting" }).catch(() => undefined);
+        }
+      }
+      if (message.type === "call-available") {
+        if (parkedCallRef.current?.callId === message.callId) return;
+        const peer = await getProfile(supabase, message.from);
+        if (!peer) return;
+        setParkedCall({
+          callId: message.callId,
+          peer,
+          conversationId: message.conversationId,
+          mode: message.mode
+        });
+        setActive(null);
+        forceStatus("idle");
+      }
+      if (message.type === "call-join" && activeRef.current?.callId === message.callId) {
+        transitionTo("connecting");
+        await updateCallSession(message.callId, { status: "connecting" }).catch(() => undefined);
+      }
       if (message.type === "ice-candidate") {
         const belongsToActiveCall = activeRef.current?.callId === message.callId;
         const belongsToIncomingCall = incomingRef.current?.callId === message.callId;
@@ -513,7 +629,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }
       if (message.type === "error") showToast({ variant: "error", title: "Calling error", description: message.message });
     },
-    [addPendingCandidates, handleOffer, notifyIncomingCall, resetCall, sendSignal, showToast, startRingtone, supabase, transitionTo, user]
+    [addPendingCandidates, forceStatus, handleOffer, notifyIncomingCall, resetCall, sendSignal, showToast, startRingtone, supabase, transitionTo, updateCallSession, user]
   );
 
   useEffect(() => {
@@ -558,7 +674,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const startCall = useCallback(
     async (peer: UserProfile, conversationId: string, nextMode: CallMode) => {
       if (!user || !supabase) return;
-      if (statusRef.current !== "idle") {
+      if (statusRef.current !== "idle" || parkedCallRef.current) {
         showToast({ variant: "info", title: "A call is already active" });
         return;
       }
@@ -768,12 +884,33 @@ export function CallProvider({ children }: { children: ReactNode }) {
               </div>
             </div>
             <div className="flex gap-2">
-              <Button onClick={() => void acceptCall()}>Accept</Button>
+              <Button onClick={() => void acceptCall()}>Join</Button>
               <Button variant="danger" onClick={() => void rejectCall()}>Reject</Button>
             </div>
           </div>
         ) : null}
       </Modal>
+
+      {parkedCall ? (
+        <div className="fixed bottom-4 left-1/2 z-40 w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 rounded-lg border border-white/15 bg-neutral-950 px-3 py-3 text-white shadow-soft sm:bottom-5">
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => void joinAvailableCall()}>
+              <Avatar name={parkedCall.peer.full_name} src={parkedCall.peer.avatar_url} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold">{parkedCall.peer.full_name}</span>
+                <span className="block truncate text-xs text-white/65">Call is still active</span>
+              </span>
+            </button>
+            <Button variant="secondary" className="h-9 px-3" onClick={() => void joinAvailableCall()}>
+              <Maximize2 className="h-4 w-4" />
+              Join
+            </Button>
+            <Button variant="danger" className="h-9 px-3" onClick={() => void endCall()}>
+              <PhoneOff className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {active && isCallMinimized ? (
         <div className="fixed bottom-4 left-1/2 z-40 w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 rounded-lg border border-white/15 bg-neutral-950 px-3 py-3 text-white shadow-soft sm:bottom-5">
@@ -789,6 +926,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
             <Button variant="secondary" className="h-9 px-3" onClick={() => setIsCallMinimized(false)}>
               <Maximize2 className="h-4 w-4" />
               Open
+            </Button>
+            <Button variant="secondary" className="h-9 px-3" onClick={() => void leaveCall()}>
+              <PhoneOff className="h-4 w-4" />
+              Leave
             </Button>
             <Button variant="danger" className="h-9 px-3" onClick={() => void endCall()}>
               <PhoneOff className="h-4 w-4" />
@@ -812,6 +953,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 <Button variant="secondary" className="h-9 px-3" onClick={() => setIsCallMinimized(true)}>
                   <Minimize2 className="h-4 w-4" />
                   Minimize
+                </Button>
+                <Button variant="secondary" className="h-9 px-3" onClick={() => void leaveCall()}>
+                  <PhoneOff className="h-4 w-4" />
+                  Leave
                 </Button>
                 <Button variant="danger" className="h-9 px-3" onClick={() => void endCall()}>
                   <PhoneOff className="h-4 w-4" />

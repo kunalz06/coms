@@ -12,6 +12,9 @@ type Signal =
   | { type: "call-answer"; callId: string; from: string; to: string; answer: unknown }
   | { type: "ice-candidate"; callId: string; from: string; to: string; candidate: unknown }
   | { type: "call-reject"; callId: string; from: string; to: string; reason?: string }
+  | { type: "call-left"; callId: string; from: string; to: string; reason?: string }
+  | { type: "call-join"; callId: string; from: string; to: string; mode: "audio" | "video"; conversationId: string }
+  | { type: "call-available"; callId: string; from: string; to: string; mode: "audio" | "video"; conversationId: string }
   | { type: "call-end"; callId: string; from: string; to: string; reason?: string }
   | { type: "call-busy"; callId: string; from: string; to: string }
   | { type: "call-unavailable"; callId: string; from: string; to: string; reason?: string };
@@ -25,6 +28,13 @@ type PendingDirectCall = {
   mode: "audio" | "video";
   expiresAt: number;
   signals: RoutedSignal[];
+};
+type DirectCallSession = {
+  callId: string;
+  from: string;
+  to: string;
+  conversationId: string;
+  mode: "audio" | "video";
 };
 type DirectConversationRow = {
   id: string;
@@ -52,6 +62,7 @@ const handle = app.getRequestHandler();
 const clients = new Map<string, Set<ClientSocket>>();
 const activeCallsByUser = new Map<string, string>();
 const participantsByCall = new Map<string, Set<string>>();
+const directCallSessions = new Map<string, DirectCallSession>();
 const pendingDirectCallsByUser = new Map<string, PendingDirectCall[]>();
 const DIRECT_CALL_RING_MS = 45_000;
 const MAX_PENDING_SIGNALS_PER_CALL = 80;
@@ -105,6 +116,8 @@ function isDirectSignal(message: Signal | Record<string, unknown>): message is S
       "call-answer",
       "ice-candidate",
       "call-reject",
+      "call-left",
+      "call-join",
       "call-end",
       "call-busy",
       "call-unavailable"
@@ -115,6 +128,7 @@ function isDirectSignal(message: Signal | Record<string, unknown>): message is S
   if (!isNonEmptyString(candidate.callId) || !isNonEmptyString(candidate.from) || !isNonEmptyString(candidate.to)) return false;
   if (candidate.from === candidate.to) return false;
   if (candidate.type === "call-initiate") return isCallMode(candidate.mode) && isNonEmptyString(candidate.conversationId);
+  if (candidate.type === "call-join") return isCallMode(candidate.mode) && isNonEmptyString(candidate.conversationId);
   return true;
 }
 
@@ -306,11 +320,38 @@ function clearCall(callId: string) {
     if (currentCallId === callId) activeCallsByUser.delete(userId);
   }
   participantsByCall.delete(callId);
+  directCallSessions.delete(callId);
   for (const [userId, calls] of pendingDirectCallsByUser.entries()) {
     const nextCalls = calls.filter((call) => call.callId !== callId);
     if (nextCalls.length) pendingDirectCallsByUser.set(userId, nextCalls);
     else pendingDirectCallsByUser.delete(userId);
   }
+}
+
+function getDirectSession(callId: string) {
+  return directCallSessions.get(callId) ?? null;
+}
+
+function parkDirectCall(userId: string, callId: string, reason = "left") {
+  const session = getDirectSession(callId);
+  if (!session) return null;
+  if (activeCallsByUser.get(userId) !== callId) return session;
+  activeCallsByUser.delete(userId);
+  const peerId = session.from === userId ? session.to : session.from;
+  sendToUser(peerId, { type: "call-left", callId, from: userId, to: peerId, reason });
+  sendToUser(userId, { type: "call-available", callId, from: peerId, to: userId, mode: session.mode, conversationId: session.conversationId });
+  return session;
+}
+
+function registerDirectCall(call: DirectCallSession) {
+  directCallSessions.set(call.callId, call);
+  activeCallsByUser.set(call.from, call.callId);
+  activeCallsByUser.set(call.to, call.callId);
+  participantsByCall.set(call.callId, new Set([call.from, call.to]));
+}
+
+function directCallsForUser(userId: string) {
+  return [...directCallSessions.values()].filter((session) => session.from === userId || session.to === userId);
 }
 
 function forward(message: RoutedSignal) {
@@ -497,6 +538,18 @@ void app.prepare().then(() => {
           addClient(message.userId, socket);
           console.log("Signaling client registered", { userId: message.userId, sockets: clients.get(message.userId)?.size ?? 0 });
           groupCalls.notifyAvailableCallsForUser(message.userId);
+          for (const session of directCallsForUser(message.userId)) {
+            if (activeCallsByUser.get(message.userId) === session.callId) continue;
+            const peerId = session.from === message.userId ? session.to : session.from;
+            send(socket, {
+              type: "call-available",
+              callId: session.callId,
+              from: peerId,
+              to: message.userId,
+              mode: session.mode,
+              conversationId: session.conversationId
+            });
+          }
           flushPendingDirectCallsForUser(message.userId);
           return;
         }
@@ -535,6 +588,13 @@ void app.prepare().then(() => {
             return;
           }
           await upsertDirectCallSession(directMessage, "ringing");
+          registerDirectCall({
+            callId: directMessage.callId,
+            from: directMessage.from,
+            to: directMessage.to,
+            conversationId: directMessage.conversationId,
+            mode: directMessage.mode
+          });
           if (!hasClient(directMessage.to)) {
             const pushSent = await sendPushToUser(directMessage.to);
             if (!pushSent) {
@@ -555,15 +615,35 @@ void app.prepare().then(() => {
                 signals: [directMessage]
               }
             ]);
-            activeCallsByUser.set(directMessage.from, directMessage.callId);
-            activeCallsByUser.set(directMessage.to, directMessage.callId);
-            participantsByCall.set(directMessage.callId, new Set([directMessage.from, directMessage.to]));
             console.log("Direct call push sent to offline recipient", { callId: directMessage.callId, from: directMessage.from, to: directMessage.to });
+            return;
+          }
+          forward(directMessage);
+          return;
+        }
+
+        if (directMessage.type === "call-left") {
+          const session = getDirectSession(directMessage.callId);
+          if (!session) return;
+          parkDirectCall(directMessage.from, directMessage.callId, directMessage.reason ?? "left");
+          await updateDirectCallSession(directMessage.callId, "reconnecting");
+          return;
+        }
+
+        if (directMessage.type === "call-join") {
+          const session = getDirectSession(directMessage.callId);
+          if (!session) {
+            send(socket, { type: "call-unavailable", callId: directMessage.callId, from: directMessage.to, to: directMessage.from, reason: "ended" });
+            return;
+          }
+          if (session.from !== directMessage.from && session.to !== directMessage.from) {
+            send(socket, { type: "call-unavailable", callId: directMessage.callId, from: directMessage.to, to: directMessage.from, reason: "not-a-participant" });
             return;
           }
           activeCallsByUser.set(directMessage.from, directMessage.callId);
           activeCallsByUser.set(directMessage.to, directMessage.callId);
-          participantsByCall.set(directMessage.callId, new Set([directMessage.from, directMessage.to]));
+          participantsByCall.set(directMessage.callId, new Set([session.from, session.to]));
+          await updateDirectCallSession(directMessage.callId, "connecting");
           forward(directMessage);
           return;
         }
@@ -608,14 +688,8 @@ void app.prepare().then(() => {
       if (!wasLastSocketForUser) return;
       const callId = activeCallsByUser.get(socket.userId);
       if (!callId) return;
-      const participants = participantsByCall.get(callId) ?? new Set<string>();
-      clearCall(callId);
-      void updateDirectCallSession(callId, "ended", "disconnect");
-      for (const peerId of participants) {
-        if (peerId !== socket.userId) {
-          sendToUser(peerId, { type: "call-end", callId, from: socket.userId, to: peerId, reason: "disconnect" });
-        }
-      }
+      parkDirectCall(socket.userId, callId, "disconnect");
+      void updateDirectCallSession(callId, "reconnecting");
     });
   });
 

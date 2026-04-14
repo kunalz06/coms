@@ -266,6 +266,9 @@ export type SignalingMessage =
   | { type: "call-answer"; callId: string; from: string; to: string; answer: RTCSessionDescriptionInit }
   | { type: "ice-candidate"; callId: string; from: string; to: string; candidate: RTCIceCandidateInit }
   | { type: "call-reject"; callId: string; from: string; to: string; reason?: string }
+  | { type: "call-left"; callId: string; from: string; to: string; reason?: string }
+  | { type: "call-join"; callId: string; from: string; to: string; mode: CallMode; conversationId: string }
+  | { type: "call-available"; callId: string; from: string; to: string; mode: CallMode; conversationId: string }
   | { type: "call-end"; callId: string; from: string; to: string; reason?: string }
   | { type: "call-busy"; callId: string; from: string; to: string }
   | { type: "call-unavailable"; callId: string; from: string; to: string; reason?: string }
