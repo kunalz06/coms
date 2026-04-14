@@ -496,11 +496,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
     await resetCall("rejected");
   }, [incoming, resetCall, sendSignal, user]);
 
-  const leaveCall = useCallback(async () => {
+  const minimizeCall = useCallback(() => {
     if (!activeRef.current) return;
-    // Collapse the call surface without tearing down the peer connection.
     setIsCallMinimized(true);
   }, []);
+
+  const leaveCall = useCallback(async () => {
+    const call = activeRef.current;
+    if (!call || !user) return;
+    try {
+      sendSignal({ type: "call-left", callId: call.callId, from: user.uid, to: call.peer.id, reason: "left" });
+    } catch {
+      // The peer may already be gone; we still park the local call state.
+    }
+    await parkActiveCall("left");
+  }, [parkActiveCall, sendSignal, user]);
 
   const joinAvailableCall = useCallback(async () => {
     const call = parkedCallRef.current;
@@ -573,16 +583,26 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }
       if (message.type === "call-left") {
         if (activeRef.current?.callId === message.callId) {
+          const call = activeRef.current;
           peerRef.current?.close();
           peerRef.current = null;
           videoSenderRef.current = null;
           pendingCandidatesRef.current = [];
           pendingOfferRef.current = null;
+          localStreamRef.current?.getTracks().forEach((track) => track.stop());
           remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
+          localStreamRef.current = null;
           remoteStreamRef.current = null;
+          setLocalStream(null);
           setRemoteStream(null);
-          setCameraEnabled(activeRef.current.mode === "video");
-          transitionTo("reconnecting");
+          setParkedCall(call);
+          setActive(null);
+          setMode(call.mode);
+          setMicEnabled(true);
+          setCameraEnabled(call.mode === "video");
+          setIsScreenSharing(false);
+          setIsCallMinimized(false);
+          forceStatus("idle");
           void updateCallSession(message.callId, { status: "reconnecting" }).catch(() => undefined);
         }
       }
@@ -941,9 +961,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 </div>
               </div>
               <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-                <Button variant="secondary" className="h-9 flex-1 px-3 sm:flex-none" onClick={() => void leaveCall()}>
+                <Button variant="secondary" className="h-9 flex-1 px-3 sm:flex-none" onClick={minimizeCall}>
                   <Minimize2 className="h-4 w-4" />
                   Minimize
+                </Button>
+                <Button variant="secondary" className="h-9 flex-1 px-3 sm:flex-none" onClick={() => void leaveCall()}>
+                  <PhoneOff className="h-4 w-4" />
+                  Leave
                 </Button>
                 <Button variant="danger" className="h-9 flex-1 px-3 sm:flex-none" onClick={() => void endCall()}>
                   <PhoneOff className="h-4 w-4" />
