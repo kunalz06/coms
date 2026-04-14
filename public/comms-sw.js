@@ -27,10 +27,17 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
   if (url.pathname.startsWith("/_next/static/")) {
-    event.respondWith(caches.open(CACHE_VERSION).then((cache) => cache.match(request).then((cached) => cached ?? fetch(request).then((response) => {
-      if (response.ok) cache.put(request, response.clone());
-      return response;
-    }))));
+    event.respondWith(
+      caches.open(CACHE_VERSION).then((cache) =>
+        cache.match(request).then((cached) =>
+          cached ??
+          fetch(request).then((response) => {
+            if (response.ok) cache.put(request, response.clone());
+            return response;
+          })
+        )
+      )
+    );
     return;
   }
 
@@ -54,6 +61,7 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = {};
   }
+
   const isMessage = payload.type === "message";
   const options = {
     body: payload.body ?? (isMessage ? "Open COMMS to read your unread chat." : "Open COMMS to answer."),
@@ -64,18 +72,46 @@ self.addEventListener("push", (event) => {
     data: { url: payload.url ?? "/app" }
   };
 
-  event.waitUntil(self.registration.showNotification(payload.title ?? (isMessage ? "Unread COMMS chat" : "Incoming COMMS call"), options));
+  event.waitUntil(
+    self.registration.showNotification(
+      payload.title ?? (isMessage ? "Unread COMMS chat" : "Incoming COMMS call"),
+      options
+    )
+  );
 });
+
+async function focusOrNavigateClient(targetUrl) {
+  const windowClients = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true
+  });
+
+  const target = new URL(targetUrl, self.location.origin).href;
+
+  const existingClient =
+    windowClients.find((client) => client.url === target) ||
+    windowClients.find((client) => client.url.startsWith(self.location.origin + "/app")) ||
+    windowClients[0];
+
+  if (!existingClient) {
+    return self.clients.openWindow(target);
+  }
+
+  try {
+    if ("navigate" in existingClient) {
+      await existingClient.navigate(target);
+    }
+  } catch {
+    // Ignore navigation failures and still try to focus the client.
+  }
+
+  return existingClient.focus();
+}
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = new URL(event.notification.data?.url ?? "/app", self.location.origin).href;
 
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      const existingClient = clients.find((client) => client.url.includes("/app"));
-      if (existingClient) return existingClient.focus();
-      return self.clients.openWindow(targetUrl);
-    })
-  );
+  const targetUrl = event.notification.data?.url ?? "/app";
+
+  event.waitUntil(focusOrNavigateClient(targetUrl));
 });
