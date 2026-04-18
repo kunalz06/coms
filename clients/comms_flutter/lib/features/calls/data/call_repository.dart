@@ -19,7 +19,9 @@ class RecentCallItem {
     required this.startedAt,
     this.endedAt,
     this.peerId,
+    this.peerName,
     this.conversationId,
+    this.conversationTitle,
   });
 
   final String id;
@@ -29,7 +31,9 @@ class RecentCallItem {
   final DateTime startedAt;
   final DateTime? endedAt;
   final String? peerId;
+  final String? peerName;
   final String? conversationId;
+  final String? conversationTitle;
 }
 
 class CallRepository {
@@ -109,9 +113,14 @@ class CallRepository {
     }
 
     final items = <RecentCallItem>[];
+    final directPeerIds = <String>{};
+    final groupConversationIdsForLookup = <String>{};
+
     for (final row in directRows) {
       try {
         final session = DirectCallSession.fromJson(Map<String, dynamic>.from(row));
+        final peerId = session.peerId(userId);
+        directPeerIds.add(peerId);
         items.add(
           RecentCallItem(
             id: session.id,
@@ -120,7 +129,7 @@ class CallRepository {
             status: session.status,
             startedAt: session.startedAt,
             endedAt: session.endedAt,
-            peerId: session.peerId(userId),
+            peerId: peerId,
             conversationId: session.conversationId,
           ),
         );
@@ -144,13 +153,67 @@ class CallRepository {
           conversationId: data['conversation_id']?.toString(),
         ),
       );
+      final conversationId = data['conversation_id']?.toString();
+      if (conversationId != null && conversationId.isNotEmpty) {
+        groupConversationIdsForLookup.add(conversationId);
+      }
     }
 
-    items.sort((a, b) => b.startedAt.compareTo(a.startedAt));
-    if (items.length > 100) {
-      return items.sublist(0, 100);
+    final peerNameById = <String, String>{};
+    if (directPeerIds.isNotEmpty) {
+      final rows = await _supabase
+          .from('user_profiles')
+          .select('id,full_name,email')
+          .inFilter('id', directPeerIds.toList(growable: false));
+      for (final row in rows) {
+        final id = row['id']?.toString();
+        if (id == null || id.isEmpty) continue;
+        final name = row['full_name']?.toString().trim();
+        final email = row['email']?.toString().trim();
+        peerNameById[id] =
+            (name != null && name.isNotEmpty) ? name : (email ?? id);
+      }
     }
-    return items;
+
+    final groupTitleByConversationId = <String, String>{};
+    if (groupConversationIdsForLookup.isNotEmpty) {
+      final rows = await _supabase
+          .from('conversations')
+          .select('id,title')
+          .inFilter('id', groupConversationIdsForLookup.toList(growable: false));
+      for (final row in rows) {
+        final id = row['id']?.toString();
+        if (id == null || id.isEmpty) continue;
+        final title = row['title']?.toString().trim();
+        if (title != null && title.isNotEmpty) {
+          groupTitleByConversationId[id] = title;
+        }
+      }
+    }
+
+    final resolvedItems = items
+        .map((item) => RecentCallItem(
+              id: item.id,
+              isGroup: item.isGroup,
+              mode: item.mode,
+              status: item.status,
+              startedAt: item.startedAt,
+              endedAt: item.endedAt,
+              peerId: item.peerId,
+              peerName:
+                  item.peerId == null ? null : peerNameById[item.peerId!],
+              conversationId: item.conversationId,
+              conversationTitle: item.conversationId == null
+                  ? null
+                  : groupTitleByConversationId[item.conversationId!],
+            ))
+        .toList(growable: false);
+
+    resolvedItems.sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    if (resolvedItems.length > 100) {
+      return resolvedItems.sublist(0, 100);
+    }
+    return resolvedItems;
   }
 
   List<DirectCallSession> _toDirectSessions(List<dynamic> rows) {

@@ -68,10 +68,17 @@ const DIRECT_CALL_RING_MS = 45_000;
 const MAX_PENDING_SIGNALS_PER_CALL = 80;
 const MAX_SIGNALING_BYTES = 96 * 1024;
 
-function writeCorsHeaders(response: ServerResponse) {
-  response.setHeader("access-control-allow-origin", process.env.ALLOWED_ORIGIN ?? "*");
-  response.setHeader("access-control-allow-methods", "GET, OPTIONS");
-  response.setHeader("access-control-allow-headers", "content-type");
+function writeCorsHeaders(response: ServerResponse, origin?: string) {
+  const configured = process.env.ALLOWED_ORIGIN?.trim();
+  if (!configured || configured === "*") {
+    response.setHeader("access-control-allow-origin", "*");
+  } else if (origin && allowedOrigin(origin)) {
+    response.setHeader("access-control-allow-origin", origin);
+    response.setHeader("vary", "origin");
+  }
+  response.setHeader("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  response.setHeader("access-control-allow-headers", "content-type, authorization");
+  response.setHeader("access-control-max-age", "86400");
 }
 
 function serviceSupabase() {
@@ -484,8 +491,19 @@ const groupCalls = new GroupCallInviteManager(userIsConversationMember, conversa
 void app.prepare().then(() => {
   const handleUpgrade = app.getUpgradeHandler();
   const server = createServer((request, response) => {
+    const requestUrl = request.url ?? "/";
+    const isApiRequest = requestUrl.startsWith("/api/");
+    if (isApiRequest) {
+      writeCorsHeaders(response, request.headers.origin);
+      if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+    }
+
     if (request.url === "/healthz") {
-      writeCorsHeaders(response);
+      writeCorsHeaders(response, request.headers.origin);
       if (request.method === "OPTIONS") {
         response.writeHead(204);
         response.end();

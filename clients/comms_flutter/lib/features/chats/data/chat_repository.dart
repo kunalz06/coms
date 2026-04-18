@@ -250,14 +250,59 @@ class ChatRepository {
         .select()
         .inFilter('id', conversationIds.toList(growable: false));
 
-    final conversations = <Conversation>[];
+    final rawConversations = <Conversation>[];
     for (final row in rows) {
       try {
-        conversations.add(Conversation.fromJson(Map<String, dynamic>.from(row)));
+        rawConversations.add(Conversation.fromJson(Map<String, dynamic>.from(row)));
       } catch (_) {
         // Skip malformed rows to keep the list usable.
       }
     }
+
+    final profileNames = <String, String>{};
+    final directPeerIds = rawConversations
+        .where((conversation) => conversation.isDirect)
+        .map((conversation) => conversation.userOneId == userId
+            ? conversation.userTwoId
+            : conversation.userOneId)
+        .whereType<String>()
+        .toSet()
+        .toList(growable: false);
+    if (directPeerIds.isNotEmpty) {
+      final profileRows = await _supabase
+          .from('user_profiles')
+          .select('id,full_name')
+          .inFilter('id', directPeerIds);
+      for (final row in profileRows) {
+        final id = row['id']?.toString();
+        final fullName = row['full_name']?.toString();
+        if (id != null && fullName != null && fullName.trim().isNotEmpty) {
+          profileNames[id] = fullName.trim();
+        }
+      }
+    }
+
+    final conversations = rawConversations.map((conversation) {
+      if (conversation.isGroup) return conversation;
+      final peerId = conversation.userOneId == userId
+          ? conversation.userTwoId
+          : conversation.userOneId;
+      final resolvedTitle = peerId == null
+          ? (conversation.title ?? 'Direct chat')
+          : (profileNames[peerId] ?? conversation.title ?? 'Direct chat');
+      return Conversation(
+        id: conversation.id,
+        type: conversation.type,
+        createdAt: conversation.createdAt,
+        updatedAt: conversation.updatedAt,
+        title: resolvedTitle,
+        avatarUrl: conversation.avatarUrl,
+        createdBy: conversation.createdBy,
+        userOneId: conversation.userOneId,
+        userTwoId: conversation.userTwoId,
+        lastMessageAt: conversation.lastMessageAt,
+      );
+    }).toList(growable: false);
 
     conversations.sort((a, b) =>
         (b.lastMessageAt ?? b.updatedAt).compareTo(a.lastMessageAt ?? a.updatedAt));
