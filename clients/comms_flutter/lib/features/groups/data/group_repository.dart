@@ -83,4 +83,84 @@ class GroupRepository {
 
     return conversation;
   }
+
+  Future<void> updateGroupProfile({
+    required String conversationId,
+    String? title,
+    String? avatarUrl,
+  }) async {
+    final payload = <String, dynamic>{};
+    if (title != null && title.trim().isNotEmpty) {
+      payload['title'] = title.trim();
+    }
+    if (avatarUrl != null) {
+      payload['avatar_url'] = avatarUrl.trim().isEmpty ? null : avatarUrl.trim();
+    }
+    if (payload.isEmpty) return;
+    await _supabase.from('conversations').update(payload).eq('id', conversationId);
+  }
+
+  Future<void> updateMemberRole({
+    required String conversationId,
+    required String userId,
+    required String role,
+  }) async {
+    await _supabase
+        .from('conversation_members')
+        .update({'role': role})
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId);
+  }
+
+  Future<void> addMembers({
+    required String conversationId,
+    required List<String> userIds,
+  }) async {
+    if (userIds.isEmpty) return;
+    await _supabase.from('conversation_members').upsert(
+          userIds
+              .map((userId) => {
+                    'conversation_id': conversationId,
+                    'user_id': userId,
+                    'role': 'member',
+                  })
+              .toList(growable: false),
+          onConflict: 'conversation_id,user_id',
+        );
+  }
+
+  Future<void> removeMember({
+    required String conversationId,
+    required String userId,
+  }) async {
+    await _supabase
+        .from('conversation_members')
+        .delete()
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId);
+  }
+
+  Future<void> leaveGroup({
+    required String conversationId,
+    required String userId,
+  }) async {
+    await removeMember(conversationId: conversationId, userId: userId);
+  }
+
+  Future<void> clearGroupMessages({
+    required String conversationId,
+  }) async {
+    await _supabase
+        .from('messages')
+        .update({
+          'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('conversation_id', conversationId);
+  }
+
+  Future<void> deleteGroup({
+    required String conversationId,
+  }) async {
+    await _supabase.from('conversations').delete().eq('id', conversationId);
+  }
 }

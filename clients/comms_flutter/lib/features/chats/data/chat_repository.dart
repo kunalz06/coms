@@ -55,6 +55,18 @@ class ChatRepository {
     return messages.length;
   }
 
+  Stream<Set<String>> watchUnreadConversationIds(String userId) {
+    return _resilientStream<Set<String>>(
+      realtime: () => _supabase
+          .from('conversation_members')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', userId)
+          .asyncMap((_) => _fetchUnreadConversationIds(userId)),
+      poll: () => _fetchUnreadConversationIds(userId),
+      equals: (a, b) => a.length == b.length && a.containsAll(b),
+    );
+  }
+
   Future<void> markRead({
     required String conversationId,
     required String userId,
@@ -169,6 +181,166 @@ class ChatRepository {
     });
   }
 
+  Future<void> editMessage({
+    required String messageId,
+    required String content,
+  }) async {
+    final trimmed = content.trim();
+    if (trimmed.isEmpty) return;
+    await _supabase.from('messages').update({'content': trimmed}).eq('id', messageId);
+  }
+
+  Future<void> deleteMessageForEveryone({
+    required String messageId,
+  }) async {
+    await _supabase
+        .from('messages')
+        .update({
+          'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', messageId);
+  }
+
+  Future<void> deleteMessageForMe({
+    required String messageId,
+    required String userId,
+  }) async {
+    await _supabase.from('message_deletions').upsert(
+      {
+        'message_id': messageId,
+        'user_id': userId,
+      },
+      onConflict: 'message_id,user_id',
+    );
+  }
+
+  Future<void> clearConversationForMe({
+    required String conversationId,
+    required String userId,
+  }) async {
+    final rows = await _supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversationId);
+    final ids = rows
+        .map((row) => row['id']?.toString())
+        .whereType<String>()
+        .toList(growable: false);
+    if (ids.isEmpty) return;
+    await _supabase.from('message_deletions').upsert(
+      ids
+          .map((id) => {
+                'message_id': id,
+                'user_id': userId,
+              })
+          .toList(growable: false),
+      onConflict: 'message_id,user_id',
+    );
+  }
+
+  Future<void> clearConversationForEveryone({
+    required String conversationId,
+  }) async {
+    await _supabase
+        .from('messages')
+        .update({
+          'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('conversation_id', conversationId);
+  }
+
+  Future<void> setConversationPinned({
+    required String conversationId,
+    required String userId,
+    required bool pinned,
+  }) async {
+    if (pinned) {
+      await _supabase.from('conversation_pins').upsert(
+        {
+          'conversation_id': conversationId,
+          'user_id': userId,
+        },
+        onConflict: 'conversation_id,user_id',
+      );
+      return;
+    }
+    await _supabase
+        .from('conversation_pins')
+        .delete()
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId);
+  }
+
+  Stream<Set<String>> watchPinnedConversationIds(String userId) {
+    return _resilientStream<Set<String>>(
+      realtime: () => _supabase
+          .from('conversation_pins')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', userId)
+          .map((rows) => rows
+              .map((row) => row['conversation_id']?.toString())
+              .whereType<String>()
+              .toSet()),
+      poll: () async {
+        final rows = await _supabase
+            .from('conversation_pins')
+            .select('conversation_id')
+            .eq('user_id', userId);
+        return rows
+            .map((row) => row['conversation_id']?.toString())
+            .whereType<String>()
+            .toSet();
+      },
+      equals: (a, b) => a.length == b.length && a.containsAll(b),
+    );
+  }
+
+  Future<void> setConversationMuted({
+    required String conversationId,
+    required String userId,
+    required bool muted,
+  }) async {
+    if (muted) {
+      await _supabase.from('conversation_mutes').upsert(
+        {
+          'conversation_id': conversationId,
+          'user_id': userId,
+        },
+        onConflict: 'conversation_id,user_id',
+      );
+      return;
+    }
+    await _supabase
+        .from('conversation_mutes')
+        .delete()
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId);
+  }
+
+  Stream<Set<String>> watchMutedConversationIds(String userId) {
+    return _resilientStream<Set<String>>(
+      realtime: () => _supabase
+          .from('conversation_mutes')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', userId)
+          .map((rows) => rows
+              .map((row) => row['conversation_id']?.toString())
+              .whereType<String>()
+              .toSet()),
+      poll: () async {
+        final rows = await _supabase
+            .from('conversation_mutes')
+            .select('conversation_id')
+            .eq('user_id', userId);
+        return rows
+            .map((row) => row['conversation_id']?.toString())
+            .whereType<String>()
+            .toSet();
+      },
+      equals: (a, b) => a.length == b.length && a.containsAll(b),
+    );
+  }
+
   Future<void> sendAttachment({
     required String conversationId,
     required String senderId,
@@ -219,6 +391,38 @@ class ChatRepository {
       'kind': kind,
       'content': trimmed.length > 80 ? trimmed.substring(0, 80) : trimmed,
     });
+  }
+
+  Future<void> shareMessageToConversation({
+    required Message message,
+    required String targetConversationId,
+    required String senderId,
+  }) async {
+    if (message.kind == 'text' && (message.content?.trim().isNotEmpty ?? false)) {
+      await sendText(
+        conversationId: targetConversationId,
+        senderId: senderId,
+        content: message.content!,
+      );
+      return;
+    }
+
+    if (message.attachments.isEmpty) return;
+    for (final attachment in message.attachments) {
+      await sendAttachment(
+        conversationId: targetConversationId,
+        senderId: senderId,
+        kind: message.kind,
+        attachment: AttachmentDraft(
+          url: attachment.url,
+          publicId: attachment.publicId ?? '',
+          resourceType: attachment.resourceType,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+        ),
+      );
+    }
   }
 
   Future<List<Conversation>> _fetchConversations(String userId) async {
@@ -309,6 +513,46 @@ class ChatRepository {
     return conversations;
   }
 
+  Future<Set<String>> _fetchUnreadConversationIds(String userId) async {
+    final memberships = await _supabase
+        .from('conversation_members')
+        .select('conversation_id,last_read_at')
+        .eq('user_id', userId);
+    if (memberships.isEmpty) return const {};
+
+    final lastReadByConversationId = <String, DateTime?>{};
+    for (final row in memberships) {
+      final conversationId = row['conversation_id']?.toString();
+      if (conversationId == null || conversationId.isEmpty) continue;
+      lastReadByConversationId[conversationId] =
+          DateTime.tryParse(row['last_read_at']?.toString() ?? '');
+    }
+
+    if (lastReadByConversationId.isEmpty) return const {};
+    final conversationIds =
+        lastReadByConversationId.keys.toList(growable: false);
+
+    final messages = await _supabase
+        .from('messages')
+        .select('conversation_id,created_at,sender_id')
+        .inFilter('conversation_id', conversationIds)
+        .neq('sender_id', userId);
+
+    final unread = <String>{};
+    for (final row in messages) {
+      final conversationId = row['conversation_id']?.toString();
+      if (conversationId == null || conversationId.isEmpty) continue;
+      final createdAt =
+          DateTime.tryParse(row['created_at']?.toString() ?? '');
+      if (createdAt == null) continue;
+      final lastRead = lastReadByConversationId[conversationId];
+      if (lastRead == null || createdAt.isAfter(lastRead)) {
+        unread.add(conversationId);
+      }
+    }
+    return unread;
+  }
+
   Future<Conversation?> _fetchConversation(String conversationId) async {
     final row = await _supabase
         .from('conversations')
@@ -357,21 +601,50 @@ class ChatRepository {
         .select()
         .eq('conversation_id', conversationId)
         .order('created_at');
+    if (rows.isEmpty) return const [];
+
+    final messageRows = rows
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList(growable: false);
+    final messageIds = messageRows
+        .map((row) => row['id']?.toString())
+        .whereType<String>()
+        .toList(growable: false);
+
+    final attachmentsRows = await _supabase
+        .from('message_attachments')
+        .select()
+        .inFilter('message_id', messageIds)
+        .order('created_at');
+    final reactionsRows = await _supabase
+        .from('message_reactions')
+        .select()
+        .inFilter('message_id', messageIds)
+        .order('created_at');
+
+    final attachmentsByMessage = <String, List<Map<String, dynamic>>>{};
+    for (final row in attachmentsRows) {
+      final data = Map<String, dynamic>.from(row);
+      final messageId = data['message_id']?.toString();
+      if (messageId == null) continue;
+      (attachmentsByMessage[messageId] ??= []).add(data);
+    }
+
+    final reactionsByMessage = <String, List<Map<String, dynamic>>>{};
+    for (final row in reactionsRows) {
+      final data = Map<String, dynamic>.from(row);
+      final messageId = data['message_id']?.toString();
+      if (messageId == null) continue;
+      (reactionsByMessage[messageId] ??= []).add(data);
+    }
+
     final messages = <Message>[];
-    for (final row in rows) {
-      final messageRow = Map<String, dynamic>.from(row);
-      final attachments = await _supabase
-          .from('message_attachments')
-          .select()
-          .eq('message_id', messageRow['id'] as String)
-          .order('created_at');
-      final reactions = await _supabase
-          .from('message_reactions')
-          .select()
-          .eq('message_id', messageRow['id'] as String)
-          .order('created_at');
-      messageRow['message_attachments'] = attachments;
-      messageRow['message_reactions'] = reactions;
+    for (final messageRow in messageRows) {
+      final messageId = messageRow['id']?.toString();
+      messageRow['message_attachments'] =
+          messageId == null ? const [] : (attachmentsByMessage[messageId] ?? const []);
+      messageRow['message_reactions'] =
+          messageId == null ? const [] : (reactionsByMessage[messageId] ?? const []);
       messages.add(Message.fromJson(messageRow));
     }
     return messages;

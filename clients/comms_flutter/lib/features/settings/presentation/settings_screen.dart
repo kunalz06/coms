@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../app/theme/theme_mode_controller.dart';
 import '../../../features/auth/data/auth_repository.dart';
+import '../../../features/chats/data/chat_list_preferences_controller.dart';
 import '../../../features/notifications/data/notification_service.dart';
 import '../../../shared/models/notification_settings.dart';
 import '../../../shared/widgets/state_views.dart';
@@ -23,6 +24,7 @@ class SettingsScreen extends ConsumerWidget {
     final themeMode = ref.watch(themeModeControllerProvider);
     final notificationSettings =
         ref.watch(_notificationSettingsProvider(userId));
+    final unreadFirst = ref.watch(chatUnreadFirstControllerProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -91,6 +93,18 @@ class SettingsScreen extends ConsumerWidget {
                       ),
                     ],
                   ),
+                ),
+                SwitchListTile(
+                  secondary: const Icon(Icons.mark_unread_chat_alt_outlined),
+                  value: unreadFirst,
+                  onChanged: (value) {
+                    ref
+                        .read(chatUnreadFirstControllerProvider.notifier)
+                        .setUnreadFirst(value);
+                  },
+                  title: const Text('Unread chats first'),
+                  subtitle:
+                      const Text('Move conversations with unread messages to top'),
                 ),
                 notificationSettings.when(
                   data: (settings) => Column(

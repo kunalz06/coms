@@ -4,19 +4,21 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:record/record.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../shared/models/conversation.dart';
 import '../../../shared/models/conversation_member.dart';
 import '../../../shared/models/message.dart';
 import '../../../shared/widgets/state_views.dart';
+import '../../backup/data/backup_repository.dart';
 import '../../calls/data/call_controller.dart';
 import '../../calls/domain/call_models.dart';
-import '../../backup/data/backup_repository.dart';
 import '../../contacts/data/contact_repository.dart';
 import '../../privacy/data/privacy_controller.dart';
 import '../../uploads/data/cloudinary_upload_service.dart';
@@ -432,6 +434,150 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         );
   }
 
+  Future<void> _showEditMessageDialog(Message message) async {
+    final editor = TextEditingController(text: message.content ?? '');
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit message'),
+        content: TextField(
+          controller: editor,
+          minLines: 1,
+          maxLines: 5,
+          decoration: const InputDecoration(hintText: 'Edit message'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(editor.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    editor.dispose();
+    if (value == null || value.isEmpty) return;
+    await ref.read(chatRepositoryProvider).editMessage(
+          messageId: message.id,
+          content: value,
+        );
+  }
+
+  Future<void> _shareMessage(Message message) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final conversations =
+        await ref.read(chatRepositoryProvider).watchConversations(user.uid).first;
+    final candidates = conversations
+        .where((conversation) => conversation.id != widget.conversationId)
+        .toList(growable: false);
+    if (candidates.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No other chats available.')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final targetConversationId = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(title: Text('Share to')),
+            for (final conversation in candidates)
+              ListTile(
+                leading: CircleAvatar(
+                  child: Icon(
+                    conversation.isGroup ? Icons.groups : Icons.person,
+                  ),
+                ),
+                title: Text(conversation.title ??
+                    (conversation.isGroup ? 'Group' : 'Direct chat')),
+                onTap: () => Navigator.of(context).pop(conversation.id),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (targetConversationId == null) return;
+
+    await ref.read(chatRepositoryProvider).shareMessageToConversation(
+          message: message,
+          targetConversationId: targetConversationId,
+          senderId: user.uid,
+        );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Message shared.')),
+    );
+  }
+
+  Future<void> _handleMessageAction({
+    required Message message,
+    required bool mine,
+    required String action,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      switch (action) {
+        case 'react':
+          await _showReactionSheet(message);
+          return;
+        case 'copy':
+          if ((message.content ?? '').trim().isEmpty) return;
+          await Clipboard.setData(ClipboardData(text: message.content!.trim()));
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Message copied.')),
+          );
+          return;
+        case 'share':
+          await _shareMessage(message);
+          return;
+        case 'share_external':
+          final text = message.content?.trim();
+          final attachmentUrl =
+              message.attachments.isEmpty ? null : message.attachments.first.url;
+          final payload = [text, attachmentUrl]
+              .whereType<String>()
+              .where((item) => item.isNotEmpty)
+              .join('\n');
+          if (payload.isEmpty) return;
+          await Share.share(payload);
+          return;
+        case 'edit':
+          if (!mine || message.kind != 'text') return;
+          await _showEditMessageDialog(message);
+          return;
+        case 'delete_me':
+          await ref.read(chatRepositoryProvider).deleteMessageForMe(
+                messageId: message.id,
+                userId: user.uid,
+              );
+          return;
+        case 'delete_everyone':
+          if (!mine) return;
+          await ref.read(chatRepositoryProvider).deleteMessageForEveryone(
+                messageId: message.id,
+              );
+          return;
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
   Future<void> _deleteFriend(String otherUserId) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _contactActionRunning) return;
@@ -553,11 +699,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final conversation =
-        ref.watch(_conversationProvider(widget.conversationId));
+    final conversation = ref.watch(_conversationProvider(widget.conversationId));
     final members = ref.watch(_membersProvider(widget.conversationId));
     final messages = ref.watch(_messagesProvider(widget.conversationId));
     final userId = FirebaseAuth.instance.currentUser?.uid;
+    final pinnedIds = userId == null
+        ? const <String>{}
+        : (ref.watch(_pinnedIdsProvider(userId)).valueOrNull ?? const <String>{});
+    final mutedIds = userId == null
+        ? const <String>{}
+        : (ref.watch(_mutedIdsProvider(userId)).valueOrNull ?? const <String>{});
+    final isPinned = pinnedIds.contains(widget.conversationId);
+    final isMuted = mutedIds.contains(widget.conversationId);
     final memberMap = members.valueOrNull == null
         ? <String, ConversationMember>{}
         : {
@@ -571,9 +724,26 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         break;
       }
     }
-    final otherUserId = otherMember?.userId;
+
+    final fallbackPeerId = currentConversation?.userOneId == userId
+        ? currentConversation?.userTwoId
+        : currentConversation?.userOneId;
+    final otherUserId = otherMember?.userId ?? fallbackPeerId;
     final canStartCall =
         currentConversation?.isGroup == true || otherUserId != null;
+    final myRole = (members.valueOrNull ?? const <ConversationMember>[])
+        .firstWhere(
+          (member) => member.userId == userId,
+          orElse: () => ConversationMember(
+            id: 'unknown',
+            conversationId: 'unknown',
+            userId: 'unknown',
+            role: 'member',
+            joinedAt: DateTime.fromMillisecondsSinceEpoch(0),
+          ),
+        )
+        .role;
+    final canManageGroup = myRole == 'owner' || myRole == 'admin';
 
     return Scaffold(
       appBar: AppBar(
@@ -620,7 +790,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               ],
             ),
           PopupMenuButton<String>(
-            tooltip: 'Privacy',
+            tooltip: 'Conversation options',
             onSelected: (value) async {
               final controller = ref.read(privacyControllerProvider.notifier);
               switch (value) {
@@ -649,6 +819,52 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     hidden: false,
                   );
                   break;
+                case 'pin':
+                  if (userId == null) break;
+                  await ref.read(chatRepositoryProvider).setConversationPinned(
+                        conversationId: widget.conversationId,
+                        userId: userId,
+                        pinned: true,
+                      );
+                  break;
+                case 'unpin':
+                  if (userId == null) break;
+                  await ref.read(chatRepositoryProvider).setConversationPinned(
+                        conversationId: widget.conversationId,
+                        userId: userId,
+                        pinned: false,
+                      );
+                  break;
+                case 'mute':
+                  if (userId == null) break;
+                  await ref.read(chatRepositoryProvider).setConversationMuted(
+                        conversationId: widget.conversationId,
+                        userId: userId,
+                        muted: true,
+                      );
+                  break;
+                case 'unmute':
+                  if (userId == null) break;
+                  await ref.read(chatRepositoryProvider).setConversationMuted(
+                        conversationId: widget.conversationId,
+                        userId: userId,
+                        muted: false,
+                      );
+                  break;
+                case 'clear_me':
+                  if (userId == null) break;
+                  await ref.read(chatRepositoryProvider).clearConversationForMe(
+                        conversationId: widget.conversationId,
+                        userId: userId,
+                      );
+                  break;
+                case 'clear_all':
+                  await ref
+                      .read(chatRepositoryProvider)
+                      .clearConversationForEveryone(
+                        conversationId: widget.conversationId,
+                      );
+                  break;
               }
             },
             itemBuilder: (context) {
@@ -666,6 +882,24 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   value: hidden ? 'unhide' : 'hide',
                   child: Text(hidden ? 'Unhide chat' : 'Hide chat'),
                 ),
+                PopupMenuItem(
+                  value: isPinned ? 'unpin' : 'pin',
+                  child: Text(isPinned ? 'Unpin chat' : 'Pin chat'),
+                ),
+                PopupMenuItem(
+                  value: isMuted ? 'unmute' : 'mute',
+                  child: Text(isMuted ? 'Unmute chat' : 'Mute chat'),
+                ),
+                const PopupMenuItem(
+                  value: 'clear_me',
+                  child: Text('Clear messages for me'),
+                ),
+                if ((currentConversation?.isDirect == true) ||
+                    (currentConversation?.isGroup == true && canManageGroup))
+                  const PopupMenuItem(
+                    value: 'clear_all',
+                    child: Text('Clear messages for everyone'),
+                  ),
               ];
             },
           ),
@@ -770,54 +1004,97 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     final showSender = currentConversation?.isGroup == true &&
                         !mine &&
                         sender != null;
-                    return GestureDetector(
-                      onLongPress: () => _showReactionSheet(message),
-                      child: Align(
-                        alignment:
-                            mine ? Alignment.centerRight : Alignment.centerLeft,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 520),
-                          child: Card(
-                            color: mine
-                                ? Theme.of(context).colorScheme.primaryContainer
-                                : null,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (showSender) ...[
-                                    Text(
-                                      sender.fullName,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelMedium,
-                                    ),
-                                    const SizedBox(height: 4),
-                                  ],
-                                  Text(resolved.isDeletedForEveryone
-                                      ? 'Message deleted'
-                                      : resolved.content ??
-                                          (resolved.isRedacted
-                                              ? 'Archived message'
-                                              : 'Attachment')),
-                                  for (final attachment in resolved.attachments)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 8),
-                                      child: _AttachmentPreview(
-                                        kind: resolved.kind,
-                                        fileName: attachment.fileName,
-                                        url: attachment.url,
-                                      ),
-                                    ),
-                                  if (resolved.reactions.isNotEmpty) ...[
-                                    const SizedBox(height: 8),
-                                    _ReactionSummary(message: resolved),
-                                  ],
+                    return Align(
+                      alignment:
+                          mine ? Alignment.centerRight : Alignment.centerLeft,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 520),
+                        child: Card(
+                          color: mine
+                              ? Theme.of(context).colorScheme.primaryContainer
+                              : null,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (showSender) ...[
+                                  Text(
+                                    sender.fullName,
+                                    style:
+                                        Theme.of(context).textTheme.labelMedium,
+                                  ),
+                                  const SizedBox(height: 4),
                                 ],
-                              ),
+                                Text(resolved.isDeletedForEveryone
+                                    ? 'Message deleted'
+                                    : resolved.content ??
+                                        (resolved.isRedacted
+                                            ? 'Archived message'
+                                            : 'Attachment')),
+                                for (final attachment in resolved.attachments)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: _AttachmentPreview(
+                                      kind: resolved.kind,
+                                      fileName: attachment.fileName,
+                                      url: attachment.url,
+                                    ),
+                                  ),
+                                if (resolved.reactions.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  _ReactionSummary(message: resolved),
+                                ],
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: PopupMenuButton<String>(
+                                    tooltip: 'Message actions',
+                                    onSelected: (action) =>
+                                        _handleMessageAction(
+                                      message: resolved,
+                                      mine: mine,
+                                      action: action,
+                                    ),
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
+                                        value: 'react',
+                                        child: Text('React'),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'share',
+                                        child: Text('Share'),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'share_external',
+                                        child: Text('Share externally'),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'copy',
+                                        child: Text('Copy text'),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'delete_me',
+                                        child: Text('Delete for me'),
+                                      ),
+                                      if (mine &&
+                                          resolved.kind == 'text' &&
+                                          !resolved.isDeletedForEveryone)
+                                        const PopupMenuItem(
+                                          value: 'edit',
+                                          child: Text('Edit'),
+                                        ),
+                                      if (mine &&
+                                          !resolved.isDeletedForEveryone)
+                                        const PopupMenuItem(
+                                          value: 'delete_everyone',
+                                          child: Text('Delete for everyone'),
+                                        ),
+                                    ],
+                                  ),
+                                )
+                              ],
                             ),
                           ),
                         ),
@@ -882,8 +1159,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           controller: _controller,
                           minLines: 1,
                           maxLines: 5,
-                          decoration:
-                              const InputDecoration(hintText: 'Message'),
+                          decoration: const InputDecoration(hintText: 'Message'),
                           onSubmitted: (_) => _send(),
                         ),
                       ),
@@ -1053,8 +1329,7 @@ String _conversationTitle(
   return conversation.title ?? 'Direct chat';
 }
 
-final _conversationProvider =
-    StreamProvider.family((ref, String conversationId) {
+final _conversationProvider = StreamProvider.family((ref, String conversationId) {
   return ref.watch(chatRepositoryProvider).watchConversation(conversationId);
 });
 
@@ -1064,4 +1339,12 @@ final _membersProvider = StreamProvider.family((ref, String conversationId) {
 
 final _messagesProvider = StreamProvider.family((ref, String conversationId) {
   return ref.watch(chatRepositoryProvider).watchMessages(conversationId);
+});
+
+final _pinnedIdsProvider = StreamProvider.family((ref, String userId) {
+  return ref.watch(chatRepositoryProvider).watchPinnedConversationIds(userId);
+});
+
+final _mutedIdsProvider = StreamProvider.family((ref, String userId) {
+  return ref.watch(chatRepositoryProvider).watchMutedConversationIds(userId);
 });

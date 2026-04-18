@@ -1,19 +1,56 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../app/router/app_routes.dart';
 import '../../../features/chats/data/chat_repository.dart';
+import '../../../features/uploads/data/cloudinary_upload_service.dart';
+import '../../../shared/models/conversation_member.dart';
 import '../../../shared/widgets/comms_avatar.dart';
 import '../../../shared/widgets/state_views.dart';
+import '../data/group_repository.dart';
 
-class GroupInfoScreen extends ConsumerWidget {
+class GroupInfoScreen extends ConsumerStatefulWidget {
   const GroupInfoScreen({required this.conversationId, super.key});
 
   final String conversationId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final conversation = ref.watch(_conversationProvider(conversationId));
-    final members = ref.watch(_membersProvider(conversationId));
+  ConsumerState<GroupInfoScreen> createState() => _GroupInfoScreenState();
+}
+
+class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
+  var _busy = false;
+
+  Future<void> _run(Future<void> Function() fn, {String? message}) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await fn();
+      if (!mounted) return;
+      if (message != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    if (me == null) return const LoadingState();
+    final conversation = ref.watch(_conversationProvider(widget.conversationId));
+    final members = ref.watch(_membersProvider(widget.conversationId));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Group info')),
@@ -25,6 +62,18 @@ class GroupInfoScreen extends ConsumerWidget {
               message: 'This conversation is not a group or is no longer open.',
             );
           }
+
+          final List<ConversationMember> memberItems =
+              members.valueOrNull ?? const <ConversationMember>[];
+          String myRole = 'member';
+          for (final member in memberItems) {
+            if (member.userId == me) {
+              myRole = member.role;
+              break;
+            }
+          }
+          final canManage = myRole == 'owner' || myRole == 'admin';
+          final isOwner = myRole == 'owner';
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -46,6 +95,194 @@ class GroupInfoScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (canManage)
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () async {
+                              final titleController = TextEditingController(
+                                text: conversation.title ?? '',
+                              );
+                              final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('Edit group'),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      TextField(
+                                        controller: titleController,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Group name',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(true),
+                                      child: const Text('Save'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (ok != true) return;
+                              await _run(
+                                () => ref.read(groupRepositoryProvider).updateGroupProfile(
+                                      conversationId: widget.conversationId,
+                                      title: titleController.text,
+                                    ),
+                                message: 'Group updated.',
+                              );
+                              titleController.dispose();
+                            },
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Edit group'),
+                    ),
+                  if (canManage)
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () async {
+                              final fileResult =
+                                  await FilePicker.platform.pickFiles(
+                                type: FileType.image,
+                                allowMultiple: false,
+                                withData: true,
+                              );
+                              final file = fileResult?.files.single;
+                              if (file == null) return;
+
+                              await _run(() async {
+                                final uploaded = await ref
+                                    .read(cloudinaryUploadServiceProvider)
+                                    .upload(
+                                      file: file,
+                                      kind: 'image',
+                                      onProgress: (_) {},
+                                    );
+                                await ref
+                                    .read(groupRepositoryProvider)
+                                    .updateGroupProfile(
+                                      conversationId: widget.conversationId,
+                                      avatarUrl: uploaded.url,
+                                    );
+                              }, message: 'Group image updated.');
+                            },
+                      icon: const Icon(Icons.photo_camera_outlined),
+                      label: const Text('Update group image'),
+                    ),
+                  if (canManage)
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () async {
+                              final emailsController = TextEditingController();
+                              final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('Add members'),
+                                  content: TextField(
+                                    controller: emailsController,
+                                    maxLines: 3,
+                                    decoration: const InputDecoration(
+                                      hintText:
+                                          'Enter emails separated by commas',
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(true),
+                                      child: const Text('Add'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (ok != true) return;
+                              final emails = emailsController.text
+                                  .split(',')
+                                  .map((email) => email.trim())
+                                  .where((email) => email.isNotEmpty)
+                                  .toList(growable: false);
+                              if (emails.isEmpty) return;
+                              final profiles = await ref
+                                  .read(groupRepositoryProvider)
+                                  .findProfilesByEmails(emails);
+                              await _run(
+                                () => ref.read(groupRepositoryProvider).addMembers(
+                                      conversationId: widget.conversationId,
+                                      userIds:
+                                          profiles.map((profile) => profile.id).toList(),
+                                    ),
+                                message: 'Members added.',
+                              );
+                              emailsController.dispose();
+                            },
+                      icon: const Icon(Icons.person_add_alt_outlined),
+                      label: const Text('Add members'),
+                    ),
+                  if (canManage)
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => _run(
+                                () => ref.read(groupRepositoryProvider).clearGroupMessages(
+                                      conversationId: widget.conversationId,
+                                    ),
+                                message: 'Group messages cleared.',
+                              ),
+                      icon: const Icon(Icons.delete_sweep_outlined),
+                      label: const Text('Clear messages'),
+                    ),
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(
+                              () => ref.read(groupRepositoryProvider).leaveGroup(
+                                    conversationId: widget.conversationId,
+                                    userId: me,
+                                  ),
+                              message: 'You left the group.',
+                            ).then((_) {
+                              if (context.mounted) context.go(AppRoutes.chats);
+                            }),
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Leave group'),
+                  ),
+                  if (isOwner)
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => _run(
+                                () => ref.read(groupRepositoryProvider).deleteGroup(
+                                      conversationId: widget.conversationId,
+                                    ),
+                                message: 'Group deleted.',
+                              ).then((_) {
+                                if (context.mounted) context.go(AppRoutes.chats);
+                              }),
+                      icon: const Icon(Icons.delete_forever_outlined),
+                      label: const Text('Delete group'),
+                    ),
+                ],
+              ),
               const SizedBox(height: 24),
               Text('Members', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
@@ -59,11 +296,69 @@ class GroupInfoScreen extends ConsumerWidget {
                             name: member.profile?.fullName ?? 'COMMS user',
                             imageUrl: member.profile?.avatarUrl,
                           ),
-                          title:
-                              Text(member.profile?.fullName ?? member.userId),
-                          subtitle:
-                              Text(member.profile?.email ?? member.userId),
-                          trailing: _RoleChip(role: member.role),
+                          title: Text(member.profile?.fullName ?? member.userId),
+                          subtitle: Text(member.profile?.email ?? member.userId),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _RoleChip(role: member.role),
+                              if (canManage && member.userId != me) ...[
+                                PopupMenuButton<String>(
+                                  onSelected: (value) {
+                                    if (value == 'make_admin') {
+                                      _run(
+                                        () => ref
+                                            .read(groupRepositoryProvider)
+                                            .updateMemberRole(
+                                              conversationId: widget.conversationId,
+                                              userId: member.userId,
+                                              role: 'admin',
+                                            ),
+                                        message: 'Member promoted to admin.',
+                                      );
+                                    } else if (value == 'make_member') {
+                                      _run(
+                                        () => ref
+                                            .read(groupRepositoryProvider)
+                                            .updateMemberRole(
+                                              conversationId: widget.conversationId,
+                                              userId: member.userId,
+                                              role: 'member',
+                                            ),
+                                        message: 'Admin changed to member.',
+                                      );
+                                    } else if (value == 'remove') {
+                                      _run(
+                                        () => ref
+                                            .read(groupRepositoryProvider)
+                                            .removeMember(
+                                              conversationId: widget.conversationId,
+                                              userId: member.userId,
+                                            ),
+                                        message: 'Member removed.',
+                                      );
+                                    }
+                                  },
+                                  itemBuilder: (context) => [
+                                    if (member.role != 'admin' && member.role != 'owner')
+                                      const PopupMenuItem(
+                                        value: 'make_admin',
+                                        child: Text('Make admin'),
+                                      ),
+                                    if (member.role == 'admin')
+                                      const PopupMenuItem(
+                                        value: 'make_member',
+                                        child: Text('Make member'),
+                                      ),
+                                    const PopupMenuItem(
+                                      value: 'remove',
+                                      child: Text('Remove member'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                     ],
                   ),
@@ -105,8 +400,7 @@ class _RoleChip extends StatelessWidget {
   }
 }
 
-final _conversationProvider =
-    StreamProvider.family((ref, String conversationId) {
+final _conversationProvider = StreamProvider.family((ref, String conversationId) {
   return ref.watch(chatRepositoryProvider).watchConversation(conversationId);
 });
 

@@ -7,9 +7,12 @@ import '../../../app/router/app_routes.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../contacts/presentation/add_contact_sheet.dart';
+import '../../contacts/data/contact_repository.dart';
+import '../../groups/data/group_repository.dart';
 import '../../groups/presentation/create_group_sheet.dart';
 import '../../privacy/data/privacy_controller.dart';
 import '../../search/data/search_repository.dart';
+import '../data/chat_list_preferences_controller.dart';
 import '../data/chat_repository.dart';
 
 class ChatsScreen extends ConsumerWidget {
@@ -21,6 +24,13 @@ class ChatsScreen extends ConsumerWidget {
     if (user == null) return const LoadingState();
     final conversations = ref.watch(_conversationListProvider(user.uid));
     final privacy = ref.watch(privacyControllerProvider);
+    final pinnedIds =
+        ref.watch(_pinnedIdsProvider(user.uid)).valueOrNull ?? const <String>{};
+    final mutedIds =
+        ref.watch(_mutedIdsProvider(user.uid)).valueOrNull ?? const <String>{};
+    final unreadIds =
+        ref.watch(_unreadIdsProvider(user.uid)).valueOrNull ?? const <String>{};
+    final unreadFirst = ref.watch(chatUnreadFirstControllerProvider);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -76,7 +86,19 @@ class ChatsScreen extends ConsumerWidget {
                               !privacy.hiddenConversationIds
                                   .contains(conversation.id),
                         )
-                        .toList(growable: false);
+                        .toList()
+                      ..sort((a, b) {
+                        final aPinned = pinnedIds.contains(a.id);
+                        final bPinned = pinnedIds.contains(b.id);
+                        if (aPinned != bPinned) return aPinned ? -1 : 1;
+                        if (unreadFirst) {
+                          final aUnread = unreadIds.contains(a.id);
+                          final bUnread = unreadIds.contains(b.id);
+                          if (aUnread != bUnread) return aUnread ? -1 : 1;
+                        }
+                        return (b.lastMessageAt ?? b.updatedAt)
+                            .compareTo(a.lastMessageAt ?? a.updatedAt);
+                      });
 
                     if (visible.isEmpty) {
                       return const EmptyState(
@@ -91,9 +113,11 @@ class ChatsScreen extends ConsumerWidget {
                         final conversation = visible[index];
                         final locked = privacy.lockedConversationIds
                             .contains(conversation.id);
+                        final muted = mutedIds.contains(conversation.id);
                         final unread = ref.watch(_unreadCountProvider(
                           _UnreadArgs(conversation.id, user.uid),
                         ));
+                        final hasUnread = unreadIds.contains(conversation.id);
                         return ListTile(
                           leading: CircleAvatar(
                               child: Icon(conversation.isGroup
@@ -111,9 +135,18 @@ class ChatsScreen extends ConsumerWidget {
                                   padding: EdgeInsets.only(right: 8),
                                   child: Icon(Icons.lock_outline, size: 18),
                                 ),
+                              if (muted)
+                                const Padding(
+                                  padding: EdgeInsets.only(right: 8),
+                                  child: Icon(Icons.volume_off_outlined, size: 18),
+                                ),
                               unread.when(
-                                data: (count) => count > 0
-                                    ? Badge(label: Text('$count'))
+                                data: (count) => count > 0 || hasUnread
+                                    ? Badge(
+                                        label: Text(
+                                          count > 0 ? '$count' : '•',
+                                        ),
+                                      )
                                     : const SizedBox.shrink(),
                                 loading: () => const SizedBox.shrink(),
                                 error: (_, __) => const SizedBox.shrink(),
@@ -139,6 +172,59 @@ class ChatsScreen extends ConsumerWidget {
                                       conversationId: conversation.id,
                                       locked: false,
                                     );
+                                  } else if (value == 'pin') {
+                                    await ref
+                                        .read(chatRepositoryProvider)
+                                        .setConversationPinned(
+                                          conversationId: conversation.id,
+                                          userId: user.uid,
+                                          pinned: true,
+                                        );
+                                  } else if (value == 'unpin') {
+                                    await ref
+                                        .read(chatRepositoryProvider)
+                                        .setConversationPinned(
+                                          conversationId: conversation.id,
+                                          userId: user.uid,
+                                          pinned: false,
+                                        );
+                                  } else if (value == 'mute') {
+                                    await ref
+                                        .read(chatRepositoryProvider)
+                                        .setConversationMuted(
+                                          conversationId: conversation.id,
+                                          userId: user.uid,
+                                          muted: true,
+                                        );
+                                  } else if (value == 'unmute') {
+                                    await ref
+                                        .read(chatRepositoryProvider)
+                                        .setConversationMuted(
+                                          conversationId: conversation.id,
+                                          userId: user.uid,
+                                          muted: false,
+                                        );
+                                  } else if (value == 'delete_direct') {
+                                    final peerId = conversation.userOneId == user.uid
+                                        ? conversation.userTwoId
+                                        : conversation.userOneId;
+                                    if (peerId != null) {
+                                      await ref
+                                          .read(contactRepositoryProvider)
+                                          .deleteFriend(
+                                            currentUserId: user.uid,
+                                            otherUserId: peerId,
+                                          );
+                                    }
+                                  } else if (value == 'leave_group') {
+                                    await ref.read(groupRepositoryProvider).leaveGroup(
+                                          conversationId: conversation.id,
+                                          userId: user.uid,
+                                        );
+                                  } else if (value == 'delete_group') {
+                                    await ref.read(groupRepositoryProvider).deleteGroup(
+                                          conversationId: conversation.id,
+                                        );
                                   }
                                 },
                                 itemBuilder: (context) => [
@@ -151,6 +237,37 @@ class ChatsScreen extends ConsumerWidget {
                                     child: Text(
                                         locked ? 'Remove lock' : 'Lock chat'),
                                   ),
+                                  PopupMenuItem(
+                                    value: pinnedIds.contains(conversation.id)
+                                        ? 'unpin'
+                                        : 'pin',
+                                    child: Text(
+                                      pinnedIds.contains(conversation.id)
+                                          ? 'Unpin chat'
+                                          : 'Pin chat',
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: muted ? 'unmute' : 'mute',
+                                    child: Text(muted ? 'Unmute chat' : 'Mute chat'),
+                                  ),
+                                  if (conversation.isDirect)
+                                    const PopupMenuItem(
+                                      value: 'delete_direct',
+                                      child: Text('Delete contact'),
+                                    ),
+                                  if (conversation.isGroup &&
+                                      conversation.createdBy != user.uid)
+                                    const PopupMenuItem(
+                                      value: 'leave_group',
+                                      child: Text('Leave group'),
+                                    ),
+                                  if (conversation.isGroup &&
+                                      conversation.createdBy == user.uid)
+                                    const PopupMenuItem(
+                                      value: 'delete_group',
+                                      child: Text('Delete group'),
+                                    ),
                                 ],
                               ),
                               const Icon(Icons.chevron_right),
@@ -312,7 +429,7 @@ Future<void> _openGlobalSearch(BuildContext context, WidgetRef ref) async {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   subtitle: Text(
-                                    '${result.conversationId} • ${result.message.createdAt.toLocal()}',
+                                    '${result.conversationTitle} • ${result.senderLabel} • ${result.message.createdAt.toLocal()}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -404,6 +521,18 @@ final _unreadCountProvider =
         conversationId: args.conversationId,
         userId: args.userId,
       );
+});
+
+final _pinnedIdsProvider = StreamProvider.family((ref, String userId) {
+  return ref.watch(chatRepositoryProvider).watchPinnedConversationIds(userId);
+});
+
+final _mutedIdsProvider = StreamProvider.family((ref, String userId) {
+  return ref.watch(chatRepositoryProvider).watchMutedConversationIds(userId);
+});
+
+final _unreadIdsProvider = StreamProvider.family((ref, String userId) {
+  return ref.watch(chatRepositoryProvider).watchUnreadConversationIds(userId);
 });
 
 class _UnreadArgs {
