@@ -1,0 +1,8 @@
+{
+  "framework": null,
+  "installCommand": "npm ci",
+  "buildCommand": "bash ./clients/comms_flutter/tool/vercel_build.sh",
+  "outputDirectory": "clients/comms_flutter/build/web",
+  "cleanUrls": true,
+  "trailingSlash": false
+}

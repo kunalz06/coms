@@ -1,0 +1,37 @@
+{
+  "auth": {
+    "provider": "firebase",
+    "identityField": "uid",
+    "profileTable": "user_profiles",
+    "apiAuthorizationHeader": "Bearer <firebase_id_token>"
+  },
+  "api": {
+    "cloudinarySign": "POST /api/cloudinary/sign",
+    "fileDownload": "GET /api/files/download",
+    "backupStatus": "GET /api/backup/status",
+    "backupConnect": "POST /api/backup/google/connect",
+    "backupCallback": "GET /api/backup/google/callback",
+    "backupRun": "POST /api/backup/run",
+    "backupDisable": "POST /api/backup/disable",
+    "backupRestore": "GET /api/backup/restore?conversationId=<id>",
+    "backupAttachment": "GET /api/backup/attachment?attachmentId=<id>",
+    "retention": "POST /api/backup/retention",
+    "messagePush": "POST /api/notifications/message-push",
+    "health": "GET /healthz",
+    "signaling": "WS /ws"
+  },
+  "featureFlags": {
+    "globalSearch": false,
+    "callTab": false,
+    "callReconnectUx": false,
+    "chatLock": false,
+    "hiddenChats": false,
+    "privacyPasswordReset": false,
+    "fileCompression": false
+  },
+  "retention": {
+    "activeContentDays": 3,
+    "deleteForEveryoneSeconds": 60,
+    "editTextSeconds": 120
+  }
+}

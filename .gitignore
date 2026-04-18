@@ -1,5 +1,7 @@
 node_modules
 .next
+.next/
+.next/cache/
 out
 dist
 dist-server
@@ -7,6 +9,12 @@ dist-server
 .env.local
 .env.*.local
 .env.example
+clients/comms_flutter/env/*.json
+clients/comms_flutter/.env.local
+clients/comms_flutter/build/
+clients/comms_flutter/.dart_tool/
+clients/comms_flutter/.flutter-plugins
+clients/comms_flutter/.flutter-plugins-dependencies
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <title>Minimal Chat Mark</title>
+  <desc>Borderless black-and-white app icon mark with two overlapping speech bubbles.</desc>
+  <g fill="#000000">
+    <!-- Rear bubble -->
+    <path d="M726 385
+             C788 428 826 487 826 552
+             C826 646 750 722 640 722
+             C612 722 585 717 560 708
+             L433 708
+             L737 843
+             C741 845 746 843 749 840
+             C753 837 754 833 753 828
+             L738 658
+             C784 629 812 585 812 536
+             C812 471 777 416 726 385Z"/>
+    <!-- Front bubble -->
+    <path d="M519 269
+             C388 269 282 351 282 453
+             C282 495 301 533 336 564
+             L287 736
+             C286 741 288 746 292 749
+             C296 752 301 752 305 749
+             L465 640
+             C483 643 501 645 519 645
+             C650 645 756 563 756 461
+             C756 359 650 269 519 269Z"/>
+    <!-- Dots -->
+    <circle cx="413" cy="453" r="28" fill="#FFFFFF"/>
+    <circle cx="519" cy="453" r="28" fill="#FFFFFF"/>
+    <circle cx="625" cy="453" r="28" fill="#FFFFFF"/>
+  </g>
+</svg>
