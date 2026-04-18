@@ -471,10 +471,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final conversations = await ref
-        .read(chatRepositoryProvider)
-        .watchConversations(user.uid)
-        .first;
+    final conversations =
+        await ref.read(chatRepositoryProvider).fetchConversationsSnapshot(user.uid);
     final candidates = conversations
         .where((conversation) => conversation.id != widget.conversationId)
         .toList(growable: false);

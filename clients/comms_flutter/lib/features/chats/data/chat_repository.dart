@@ -32,6 +32,10 @@ class ChatRepository {
     );
   }
 
+  Future<List<Conversation>> fetchConversationsSnapshot(String userId) {
+    return _withTransientRetry(() => _fetchConversations(userId));
+  }
+
   Future<int> unreadCount({
     required String conversationId,
     required String userId,
