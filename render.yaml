@@ -3,8 +3,8 @@ services:
     name: comms
     runtime: node
     plan: starter
-    buildCommand: npm ci && npm run build
-    startCommand: npm run start
+    buildCommand: npm ci && npm run backend:build
+    startCommand: npm run backend:start
     healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION
