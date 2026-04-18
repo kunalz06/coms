@@ -4,5 +4,14 @@
   "buildCommand": "bash ./clients/comms_flutter/tool/vercel_build.sh",
   "outputDirectory": "clients/comms_flutter/build/web",
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "routes": [
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/.*",
+      "dest": "/index.html"
+    }
+  ]
 }
