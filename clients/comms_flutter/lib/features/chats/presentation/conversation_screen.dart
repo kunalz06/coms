@@ -70,12 +70,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     if (privacy.hiddenConversationIds.contains(conversationId) &&
         !privacy.hiddenUnlocked) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unlock hidden chats first.')),
-        );
-        context.go(AppRoutes.hiddenChats);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unlock hidden chats first.')),
+      );
+      context.go(AppRoutes.hiddenChats);
       return;
     }
 
@@ -106,14 +104,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           ],
         ),
       );
+      controller.dispose();
+
+      if (!mounted) return;
       if (password == null || password.isEmpty) {
-        if (context.mounted) context.go(AppRoutes.chats);
+        context.go(AppRoutes.chats);
         return;
       }
       final ok = await ref
           .read(privacyControllerProvider.notifier)
           .unlockChatLock(password);
-      if (!ok && context.mounted) {
+      if (!mounted) return;
+      if (!ok) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Wrong chat lock password.')),
         );

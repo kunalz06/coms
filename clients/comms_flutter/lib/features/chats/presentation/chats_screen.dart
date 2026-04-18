@@ -9,6 +9,7 @@ import '../../../shared/widgets/state_views.dart';
 import '../../contacts/presentation/add_contact_sheet.dart';
 import '../../groups/presentation/create_group_sheet.dart';
 import '../../privacy/data/privacy_controller.dart';
+import '../../search/data/search_repository.dart';
 import '../data/chat_repository.dart';
 
 class ChatsScreen extends ConsumerWidget {
@@ -34,7 +35,7 @@ class ChatsScreen extends ConsumerWidget {
                   title: const Text('Chats'),
                   actions: [
                     IconButton(
-                        onPressed: () {},
+                        onPressed: () => _openGlobalSearch(context, ref),
                         icon: const Icon(Icons.search),
                         tooltip: 'Search'),
                   ],
@@ -194,6 +195,160 @@ class ChatsScreen extends ConsumerWidget {
       },
     );
   }
+}
+
+Future<void> _openGlobalSearch(BuildContext context, WidgetRef ref) async {
+  final queryController = TextEditingController();
+  var query = '';
+  List<SearchResult> results = const [];
+  var loading = false;
+  String? error;
+
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (context, setState) {
+          Future<void> runSearch() async {
+            final nextQuery = queryController.text.trim();
+            if (nextQuery.length < 2) {
+              setState(() {
+                query = nextQuery;
+                results = const [];
+                loading = false;
+                error = null;
+              });
+              return;
+            }
+
+            setState(() {
+              query = nextQuery;
+              loading = true;
+              error = null;
+            });
+
+            try {
+              final privacy = ref.read(privacyControllerProvider);
+              final rawResults = await ref
+                  .read(searchRepositoryProvider)
+                  .searchUnlockedMessages(nextQuery);
+
+              final filtered = rawResults.where((item) {
+                final conversationId = item.conversationId;
+                if (privacy.hiddenConversationIds.contains(conversationId) &&
+                    !privacy.hiddenUnlocked) {
+                  return false;
+                }
+                if (privacy.lockedConversationIds.contains(conversationId) &&
+                    privacy.chatLockConfigured &&
+                    !privacy.chatUnlocked) {
+                  return false;
+                }
+                return true;
+              }).toList(growable: false);
+
+              setState(() {
+                results = filtered;
+                loading = false;
+              });
+            } catch (e) {
+              setState(() {
+                loading = false;
+                error = e.toString();
+              });
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('Search messages'),
+            content: SizedBox(
+              width: 520,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: queryController,
+                    autofocus: true,
+                    onSubmitted: (_) => runSearch(),
+                    decoration: const InputDecoration(
+                      hintText: 'Search across chats',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (loading) const LinearProgressIndicator(),
+                  if (!loading && error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  if (!loading && error == null)
+                    SizedBox(
+                      height: 280,
+                      child: results.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Text(
+                                query.length < 2
+                                    ? 'Type at least 2 characters.'
+                                    : 'No results found.',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            )
+                          : ListView.builder(
+                              itemCount: results.length,
+                              itemBuilder: (context, index) {
+                                final result = results[index];
+                                return ListTile(
+                                  title: Text(
+                                    result.message.content ??
+                                        result.message.kind.toUpperCase(),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: Text(
+                                    '${result.conversationId} • ${result.message.createdAt.toLocal()}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  onTap: () {
+                                    Navigator.of(dialogContext).pop();
+                                    if (context.mounted) {
+                                      context.go(
+                                        AppRoutes.conversation.replaceFirst(
+                                          ':conversationId',
+                                          result.conversationId,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                );
+                              },
+                            ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Close'),
+              ),
+              FilledButton(
+                onPressed: runSearch,
+                child: const Text('Search'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
 }
 
 Future<bool> _canOpenConversation({

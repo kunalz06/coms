@@ -82,20 +82,26 @@ class CallsScreen extends ConsumerWidget {
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     final call = items[index];
-                    final outgoing = call.callerId == user.uid;
-                    return ListTile(
-                      leading: Icon(
-                        call.mode.name == 'video'
-                            ? Icons.videocam_outlined
-                            : Icons.call_outlined,
-                      ),
-                      title: Text(outgoing ? 'Outgoing call' : 'Incoming call'),
-                      subtitle:
-                          Text('${call.status} - ${call.peerId(user.uid)}'),
-                      trailing: Text(
-                        TimeOfDay.fromDateTime(call.startedAt.toLocal())
-                            .format(context),
-                      ),
+                        return ListTile(
+                          leading: Icon(
+                            call.mode.name == 'video'
+                                ? Icons.videocam_outlined
+                                : Icons.call_outlined,
+                          ),
+                          title: Text(
+                            call.isGroup
+                                ? 'Group ${call.mode.name} call'
+                                : '${call.mode.name == 'video' ? 'Video' : 'Audio'} call',
+                          ),
+                          subtitle: Text(
+                            call.isGroup
+                                ? '${call.status} • ${call.conversationId ?? 'group'}'
+                                : '${call.status} • ${call.peerId ?? 'direct'}',
+                          ),
+                          trailing: Text(
+                            TimeOfDay.fromDateTime(call.startedAt.toLocal())
+                                .format(context),
+                          ),
                     );
                   },
                 );
@@ -114,5 +120,5 @@ class CallsScreen extends ConsumerWidget {
 }
 
 final _recentCallsProvider = StreamProvider.family((ref, String userId) {
-  return ref.watch(callRepositoryProvider).watchRecentDirectCalls(userId);
+  return ref.watch(callRepositoryProvider).watchRecentCalls(userId);
 });

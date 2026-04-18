@@ -21,18 +21,10 @@ class ChatRepository {
   Stream<List<Conversation>> watchConversations(String userId) {
     return _resilientStream<List<Conversation>>(
       realtime: () => _supabase
-          .from('conversations')
+          .from('conversation_members')
           .stream(primaryKey: ['id'])
-          .order('last_message_at')
-          .map((rows) => rows
-              .where((row) =>
-                  row['type'] == 'group' ||
-                  row['user_one_id'] == userId ||
-                  row['user_two_id'] == userId)
-              .map((row) => Conversation.fromJson(Map<String, dynamic>.from(row)))
-              .toList(growable: false)
-            ..sort((a, b) => (b.lastMessageAt ?? b.updatedAt)
-                .compareTo(a.lastMessageAt ?? a.updatedAt))),
+          .eq('user_id', userId)
+          .asyncMap((_) => _fetchConversations(userId)),
       poll: () => _fetchConversations(userId),
       equals: _conversationListEquals,
     );
@@ -230,17 +222,45 @@ class ChatRepository {
   }
 
   Future<List<Conversation>> _fetchConversations(String userId) async {
-    final rows =
-        await _supabase.from('conversations').select().order('last_message_at');
-    final conversations = rows
-        .where((row) =>
-            row['type'] == 'group' ||
-            row['user_one_id'] == userId ||
-            row['user_two_id'] == userId)
-        .map((row) => Conversation.fromJson(Map<String, dynamic>.from(row)))
-        .toList(growable: false)
-      ..sort((a, b) => (b.lastMessageAt ?? b.updatedAt)
-          .compareTo(a.lastMessageAt ?? a.updatedAt));
+    final conversationIds = <String>{};
+
+    final memberRows = await _supabase
+        .from('conversation_members')
+        .select('conversation_id')
+        .eq('user_id', userId);
+    for (final row in memberRows) {
+      final id = row['conversation_id']?.toString();
+      if (id != null && id.isNotEmpty) conversationIds.add(id);
+    }
+
+    final directRows = await _supabase
+        .from('conversations')
+        .select('id')
+        .eq('type', 'direct')
+        .or('user_one_id.eq.$userId,user_two_id.eq.$userId');
+    for (final row in directRows) {
+      final id = row['id']?.toString();
+      if (id != null && id.isNotEmpty) conversationIds.add(id);
+    }
+
+    if (conversationIds.isEmpty) return const [];
+
+    final rows = await _supabase
+        .from('conversations')
+        .select()
+        .inFilter('id', conversationIds.toList(growable: false));
+
+    final conversations = <Conversation>[];
+    for (final row in rows) {
+      try {
+        conversations.add(Conversation.fromJson(Map<String, dynamic>.from(row)));
+      } catch (_) {
+        // Skip malformed rows to keep the list usable.
+      }
+    }
+
+    conversations.sort((a, b) =>
+        (b.lastMessageAt ?? b.updatedAt).compareTo(a.lastMessageAt ?? a.updatedAt));
     return conversations;
   }
 
