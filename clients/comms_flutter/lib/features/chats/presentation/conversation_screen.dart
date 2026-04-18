@@ -100,7 +100,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               child: const Text('Back'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              onPressed: () =>
+                  Navigator.of(context).pop(controller.text.trim()),
               child: const Text('Unlock'),
             ),
           ],
@@ -470,8 +471,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final conversations =
-        await ref.read(chatRepositoryProvider).watchConversations(user.uid).first;
+    final conversations = await ref
+        .read(chatRepositoryProvider)
+        .watchConversations(user.uid)
+        .first;
     final candidates = conversations
         .where((conversation) => conversation.id != widget.conversationId)
         .toList(growable: false);
@@ -544,8 +547,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           return;
         case 'share_external':
           final text = message.content?.trim();
-          final attachmentUrl =
-              message.attachments.isEmpty ? null : message.attachments.first.url;
+          final attachmentUrl = message.attachments.isEmpty
+              ? null
+              : message.attachments.first.url;
           final payload = [text, attachmentUrl]
               .whereType<String>()
               .where((item) => item.isNotEmpty)
@@ -699,16 +703,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final conversation = ref.watch(_conversationProvider(widget.conversationId));
+    final conversation =
+        ref.watch(_conversationProvider(widget.conversationId));
     final members = ref.watch(_membersProvider(widget.conversationId));
     final messages = ref.watch(_messagesProvider(widget.conversationId));
     final userId = FirebaseAuth.instance.currentUser?.uid;
     final pinnedIds = userId == null
         ? const <String>{}
-        : (ref.watch(_pinnedIdsProvider(userId)).valueOrNull ?? const <String>{});
+        : (ref.watch(_pinnedIdsProvider(userId)).valueOrNull ??
+            const <String>{});
     final mutedIds = userId == null
         ? const <String>{}
-        : (ref.watch(_mutedIdsProvider(userId)).valueOrNull ?? const <String>{});
+        : (ref.watch(_mutedIdsProvider(userId)).valueOrNull ??
+            const <String>{});
     final isPinned = pinnedIds.contains(widget.conversationId);
     final isMuted = mutedIds.contains(widget.conversationId);
     final memberMap = members.valueOrNull == null
@@ -1159,7 +1166,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           controller: _controller,
                           minLines: 1,
                           maxLines: 5,
-                          decoration: const InputDecoration(hintText: 'Message'),
+                          decoration:
+                              const InputDecoration(hintText: 'Message'),
                           onSubmitted: (_) => _send(),
                         ),
                       ),
@@ -1329,7 +1337,8 @@ String _conversationTitle(
   return conversation.title ?? 'Direct chat';
 }
 
-final _conversationProvider = StreamProvider.family((ref, String conversationId) {
+final _conversationProvider =
+    StreamProvider.family((ref, String conversationId) {
   return ref.watch(chatRepositoryProvider).watchConversation(conversationId);
 });
 

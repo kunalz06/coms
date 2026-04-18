@@ -20,7 +20,8 @@ class _HiddenChatsScreenState extends ConsumerState<HiddenChatsScreen> {
 
   Future<bool> _ensureUnlocked() async {
     final privacy = ref.read(privacyControllerProvider);
-    if (!privacy.hiddenPasswordConfigured || privacy.hiddenUnlocked) return true;
+    if (!privacy.hiddenPasswordConfigured || privacy.hiddenUnlocked)
+      return true;
     if (_unlocking) return false;
     setState(() => _unlocking = true);
     try {
@@ -42,7 +43,8 @@ class _HiddenChatsScreenState extends ConsumerState<HiddenChatsScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              onPressed: () =>
+                  Navigator.of(context).pop(controller.text.trim()),
               child: const Text('Unlock'),
             ),
           ],
@@ -101,7 +103,8 @@ class _HiddenChatsScreenState extends ConsumerState<HiddenChatsScreen> {
               child: FilledButton.icon(
                 onPressed: _unlocking ? null : _ensureUnlocked,
                 icon: const Icon(Icons.lock_open_outlined),
-                label: Text(_unlocking ? 'Unlocking...' : 'Unlock hidden chats'),
+                label:
+                    Text(_unlocking ? 'Unlocking...' : 'Unlock hidden chats'),
               ),
             );
           }

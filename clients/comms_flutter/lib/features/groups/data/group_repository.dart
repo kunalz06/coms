@@ -94,10 +94,14 @@ class GroupRepository {
       payload['title'] = title.trim();
     }
     if (avatarUrl != null) {
-      payload['avatar_url'] = avatarUrl.trim().isEmpty ? null : avatarUrl.trim();
+      payload['avatar_url'] =
+          avatarUrl.trim().isEmpty ? null : avatarUrl.trim();
     }
     if (payload.isEmpty) return;
-    await _supabase.from('conversations').update(payload).eq('id', conversationId);
+    await _supabase
+        .from('conversations')
+        .update(payload)
+        .eq('id', conversationId);
   }
 
   Future<void> updateMemberRole({
@@ -150,12 +154,9 @@ class GroupRepository {
   Future<void> clearGroupMessages({
     required String conversationId,
   }) async {
-    await _supabase
-        .from('messages')
-        .update({
-          'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
-        })
-        .eq('conversation_id', conversationId);
+    await _supabase.from('messages').update({
+      'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('conversation_id', conversationId);
   }
 
   Future<void> deleteGroup({

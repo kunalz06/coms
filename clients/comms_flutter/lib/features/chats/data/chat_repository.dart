@@ -16,7 +16,8 @@ class ChatRepository {
   ChatRepository(this._supabase);
 
   final SupabaseClient _supabase;
-  static const _pollInterval = Duration(seconds: 4);
+  static const _pollInterval = Duration(seconds: 8);
+  static const _maxPollInterval = Duration(seconds: 45);
 
   Stream<List<Conversation>> watchConversations(String userId) {
     return _resilientStream<List<Conversation>>(
@@ -27,6 +28,7 @@ class ChatRepository {
           .asyncMap((_) => _fetchConversations(userId)),
       poll: () => _fetchConversations(userId),
       equals: _conversationListEquals,
+      seed: const [],
     );
   }
 
@@ -64,6 +66,7 @@ class ChatRepository {
           .asyncMap((_) => _fetchUnreadConversationIds(userId)),
       poll: () => _fetchUnreadConversationIds(userId),
       equals: (a, b) => a.length == b.length && a.containsAll(b),
+      seed: const <String>{},
     );
   }
 
@@ -89,11 +92,12 @@ class ChatRepository {
           .stream(primaryKey: ['id'])
           .eq('id', conversationId)
           .map((rows) {
-        if (rows.isEmpty) return null;
-        return Conversation.fromJson(Map<String, dynamic>.from(rows.first));
-      }),
+            if (rows.isEmpty) return null;
+            return Conversation.fromJson(Map<String, dynamic>.from(rows.first));
+          }),
       poll: () => _fetchConversation(conversationId),
       equals: (a, b) => a?.id == b?.id && a?.updatedAt == b?.updatedAt,
+      seed: null,
     );
   }
 
@@ -107,6 +111,7 @@ class ChatRepository {
           .asyncMap((_) => _fetchMembers(conversationId)),
       poll: () => _fetchMembers(conversationId),
       equals: _memberListEquals,
+      seed: const [],
     );
   }
 
@@ -162,6 +167,7 @@ class ChatRepository {
           .asyncMap((_) => _fetchMessages(conversationId)),
       poll: () => _fetchMessages(conversationId),
       equals: _messageListEquals,
+      seed: const [],
     );
   }
 
@@ -187,18 +193,17 @@ class ChatRepository {
   }) async {
     final trimmed = content.trim();
     if (trimmed.isEmpty) return;
-    await _supabase.from('messages').update({'content': trimmed}).eq('id', messageId);
+    await _supabase
+        .from('messages')
+        .update({'content': trimmed}).eq('id', messageId);
   }
 
   Future<void> deleteMessageForEveryone({
     required String messageId,
   }) async {
-    await _supabase
-        .from('messages')
-        .update({
-          'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
-        })
-        .eq('id', messageId);
+    await _supabase.from('messages').update({
+      'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', messageId);
   }
 
   Future<void> deleteMessageForMe({
@@ -228,25 +233,22 @@ class ChatRepository {
         .toList(growable: false);
     if (ids.isEmpty) return;
     await _supabase.from('message_deletions').upsert(
-      ids
-          .map((id) => {
-                'message_id': id,
-                'user_id': userId,
-              })
-          .toList(growable: false),
-      onConflict: 'message_id,user_id',
-    );
+          ids
+              .map((id) => {
+                    'message_id': id,
+                    'user_id': userId,
+                  })
+              .toList(growable: false),
+          onConflict: 'message_id,user_id',
+        );
   }
 
   Future<void> clearConversationForEveryone({
     required String conversationId,
   }) async {
-    await _supabase
-        .from('messages')
-        .update({
-          'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
-        })
-        .eq('conversation_id', conversationId);
+    await _supabase.from('messages').update({
+      'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('conversation_id', conversationId);
   }
 
   Future<void> setConversationPinned({
@@ -292,6 +294,7 @@ class ChatRepository {
             .toSet();
       },
       equals: (a, b) => a.length == b.length && a.containsAll(b),
+      seed: const <String>{},
     );
   }
 
@@ -338,6 +341,7 @@ class ChatRepository {
             .toSet();
       },
       equals: (a, b) => a.length == b.length && a.containsAll(b),
+      seed: const <String>{},
     );
   }
 
@@ -398,7 +402,8 @@ class ChatRepository {
     required String targetConversationId,
     required String senderId,
   }) async {
-    if (message.kind == 'text' && (message.content?.trim().isNotEmpty ?? false)) {
+    if (message.kind == 'text' &&
+        (message.content?.trim().isNotEmpty ?? false)) {
       await sendText(
         conversationId: targetConversationId,
         senderId: senderId,
@@ -428,20 +433,24 @@ class ChatRepository {
   Future<List<Conversation>> _fetchConversations(String userId) async {
     final conversationIds = <String>{};
 
-    final memberRows = await _supabase
-        .from('conversation_members')
-        .select('conversation_id')
-        .eq('user_id', userId);
+    final memberRows = await _withTransientRetry(
+      () => _supabase
+          .from('conversation_members')
+          .select('conversation_id')
+          .eq('user_id', userId),
+    );
     for (final row in memberRows) {
       final id = row['conversation_id']?.toString();
       if (id != null && id.isNotEmpty) conversationIds.add(id);
     }
 
-    final directRows = await _supabase
-        .from('conversations')
-        .select('id')
-        .eq('type', 'direct')
-        .or('user_one_id.eq.$userId,user_two_id.eq.$userId');
+    final directRows = await _withTransientRetry(
+      () => _supabase
+          .from('conversations')
+          .select('id')
+          .eq('type', 'direct')
+          .or('user_one_id.eq.$userId,user_two_id.eq.$userId'),
+    );
     for (final row in directRows) {
       final id = row['id']?.toString();
       if (id != null && id.isNotEmpty) conversationIds.add(id);
@@ -449,15 +458,18 @@ class ChatRepository {
 
     if (conversationIds.isEmpty) return const [];
 
-    final rows = await _supabase
-        .from('conversations')
-        .select()
-        .inFilter('id', conversationIds.toList(growable: false));
+    final rows = await _withTransientRetry(
+      () => _supabase
+          .from('conversations')
+          .select()
+          .inFilter('id', conversationIds.toList(growable: false)),
+    );
 
     final rawConversations = <Conversation>[];
     for (final row in rows) {
       try {
-        rawConversations.add(Conversation.fromJson(Map<String, dynamic>.from(row)));
+        rawConversations
+            .add(Conversation.fromJson(Map<String, dynamic>.from(row)));
       } catch (_) {
         // Skip malformed rows to keep the list usable.
       }
@@ -473,10 +485,12 @@ class ChatRepository {
         .toSet()
         .toList(growable: false);
     if (directPeerIds.isNotEmpty) {
-      final profileRows = await _supabase
-          .from('user_profiles')
-          .select('id,full_name')
-          .inFilter('id', directPeerIds);
+      final profileRows = await _withTransientRetry(
+        () => _supabase
+            .from('user_profiles')
+            .select('id,full_name')
+            .inFilter('id', directPeerIds),
+      );
       for (final row in profileRows) {
         final id = row['id']?.toString();
         final fullName = row['full_name']?.toString();
@@ -508,16 +522,18 @@ class ChatRepository {
       );
     }).toList(growable: false);
 
-    conversations.sort((a, b) =>
-        (b.lastMessageAt ?? b.updatedAt).compareTo(a.lastMessageAt ?? a.updatedAt));
+    conversations.sort((a, b) => (b.lastMessageAt ?? b.updatedAt)
+        .compareTo(a.lastMessageAt ?? a.updatedAt));
     return conversations;
   }
 
   Future<Set<String>> _fetchUnreadConversationIds(String userId) async {
-    final memberships = await _supabase
-        .from('conversation_members')
-        .select('conversation_id,last_read_at')
-        .eq('user_id', userId);
+    final memberships = await _withTransientRetry(
+      () => _supabase
+          .from('conversation_members')
+          .select('conversation_id,last_read_at')
+          .eq('user_id', userId),
+    );
     if (memberships.isEmpty) return const {};
 
     final lastReadByConversationId = <String, DateTime?>{};
@@ -532,18 +548,19 @@ class ChatRepository {
     final conversationIds =
         lastReadByConversationId.keys.toList(growable: false);
 
-    final messages = await _supabase
-        .from('messages')
-        .select('conversation_id,created_at,sender_id')
-        .inFilter('conversation_id', conversationIds)
-        .neq('sender_id', userId);
+    final messages = await _withTransientRetry(
+      () => _supabase
+          .from('messages')
+          .select('conversation_id,created_at,sender_id')
+          .inFilter('conversation_id', conversationIds)
+          .neq('sender_id', userId),
+    );
 
     final unread = <String>{};
     for (final row in messages) {
       final conversationId = row['conversation_id']?.toString();
       if (conversationId == null || conversationId.isEmpty) continue;
-      final createdAt =
-          DateTime.tryParse(row['created_at']?.toString() ?? '');
+      final createdAt = DateTime.tryParse(row['created_at']?.toString() ?? '');
       if (createdAt == null) continue;
       final lastRead = lastReadByConversationId[conversationId];
       if (lastRead == null || createdAt.isAfter(lastRead)) {
@@ -554,21 +571,25 @@ class ChatRepository {
   }
 
   Future<Conversation?> _fetchConversation(String conversationId) async {
-    final row = await _supabase
-        .from('conversations')
-        .select()
-        .eq('id', conversationId)
-        .maybeSingle();
+    final row = await _withTransientRetry(
+      () => _supabase
+          .from('conversations')
+          .select()
+          .eq('id', conversationId)
+          .maybeSingle(),
+    );
     if (row == null) return null;
     return Conversation.fromJson(Map<String, dynamic>.from(row));
   }
 
   Future<List<ConversationMember>> _fetchMembers(String conversationId) async {
-    final rows = await _supabase
-        .from('conversation_members')
-        .select()
-        .eq('conversation_id', conversationId)
-        .order('joined_at');
+    final rows = await _withTransientRetry(
+      () => _supabase
+          .from('conversation_members')
+          .select()
+          .eq('conversation_id', conversationId)
+          .order('joined_at'),
+    );
     final members = rows
         .map((row) => Map<String, dynamic>.from(row))
         .toList(growable: false);
@@ -580,10 +601,16 @@ class ChatRepository {
     for (final member in members) {
       final userId = member['user_id'] as String?;
       if (userId == null || profiles.containsKey(userId)) continue;
-      final data =
-          await _supabase.from('user_profiles').select().eq('id', userId).maybeSingle();
+      final data = await _withTransientRetry(
+        () => _supabase
+            .from('user_profiles')
+            .select()
+            .eq('id', userId)
+            .maybeSingle(),
+      );
       if (data != null) {
-        profiles[userId] = UserProfile.fromJson(Map<String, dynamic>.from(data));
+        profiles[userId] =
+            UserProfile.fromJson(Map<String, dynamic>.from(data));
       }
     }
 
@@ -596,11 +623,13 @@ class ChatRepository {
   }
 
   Future<List<Message>> _fetchMessages(String conversationId) async {
-    final rows = await _supabase
-        .from('messages')
-        .select()
-        .eq('conversation_id', conversationId)
-        .order('created_at');
+    final rows = await _withTransientRetry(
+      () => _supabase
+          .from('messages')
+          .select()
+          .eq('conversation_id', conversationId)
+          .order('created_at'),
+    );
     if (rows.isEmpty) return const [];
 
     final messageRows = rows
@@ -611,16 +640,20 @@ class ChatRepository {
         .whereType<String>()
         .toList(growable: false);
 
-    final attachmentsRows = await _supabase
-        .from('message_attachments')
-        .select()
-        .inFilter('message_id', messageIds)
-        .order('created_at');
-    final reactionsRows = await _supabase
-        .from('message_reactions')
-        .select()
-        .inFilter('message_id', messageIds)
-        .order('created_at');
+    final attachmentsRows = await _withTransientRetry(
+      () => _supabase
+          .from('message_attachments')
+          .select()
+          .inFilter('message_id', messageIds)
+          .order('created_at'),
+    );
+    final reactionsRows = await _withTransientRetry(
+      () => _supabase
+          .from('message_reactions')
+          .select()
+          .inFilter('message_id', messageIds)
+          .order('created_at'),
+    );
 
     final attachmentsByMessage = <String, List<Map<String, dynamic>>>{};
     for (final row in attachmentsRows) {
@@ -641,10 +674,12 @@ class ChatRepository {
     final messages = <Message>[];
     for (final messageRow in messageRows) {
       final messageId = messageRow['id']?.toString();
-      messageRow['message_attachments'] =
-          messageId == null ? const [] : (attachmentsByMessage[messageId] ?? const []);
-      messageRow['message_reactions'] =
-          messageId == null ? const [] : (reactionsByMessage[messageId] ?? const []);
+      messageRow['message_attachments'] = messageId == null
+          ? const []
+          : (attachmentsByMessage[messageId] ?? const []);
+      messageRow['message_reactions'] = messageId == null
+          ? const []
+          : (reactionsByMessage[messageId] ?? const []);
       messages.add(Message.fromJson(messageRow));
     }
     return messages;
@@ -654,48 +689,85 @@ class ChatRepository {
     required Stream<T> Function() realtime,
     required Future<T> Function() poll,
     required bool Function(T previous, T next) equals,
+    required T seed,
   }) {
     final controller = StreamController<T>();
     StreamSubscription<T>? realtimeSub;
     Timer? pollTimer;
-    T? lastValue;
+    T lastValue = seed;
+    Duration activePollInterval = _pollInterval;
+    var realtimeHealthy = false;
+    var initialValueEmitted = false;
 
     Future<void> emitPolled() async {
-      final next = await poll();
-      if (lastValue != null && equals(lastValue as T, next)) return;
+      final next = await _withTransientRetry(poll);
+      if (equals(lastValue, next)) return;
       lastValue = next;
       if (!controller.isClosed) controller.add(next);
+      initialValueEmitted = true;
     }
 
-    Future<void> startPolling() async {
+    Future<void> startPolling({bool immediate = false}) async {
+      if (pollTimer != null) return;
+
+      if (immediate) {
+        try {
+          await emitPolled();
+          activePollInterval = _pollInterval;
+        } catch (_) {}
+      }
+
+      pollTimer = Timer.periodic(activePollInterval, (_) async {
+        try {
+          await emitPolled();
+          activePollInterval = _pollInterval;
+        } catch (error, stack) {
+          if (!controller.isClosed &&
+              !initialValueEmitted &&
+              !_isTransientNetworkError(error)) {
+            controller.addError(error, stack);
+          }
+          final nextSeconds = (activePollInterval.inSeconds * 2)
+              .clamp(_pollInterval.inSeconds, _maxPollInterval.inSeconds)
+              .toInt();
+          activePollInterval = Duration(seconds: nextSeconds);
+          pollTimer?.cancel();
+          pollTimer = null;
+          if (!controller.isClosed) {
+            await startPolling();
+          }
+        }
+      });
+    }
+
+    void stopPolling() {
+      pollTimer?.cancel();
+      pollTimer = null;
+      activePollInterval = _pollInterval;
+    }
+
+    Future<void> emitInitialValue() async {
       try {
         await emitPolled();
       } catch (error, stack) {
-        if (!controller.isClosed && lastValue == null) {
+        if (!controller.isClosed && !_isTransientNetworkError(error)) {
           controller.addError(error, stack);
         }
       }
-
-      pollTimer ??= Timer.periodic(_pollInterval, (_) {
-        emitPolled().catchError((error, stack) {
-          if (!controller.isClosed && lastValue == null) {
-            controller.addError(error, stack);
-          }
-        });
-      });
     }
 
     void onRealtimeError(Object error, StackTrace stack) {
       // Realtime may fail due transient websocket/network issues. Keep chat
       // usable through polling and only surface non-timeout errors when no
       // prior data has been loaded.
+      realtimeHealthy = false;
       if (!controller.isClosed &&
-          lastValue == null &&
+          !initialValueEmitted &&
           !_isRealtimeTimeoutError(error)) {
         controller.addError(error, stack);
       }
-      startPolling().catchError((pollError, pollStack) {
-        if (!controller.isClosed && lastValue == null) {
+      startPolling(immediate: true).catchError((pollError, pollStack) {
+        if (!controller.isClosed && !initialValueEmitted) {
           controller.addError(pollError, pollStack);
         }
       });
@@ -705,9 +777,12 @@ class ChatRepository {
       try {
         realtimeSub = realtime().listen(
           (event) {
-            if (lastValue != null && equals(lastValue as T, event)) return;
+            realtimeHealthy = true;
+            stopPolling();
+            if (equals(lastValue, event)) return;
             lastValue = event;
             if (!controller.isClosed) controller.add(event);
+            initialValueEmitted = true;
           },
           onError: onRealtimeError,
         );
@@ -717,16 +792,49 @@ class ChatRepository {
     }
 
     controller.onListen = () async {
+      if (!controller.isClosed) {
+        controller.add(seed);
+      }
       startRealtime();
-      await startPolling();
+      await emitInitialValue();
+      if (!realtimeHealthy) {
+        await startPolling();
+      }
     };
 
     controller.onCancel = () async {
       await realtimeSub?.cancel();
-      pollTimer?.cancel();
+      stopPolling();
     };
 
     return controller.stream;
+  }
+
+  Future<T> _withTransientRetry<T>(
+    Future<T> Function() operation, {
+    int maxAttempts = 3,
+  }) async {
+    Object? lastError;
+    StackTrace? lastStack;
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await operation();
+      } catch (error, stack) {
+        lastError = error;
+        lastStack = stack;
+        final shouldRetry =
+            _isTransientNetworkError(error) && attempt < maxAttempts;
+        if (!shouldRetry) rethrow;
+        final delayMs = (250 * attempt * attempt).clamp(250, 2000);
+        await Future<void>.delayed(Duration(milliseconds: delayMs));
+      }
+    }
+
+    Error.throwWithStackTrace(
+      lastError ?? StateError('Transient retry failed'),
+      lastStack ?? StackTrace.current,
+    );
   }
 }
 
@@ -735,6 +843,22 @@ bool _isRealtimeTimeoutError(Object error) {
     return error.status == RealtimeSubscribeStatus.timedOut;
   }
   return error.toString().contains('RealtimeSubscribeStatus.timedOut');
+}
+
+bool _isTransientNetworkError(Object error) {
+  if (error is PostgrestException) {
+    final message = error.message.toLowerCase();
+    return message.contains('connection closed') ||
+        message.contains('connection terminated') ||
+        message.contains('timeout') ||
+        message.contains('econnreset');
+  }
+  final text = error.toString().toLowerCase();
+  return text.contains('err_connection_closed') ||
+      text.contains('connection closed') ||
+      text.contains('connection terminated') ||
+      text.contains('network is unreachable') ||
+      text.contains('timeout');
 }
 
 bool _conversationListEquals(List<Conversation> a, List<Conversation> b) {

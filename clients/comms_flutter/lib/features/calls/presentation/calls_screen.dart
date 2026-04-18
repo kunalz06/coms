@@ -47,92 +47,95 @@ class CallsScreen extends ConsumerWidget {
             ],
           ),
         ),
-      body: Column(
-        children: [
-          if (controller.status == CommsCallStatus.failed &&
-              controller.error != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        color: Theme.of(context).colorScheme.onErrorContainer,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          controller.error!,
-                          style: TextStyle(
-                            color:
-                                Theme.of(context).colorScheme.onErrorContainer,
+        body: Column(
+          children: [
+            if (controller.status == CommsCallStatus.failed &&
+                controller.error != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            controller.error!,
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onErrorContainer,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                _MakeCallTab(currentUserId: user.uid),
-                calls.when(
-                  data: (items) {
-                    if (items.isEmpty) {
-                      return const EmptyState(
-                        title: 'No calls yet',
-                        message:
-                            'Start an audio or video call from a direct or group chat.',
-                      );
-                    }
-                    return ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: items.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final call = items[index];
-                        return ListTile(
-                          leading: Icon(
-                            call.mode.name == 'video'
-                                ? Icons.videocam_outlined
-                                : Icons.call_outlined,
-                          ),
-                          title: Text(
-                            call.isGroup
-                                ? (call.conversationTitle ?? 'Group call')
-                                : (call.peerName ?? call.peerId ?? 'Direct call'),
-                          ),
-                          subtitle: Text(
-                            '${call.mode.name == 'video' ? 'Video' : 'Audio'} • ${call.status}',
-                          ),
-                          trailing: Text(
-                            TimeOfDay.fromDateTime(call.startedAt.toLocal())
-                                .format(context),
-                          ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _MakeCallTab(currentUserId: user.uid),
+                  calls.when(
+                    data: (items) {
+                      if (items.isEmpty) {
+                        return const EmptyState(
+                          title: 'No calls yet',
+                          message:
+                              'Start an audio or video call from a direct or group chat.',
                         );
-                      },
-                    );
-                  },
-                  loading: () => const LoadingState(),
-                  error: (error, _) => EmptyState(
-                    title: 'Could not load calls',
-                    message: error.toString(),
+                      }
+                      return ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final call = items[index];
+                          return ListTile(
+                            leading: Icon(
+                              call.mode.name == 'video'
+                                  ? Icons.videocam_outlined
+                                  : Icons.call_outlined,
+                            ),
+                            title: Text(
+                              call.isGroup
+                                  ? (call.conversationTitle ?? 'Group call')
+                                  : (call.peerName ??
+                                      call.peerId ??
+                                      'Direct call'),
+                            ),
+                            subtitle: Text(
+                              '${call.mode.name == 'video' ? 'Video' : 'Audio'} • ${call.status}',
+                            ),
+                            trailing: Text(
+                              TimeOfDay.fromDateTime(call.startedAt.toLocal())
+                                  .format(context),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                    loading: () => const LoadingState(),
+                    error: (error, _) => EmptyState(
+                      title: 'Could not load calls',
+                      message: error.toString(),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }

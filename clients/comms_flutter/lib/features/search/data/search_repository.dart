@@ -67,9 +67,8 @@ class SearchRepository {
       if (id == null || id.isEmpty) continue;
       final fullName = row['full_name']?.toString().trim();
       final email = row['email']?.toString().trim();
-      profileById[id] = (fullName != null && fullName.isNotEmpty)
-          ? fullName
-          : (email ?? id);
+      profileById[id] =
+          (fullName != null && fullName.isNotEmpty) ? fullName : (email ?? id);
     }
 
     final conversationTitleById = <String, String>{};
@@ -87,10 +86,10 @@ class SearchRepository {
         .map((message) => SearchResult(
               conversationId: message.conversationId,
               message: message,
-              conversationTitle: conversationTitleById[message.conversationId] ??
-                  'Conversation',
-              senderLabel:
-                  profileById[message.senderId] ?? message.senderId,
+              conversationTitle:
+                  conversationTitleById[message.conversationId] ??
+                      'Conversation',
+              senderLabel: profileById[message.senderId] ?? message.senderId,
             ))
         .toList(growable: false);
   }

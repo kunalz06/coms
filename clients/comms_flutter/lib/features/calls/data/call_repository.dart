@@ -118,7 +118,8 @@ class CallRepository {
 
     for (final row in directRows) {
       try {
-        final session = DirectCallSession.fromJson(Map<String, dynamic>.from(row));
+        final session =
+            DirectCallSession.fromJson(Map<String, dynamic>.from(row));
         final peerId = session.peerId(userId);
         directPeerIds.add(peerId);
         items.add(
@@ -180,7 +181,8 @@ class CallRepository {
       final rows = await _supabase
           .from('conversations')
           .select('id,title')
-          .inFilter('id', groupConversationIdsForLookup.toList(growable: false));
+          .inFilter(
+              'id', groupConversationIdsForLookup.toList(growable: false));
       for (final row in rows) {
         final id = row['id']?.toString();
         if (id == null || id.isEmpty) continue;
@@ -200,8 +202,7 @@ class CallRepository {
               startedAt: item.startedAt,
               endedAt: item.endedAt,
               peerId: item.peerId,
-              peerName:
-                  item.peerId == null ? null : peerNameById[item.peerId!],
+              peerName: item.peerId == null ? null : peerNameById[item.peerId!],
               conversationId: item.conversationId,
               conversationTitle: item.conversationId == null
                   ? null
@@ -220,7 +221,8 @@ class CallRepository {
     final sessions = <DirectCallSession>[];
     for (final row in rows) {
       try {
-        sessions.add(DirectCallSession.fromJson(Map<String, dynamic>.from(row)));
+        sessions
+            .add(DirectCallSession.fromJson(Map<String, dynamic>.from(row)));
       } catch (_) {
         // Skip malformed rows.
       }
@@ -305,7 +307,8 @@ class CallRepository {
   }
 }
 
-bool _directCallListEquals(List<DirectCallSession> a, List<DirectCallSession> b) {
+bool _directCallListEquals(
+    List<DirectCallSession> a, List<DirectCallSession> b) {
   if (identical(a, b)) return true;
   if (a.length != b.length) return false;
   for (var i = 0; i < a.length; i++) {

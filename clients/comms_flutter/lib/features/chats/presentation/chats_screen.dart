@@ -82,9 +82,8 @@ class ChatsScreen extends ConsumerWidget {
                   data: (items) {
                     final visible = items
                         .where(
-                          (conversation) =>
-                              !privacy.hiddenConversationIds
-                                  .contains(conversation.id),
+                          (conversation) => !privacy.hiddenConversationIds
+                              .contains(conversation.id),
                         )
                         .toList()
                       ..sort((a, b) {
@@ -125,8 +124,8 @@ class ChatsScreen extends ConsumerWidget {
                                   : Icons.person)),
                           title: Text(conversation.title ?? 'Direct chat'),
                           subtitle: Text(conversation.isGroup
-                                  ? 'Group conversation'
-                                  : 'Direct conversation'),
+                              ? 'Group conversation'
+                              : 'Direct conversation'),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -138,7 +137,8 @@ class ChatsScreen extends ConsumerWidget {
                               if (muted)
                                 const Padding(
                                   padding: EdgeInsets.only(right: 8),
-                                  child: Icon(Icons.volume_off_outlined, size: 18),
+                                  child:
+                                      Icon(Icons.volume_off_outlined, size: 18),
                                 ),
                               unread.when(
                                 data: (count) => count > 0 || hasUnread
@@ -205,9 +205,10 @@ class ChatsScreen extends ConsumerWidget {
                                           muted: false,
                                         );
                                   } else if (value == 'delete_direct') {
-                                    final peerId = conversation.userOneId == user.uid
-                                        ? conversation.userTwoId
-                                        : conversation.userOneId;
+                                    final peerId =
+                                        conversation.userOneId == user.uid
+                                            ? conversation.userTwoId
+                                            : conversation.userOneId;
                                     if (peerId != null) {
                                       await ref
                                           .read(contactRepositoryProvider)
@@ -217,12 +218,16 @@ class ChatsScreen extends ConsumerWidget {
                                           );
                                     }
                                   } else if (value == 'leave_group') {
-                                    await ref.read(groupRepositoryProvider).leaveGroup(
+                                    await ref
+                                        .read(groupRepositoryProvider)
+                                        .leaveGroup(
                                           conversationId: conversation.id,
                                           userId: user.uid,
                                         );
                                   } else if (value == 'delete_group') {
-                                    await ref.read(groupRepositoryProvider).deleteGroup(
+                                    await ref
+                                        .read(groupRepositoryProvider)
+                                        .deleteGroup(
                                           conversationId: conversation.id,
                                         );
                                   }
@@ -249,7 +254,8 @@ class ChatsScreen extends ConsumerWidget {
                                   ),
                                   PopupMenuItem(
                                     value: muted ? 'unmute' : 'mute',
-                                    child: Text(muted ? 'Unmute chat' : 'Mute chat'),
+                                    child: Text(
+                                        muted ? 'Unmute chat' : 'Mute chat'),
                                   ),
                                   if (conversation.isDirect)
                                     const PopupMenuItem(
@@ -281,8 +287,8 @@ class ChatsScreen extends ConsumerWidget {
                             );
                             if (!canOpen || !context.mounted) return;
                             context.go(
-                              AppRoutes.conversation
-                                  .replaceFirst(':conversationId', conversation.id),
+                              AppRoutes.conversation.replaceFirst(
+                                  ':conversationId', conversation.id),
                             );
                           },
                         );

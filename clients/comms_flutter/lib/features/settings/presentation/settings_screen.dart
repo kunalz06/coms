@@ -103,8 +103,8 @@ class SettingsScreen extends ConsumerWidget {
                         .setUnreadFirst(value);
                   },
                   title: const Text('Unread chats first'),
-                  subtitle:
-                      const Text('Move conversations with unread messages to top'),
+                  subtitle: const Text(
+                      'Move conversations with unread messages to top'),
                 ),
                 notificationSettings.when(
                   data: (settings) => Column(

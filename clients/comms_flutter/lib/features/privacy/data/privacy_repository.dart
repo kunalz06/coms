@@ -44,7 +44,8 @@ class PrivacyRepository {
 
   Future<void> clearChatLockPassword() => _storage.delete(key: _lockHashKey);
 
-  Future<void> clearHiddenChatsPassword() => _storage.delete(key: _hiddenHashKey);
+  Future<void> clearHiddenChatsPassword() =>
+      _storage.delete(key: _hiddenHashKey);
 
   Future<Set<String>> lockedConversationIds() async {
     return _loadStringSet(_lockedConversationsKey);
@@ -85,7 +86,10 @@ class PrivacyRepository {
       'email': email.trim().toLowerCase(),
       'salt': salt,
       'token_hash': _hash(token, salt),
-      'expires_at': DateTime.now().toUtc().add(const Duration(minutes: 15)).toIso8601String(),
+      'expires_at': DateTime.now()
+          .toUtc()
+          .add(const Duration(minutes: 15))
+          .toIso8601String(),
       'used': false,
     };
     await _storage.write(key: key, value: jsonEncode(payload));

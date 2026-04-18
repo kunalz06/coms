@@ -49,7 +49,8 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
   Widget build(BuildContext context) {
     final me = FirebaseAuth.instance.currentUser?.uid;
     if (me == null) return const LoadingState();
-    final conversation = ref.watch(_conversationProvider(widget.conversationId));
+    final conversation =
+        ref.watch(_conversationProvider(widget.conversationId));
     final members = ref.watch(_membersProvider(widget.conversationId));
 
     return Scaffold(
@@ -139,7 +140,9 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                               );
                               if (ok != true) return;
                               await _run(
-                                () => ref.read(groupRepositoryProvider).updateGroupProfile(
+                                () => ref
+                                    .read(groupRepositoryProvider)
+                                    .updateGroupProfile(
                                       conversationId: widget.conversationId,
                                       title: titleController.text,
                                     ),
@@ -226,10 +229,13 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                   .read(groupRepositoryProvider)
                                   .findProfilesByEmails(emails);
                               await _run(
-                                () => ref.read(groupRepositoryProvider).addMembers(
+                                () => ref
+                                    .read(groupRepositoryProvider)
+                                    .addMembers(
                                       conversationId: widget.conversationId,
-                                      userIds:
-                                          profiles.map((profile) => profile.id).toList(),
+                                      userIds: profiles
+                                          .map((profile) => profile.id)
+                                          .toList(),
                                     ),
                                 message: 'Members added.',
                               );
@@ -243,7 +249,9 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                       onPressed: _busy
                           ? null
                           : () => _run(
-                                () => ref.read(groupRepositoryProvider).clearGroupMessages(
+                                () => ref
+                                    .read(groupRepositoryProvider)
+                                    .clearGroupMessages(
                                       conversationId: widget.conversationId,
                                     ),
                                 message: 'Group messages cleared.',
@@ -255,10 +263,11 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                     onPressed: _busy
                         ? null
                         : () => _run(
-                              () => ref.read(groupRepositoryProvider).leaveGroup(
-                                    conversationId: widget.conversationId,
-                                    userId: me,
-                                  ),
+                              () =>
+                                  ref.read(groupRepositoryProvider).leaveGroup(
+                                        conversationId: widget.conversationId,
+                                        userId: me,
+                                      ),
                               message: 'You left the group.',
                             ).then((_) {
                               if (context.mounted) context.go(AppRoutes.chats);
@@ -271,12 +280,15 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                       onPressed: _busy
                           ? null
                           : () => _run(
-                                () => ref.read(groupRepositoryProvider).deleteGroup(
+                                () => ref
+                                    .read(groupRepositoryProvider)
+                                    .deleteGroup(
                                       conversationId: widget.conversationId,
                                     ),
                                 message: 'Group deleted.',
                               ).then((_) {
-                                if (context.mounted) context.go(AppRoutes.chats);
+                                if (context.mounted)
+                                  context.go(AppRoutes.chats);
                               }),
                       icon: const Icon(Icons.delete_forever_outlined),
                       label: const Text('Delete group'),
@@ -296,8 +308,10 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                             name: member.profile?.fullName ?? 'COMMS user',
                             imageUrl: member.profile?.avatarUrl,
                           ),
-                          title: Text(member.profile?.fullName ?? member.userId),
-                          subtitle: Text(member.profile?.email ?? member.userId),
+                          title:
+                              Text(member.profile?.fullName ?? member.userId),
+                          subtitle:
+                              Text(member.profile?.email ?? member.userId),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -310,7 +324,8 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                         () => ref
                                             .read(groupRepositoryProvider)
                                             .updateMemberRole(
-                                              conversationId: widget.conversationId,
+                                              conversationId:
+                                                  widget.conversationId,
                                               userId: member.userId,
                                               role: 'admin',
                                             ),
@@ -321,7 +336,8 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                         () => ref
                                             .read(groupRepositoryProvider)
                                             .updateMemberRole(
-                                              conversationId: widget.conversationId,
+                                              conversationId:
+                                                  widget.conversationId,
                                               userId: member.userId,
                                               role: 'member',
                                             ),
@@ -332,7 +348,8 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                         () => ref
                                             .read(groupRepositoryProvider)
                                             .removeMember(
-                                              conversationId: widget.conversationId,
+                                              conversationId:
+                                                  widget.conversationId,
                                               userId: member.userId,
                                             ),
                                         message: 'Member removed.',
@@ -340,7 +357,8 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                     }
                                   },
                                   itemBuilder: (context) => [
-                                    if (member.role != 'admin' && member.role != 'owner')
+                                    if (member.role != 'admin' &&
+                                        member.role != 'owner')
                                       const PopupMenuItem(
                                         value: 'make_admin',
                                         child: Text('Make admin'),
@@ -400,7 +418,8 @@ class _RoleChip extends StatelessWidget {
   }
 }
 
-final _conversationProvider = StreamProvider.family((ref, String conversationId) {
+final _conversationProvider =
+    StreamProvider.family((ref, String conversationId) {
   return ref.watch(chatRepositoryProvider).watchConversation(conversationId);
 });
 

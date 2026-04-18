@@ -42,8 +42,7 @@ class PrivacyScreen extends ConsumerWidget {
                           .read(privacyControllerProvider.notifier)
                           .setChatLockPassword(value),
                     ),
-                    child:
-                        Text(privacy.chatLockConfigured ? 'Change' : 'Set'),
+                    child: Text(privacy.chatLockConfigured ? 'Change' : 'Set'),
                   ),
                 ),
                 ListTile(
@@ -64,8 +63,8 @@ class PrivacyScreen extends ConsumerWidget {
                           .read(privacyControllerProvider.notifier)
                           .setHiddenPassword(value),
                     ),
-                    child:
-                        Text(privacy.hiddenPasswordConfigured ? 'Change' : 'Set'),
+                    child: Text(
+                        privacy.hiddenPasswordConfigured ? 'Change' : 'Set'),
                   ),
                 ),
                 ListTile(
@@ -156,7 +155,8 @@ Future<void> _showSetPasswordDialog({
   if (value == null || value.length < 4) {
     if (!context.mounted || value == null) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Use a password with at least 4 characters.')),
+      const SnackBar(
+          content: Text('Use a password with at least 4 characters.')),
     );
     return;
   }
@@ -189,10 +189,11 @@ Future<void> _showResetFlow({
   }
 
   try {
-    final token = await ref.read(privacyControllerProvider.notifier).issueResetToken(
-          type: type,
-          email: email,
-        );
+    final token =
+        await ref.read(privacyControllerProvider.notifier).issueResetToken(
+              type: type,
+              email: email,
+            );
 
     if (!context.mounted) return;
     await showDialog<void>(
@@ -249,12 +250,13 @@ Future<void> _showResetFlow({
     );
     if (submitted != true) return;
 
-    final ok = await ref.read(privacyControllerProvider.notifier).applyResetToken(
-          type: type,
-          email: email,
-          token: tokenController.text.trim(),
-          newPassword: passwordController.text.trim(),
-        );
+    final ok =
+        await ref.read(privacyControllerProvider.notifier).applyResetToken(
+              type: type,
+              email: email,
+              token: tokenController.text.trim(),
+              newPassword: passwordController.text.trim(),
+            );
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

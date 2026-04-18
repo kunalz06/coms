@@ -55,8 +55,10 @@ class PrivacyState {
       chatLockConfigured: chatLockConfigured ?? this.chatLockConfigured,
       hiddenPasswordConfigured:
           hiddenPasswordConfigured ?? this.hiddenPasswordConfigured,
-      lockedConversationIds: lockedConversationIds ?? this.lockedConversationIds,
-      hiddenConversationIds: hiddenConversationIds ?? this.hiddenConversationIds,
+      lockedConversationIds:
+          lockedConversationIds ?? this.lockedConversationIds,
+      hiddenConversationIds:
+          hiddenConversationIds ?? this.hiddenConversationIds,
       chatUnlockUntil: chatUnlockUntil ?? this.chatUnlockUntil,
       hiddenUnlockUntil: hiddenUnlockUntil ?? this.hiddenUnlockUntil,
       error: clearError ? null : error ?? this.error,
