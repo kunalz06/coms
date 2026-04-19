@@ -319,6 +319,7 @@ class ChatsScreen extends ConsumerWidget {
                                   conversationId: conversation.id,
                                   userId: user.uid,
                                 );
+                            if (!context.mounted) return;
                             context.go(
                               AppRoutes.conversation.replaceFirst(
                                   ':conversationId', conversation.id),

@@ -1,10 +1,11 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:async';
 
 import '../core/config/app_config.dart';
 import '../core/logging/app_logger.dart';
@@ -31,7 +32,11 @@ Future<void> bootstrap() async {
   await NotificationService.instance.initialize();
 
   FlutterError.onError = (details) {
-    AppLogger.instance.error(details.exception, details.stack);
+    AppLogger.instance.error(
+      'Unhandled Flutter framework error',
+      details.exception,
+      details.stack,
+    );
   };
 
   runZonedGuarded(
@@ -41,6 +46,7 @@ Future<void> bootstrap() async {
         child: const CommsApp(),
       ),
     ),
-    (error, stack) => AppLogger.instance.error(error, stack),
+    (error, stack) =>
+        AppLogger.instance.error('Unhandled zoned runtime error', error, stack),
   );
 }

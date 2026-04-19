@@ -845,7 +845,9 @@ class CallController extends StateNotifier<CallControllerState> {
           ? 'Camera or microphone was not found on this device.'
           : 'Microphone was not found on this device.';
     }
-    if (text.contains('notreadable') || text.contains('track') || text.contains('hardware')) {
+    if (text.contains('notreadable') ||
+        text.contains('track') ||
+        text.contains('hardware')) {
       return 'Media device is busy or unavailable. Close other apps using camera/mic and retry.';
     }
     return 'Call could not start. Please check network and media access, then try again.';

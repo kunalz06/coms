@@ -35,7 +35,7 @@ class AuthHero extends StatelessWidget {
                 title,
                 textAlign: TextAlign.center,
                 style: baseStyle?.copyWith(
-                  color: theme.colorScheme.primary.withOpacity(0.28),
+                  color: theme.colorScheme.primary.withValues(alpha: 0.28),
                 ),
               ),
             ),
@@ -46,7 +46,7 @@ class AuthHero extends StatelessWidget {
                 color: theme.colorScheme.onSurface,
                 shadows: [
                   Shadow(
-                    color: theme.colorScheme.primary.withOpacity(0.35),
+                    color: theme.colorScheme.primary.withValues(alpha: 0.35),
                     offset: const Offset(0.8, 1.0),
                     blurRadius: 0,
                   ),

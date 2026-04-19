@@ -18,7 +18,7 @@ class ChatRepository {
   final SupabaseClient _supabase;
   static const _pollInterval = Duration(seconds: 8);
   static const _maxPollInterval = Duration(seconds: 45);
-  static const _messageWindowSize = 300;
+  static const _messageWindowSize = 150;
 
   Stream<List<Conversation>> watchConversations(String userId) {
     return _resilientStream<List<Conversation>>(
@@ -171,7 +171,8 @@ class ChatRepository {
           .from('messages')
           .stream(primaryKey: ['id'])
           .eq('conversation_id', conversationId)
-          .order('created_at')
+          .order('created_at', ascending: false)
+          .limit(_messageWindowSize)
           .asyncMap((_) => _fetchMessages(conversationId)),
       poll: () => _fetchMessages(conversationId),
       equals: _messageListEquals,
@@ -405,6 +406,23 @@ class ChatRepository {
     });
   }
 
+  Future<void> removeReaction({
+    required String messageId,
+    required String userId,
+    required String content,
+    required String kind,
+  }) async {
+    final trimmed = content.trim();
+    if (trimmed.isEmpty) return;
+    await _supabase
+        .from('message_reactions')
+        .delete()
+        .eq('message_id', messageId)
+        .eq('user_id', userId)
+        .eq('kind', kind)
+        .eq('content', trimmed);
+  }
+
   Future<void> shareMessageToConversation({
     required Message message,
     required String targetConversationId,
@@ -508,9 +526,8 @@ class ChatRepository {
         }
         if (id != null) {
           final avatar = row['avatar_url']?.toString();
-          profileAvatars[id] = (avatar == null || avatar.trim().isEmpty)
-              ? null
-              : avatar.trim();
+          profileAvatars[id] =
+              (avatar == null || avatar.trim().isEmpty) ? null : avatar.trim();
         }
       }
     }

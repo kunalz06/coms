@@ -87,11 +87,12 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
     if (confirmed != true) return;
 
     await _run(() async {
-      final deleted = await ref.read(groupRepositoryProvider).clearGroupMessagesInRange(
-            conversationId: widget.conversationId,
-            startInclusive: startDate,
-            endInclusive: endDate,
-          );
+      final deleted =
+          await ref.read(groupRepositoryProvider).clearGroupMessagesInRange(
+                conversationId: widget.conversationId,
+                startInclusive: startDate,
+                endInclusive: endDate,
+              );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$deleted messages deleted.')),
@@ -302,19 +303,14 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                     OutlinedButton.icon(
                       onPressed: _busy
                           ? null
-                          : () => _run(() async {
-                                final deleted = await ref
+                          : () => _run(
+                                () => ref
                                     .read(groupRepositoryProvider)
                                     .clearGroupMessages(
                                       conversationId: widget.conversationId,
-                                    );
-                                if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('$deleted messages deleted.'),
-                                  ),
-                                );
-                              }),
+                                    ),
+                                message: 'Group messages cleared.',
+                              ),
                       icon: const Icon(Icons.delete_sweep_outlined),
                       label: const Text('Clear all messages'),
                     ),
@@ -327,16 +323,18 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                   OutlinedButton.icon(
                     onPressed: _busy
                         ? null
-                        : () => _run(
+                        : () async {
+                            await _run(
                               () =>
                                   ref.read(groupRepositoryProvider).leaveGroup(
                                         conversationId: widget.conversationId,
                                         userId: me,
                                       ),
                               message: 'You left the group.',
-                            ).then((_) {
-                              if (context.mounted) context.go(AppRoutes.chats);
-                            }),
+                            );
+                            if (!mounted) return;
+                            context.go(AppRoutes.chats);
+                          },
                     icon: const Icon(Icons.logout),
                     label: const Text('Leave group'),
                   ),
@@ -344,18 +342,18 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                     OutlinedButton.icon(
                       onPressed: _busy
                           ? null
-                          : () => _run(
+                          : () async {
+                              await _run(
                                 () => ref
                                     .read(groupRepositoryProvider)
                                     .deleteGroup(
                                       conversationId: widget.conversationId,
                                     ),
                                 message: 'Group deleted.',
-                              ).then((_) {
-                                if (context.mounted) {
-                                  context.go(AppRoutes.chats);
-                                }
-                              }),
+                              );
+                              if (!mounted) return;
+                              context.go(AppRoutes.chats);
+                            },
                       icon: const Icon(Icons.delete_forever_outlined),
                       label: const Text('Delete group'),
                     ),

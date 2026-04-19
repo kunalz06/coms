@@ -439,6 +439,21 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         );
   }
 
+  Future<void> _removeReaction(
+    Message message,
+    String content,
+    String kind,
+  ) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || content.trim().isEmpty) return;
+    await ref.read(chatRepositoryProvider).removeReaction(
+          messageId: message.id,
+          userId: user.uid,
+          content: content,
+          kind: kind,
+        );
+  }
+
   Future<void> _showEditMessageDialog(Message message) async {
     final editor = TextEditingController(text: message.content ?? '');
     final value = await showDialog<String>(
@@ -1093,7 +1108,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   ),
                                 if (resolved.reactions.isNotEmpty) ...[
                                   const SizedBox(height: 8),
-                                  _ReactionSummary(message: resolved),
+                                  _ReactionSummary(
+                                    message: resolved,
+                                    membersById: memberMap,
+                                    currentUserId: userId,
+                                    onRemoveMyReaction: (content, kind) =>
+                                        _removeReaction(
+                                      resolved,
+                                      content,
+                                      kind,
+                                    ),
+                                  ),
                                 ],
                                 const SizedBox(height: 6),
                                 Row(
@@ -1380,9 +1405,17 @@ class _VoicePreviewState extends State<_VoicePreview> {
 }
 
 class _ReactionSummary extends StatelessWidget {
-  const _ReactionSummary({required this.message});
+  const _ReactionSummary({
+    required this.message,
+    required this.membersById,
+    required this.currentUserId,
+    required this.onRemoveMyReaction,
+  });
 
   final Message message;
+  final Map<String, ConversationMember> membersById;
+  final String? currentUserId;
+  final Future<void> Function(String content, String kind) onRemoveMyReaction;
 
   @override
   Widget build(BuildContext context) {
@@ -1391,15 +1424,78 @@ class _ReactionSummary extends StatelessWidget {
       grouped.update(reaction.content, (count) => count + 1, ifAbsent: () => 1);
     }
 
+    Future<void> openReactionsDialog() async {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Reactions'),
+          content: SizedBox(
+            width: 420,
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: message.reactions.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final reaction = message.reactions[index];
+                final profile = membersById[reaction.userId]?.profile;
+                final isMine = currentUserId != null &&
+                    reaction.userId == currentUserId;
+                final userLabel = isMine
+                    ? 'You'
+                    : (profile?.fullName?.trim().isNotEmpty == true
+                        ? profile!.fullName
+                        : (profile?.email?.trim().isNotEmpty == true
+                            ? profile!.email
+                            : reaction.userId));
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Text(
+                    reaction.content,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  title: Text(userLabel),
+                  subtitle: Text(reaction.kind),
+                  trailing: isMine
+                      ? TextButton.icon(
+                          onPressed: () async {
+                            await onRemoveMyReaction(
+                              reaction.content,
+                              reaction.kind,
+                            );
+                            if (dialogContext.mounted) {
+                              Navigator.of(dialogContext).pop();
+                            }
+                          },
+                          icon: const Icon(Icons.close, size: 16),
+                          label: const Text('Remove'),
+                        )
+                      : null,
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              icon: const Icon(Icons.close),
+              label: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Wrap(
       spacing: 4,
       runSpacing: 4,
       children: grouped.entries
           .map(
-            (entry) => Chip(
+            (entry) => ActionChip(
               visualDensity: VisualDensity.compact,
+              onPressed: openReactionsDialog,
               label: Text(
-                  entry.value > 1 ? '${entry.key} ${entry.value}' : entry.key),
+                entry.value > 1 ? '${entry.key} ${entry.value}' : entry.key,
+              ),
             ),
           )
           .toList(growable: false),
