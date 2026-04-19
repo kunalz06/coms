@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import '../../chats/data/chat_repository.dart';
+import '../../../shared/models/conversation_member.dart';
 import '../data/call_controller.dart';
 import '../domain/call_models.dart';
 import '../domain/call_state.dart';
@@ -43,6 +45,10 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
     final call = ref.watch(callControllerProvider);
     final user = FirebaseAuth.instance.currentUser;
     if (!_ready || user == null) return const SizedBox.shrink();
+    final memberItems = call.conversationId == null
+        ? const <ConversationMember>[]
+        : (ref.watch(_groupMembersProvider(call.conversationId!)).valueOrNull ??
+            const <ConversationMember>[]);
 
     _localRenderer.srcObject = call.localStream;
     final primaryRemoteStream = call.isGroupCall
@@ -62,6 +68,20 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
             : call.remoteStream == null
                 ? 0
                 : 1);
+    final myRole = memberItems
+        .firstWhere(
+          (member) => member.userId == user.uid,
+          orElse: () => ConversationMember(
+            id: 'unknown',
+            conversationId: call.conversationId ?? '',
+            userId: user.uid,
+            role: 'member',
+            joinedAt: DateTime.fromMillisecondsSinceEpoch(0),
+          ),
+        )
+        .role;
+    final canEndGroupCall = call.isGroupCall &&
+        (myRole == 'owner' || myRole == 'admin' || call.peerId == user.uid);
 
     return Material(
       color: Theme.of(context).colorScheme.surface,
@@ -180,6 +200,17 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                         .read(callControllerProvider.notifier)
                         .end(currentUserId: user.uid),
                   ),
+                  if (canEndGroupCall)
+                    _RoundCallButton(
+                      icon: Icons.stop_circle_outlined,
+                      label: 'End for all',
+                      color: Theme.of(context).colorScheme.error,
+                      onPressed: () =>
+                          ref.read(callControllerProvider.notifier).end(
+                                currentUserId: user.uid,
+                                endForEveryone: true,
+                              ),
+                    ),
                 ],
               ),
             ),
@@ -289,3 +320,8 @@ class _RoundCallButton extends StatelessWidget {
     );
   }
 }
+
+final _groupMembersProvider =
+    StreamProvider.family((ref, String conversationId) {
+  return ref.watch(chatRepositoryProvider).watchMembers(conversationId);
+});

@@ -731,9 +731,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         : {
             for (final member in members.valueOrNull!) member.userId: member,
           };
+    final memberItems = members.valueOrNull ?? const <ConversationMember>[];
     final currentConversation = conversation.valueOrNull;
     ConversationMember? otherMember;
-    for (final member in members.valueOrNull ?? const <ConversationMember>[]) {
+    for (final member in memberItems) {
       if (member.userId != userId) {
         otherMember = member;
         break;
@@ -746,7 +747,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final otherUserId = otherMember?.userId ?? fallbackPeerId;
     final canStartCall =
         currentConversation?.isGroup == true || otherUserId != null;
-    final myRole = (members.valueOrNull ?? const <ConversationMember>[])
+    final myRole = memberItems
         .firstWhere(
           (member) => member.userId == userId,
           orElse: () => ConversationMember(
@@ -768,53 +769,29 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           error: (_, __) => const Text('Conversation'),
         ),
         actions: [
-          if (currentConversation?.isGroup == true)
-            IconButton(
-              onPressed: () => context.go(
-                AppRoutes.conversationInfo.replaceFirst(
-                  ':conversationId',
-                  widget.conversationId,
-                ),
-              ),
-              icon: const Icon(Icons.info_outline),
-              tooltip: 'Group info',
-            ),
-          if (currentConversation?.isDirect == true && otherUserId != null)
-            PopupMenuButton<String>(
-              enabled: !_contactActionRunning,
-              tooltip: 'Contact actions',
-              onSelected: (value) {
-                switch (value) {
-                  case 'delete':
-                    _deleteFriend(otherUserId);
-                    return;
-                  case 'block':
-                    _blockUser(otherUserId);
-                    return;
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: 'delete',
-                  child: _MenuItemLabel(
-                    icon: Icons.person_remove_outlined,
-                    label: 'Delete friend',
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'block',
-                  child: _MenuItemLabel(
-                    icon: Icons.block_outlined,
-                    label: 'Block contact',
-                  ),
-                ),
-              ],
-            ),
           PopupMenuButton<String>(
+            enabled: !_contactActionRunning,
             tooltip: 'Conversation options',
             onSelected: (value) async {
               final controller = ref.read(privacyControllerProvider.notifier);
               switch (value) {
+                case 'group_info':
+                  if (!context.mounted) break;
+                  context.go(
+                    AppRoutes.conversationInfo.replaceFirst(
+                      ':conversationId',
+                      widget.conversationId,
+                    ),
+                  );
+                  break;
+                case 'delete':
+                  if (otherUserId == null) break;
+                  _deleteFriend(otherUserId);
+                  break;
+                case 'block':
+                  if (otherUserId == null) break;
+                  _blockUser(otherUserId);
+                  break;
                 case 'lock':
                   await controller.setConversationLocked(
                     conversationId: widget.conversationId,
@@ -895,6 +872,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               final hidden =
                   privacy.hiddenConversationIds.contains(widget.conversationId);
               return [
+                if (currentConversation?.isGroup == true)
+                  const PopupMenuItem(
+                    value: 'group_info',
+                    child: _MenuItemLabel(
+                      icon: Icons.info_outline,
+                      label: 'Group info',
+                    ),
+                  ),
                 PopupMenuItem(
                   value: locked ? 'unlock' : 'lock',
                   child: _MenuItemLabel(
@@ -942,6 +927,24 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     child: _MenuItemLabel(
                       icon: Icons.delete_sweep_outlined,
                       label: 'Clear messages for everyone',
+                    ),
+                  ),
+                if (currentConversation?.isDirect == true &&
+                    otherUserId != null)
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: _MenuItemLabel(
+                      icon: Icons.person_remove_outlined,
+                      label: 'Delete friend',
+                    ),
+                  ),
+                if (currentConversation?.isDirect == true &&
+                    otherUserId != null)
+                  const PopupMenuItem(
+                    value: 'block',
+                    child: _MenuItemLabel(
+                      icon: Icons.block_outlined,
+                      label: 'Block contact',
                     ),
                   ),
               ];
@@ -1091,74 +1094,87 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   const SizedBox(height: 8),
                                   _ReactionSummary(message: resolved),
                                 ],
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: PopupMenuButton<String>(
-                                    tooltip: 'Message actions',
-                                    onSelected: (action) =>
-                                        _handleMessageAction(
-                                      message: resolved,
-                                      mine: mine,
-                                      action: action,
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        mine
+                                            ? '${_formatMessageTime(resolved.createdAt)} • ${_messageStatusLabel(message: resolved, memberItems: memberItems, currentUserId: userId, isGroup: currentConversation?.isGroup == true)}'
+                                            : _formatMessageTime(
+                                                resolved.createdAt),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall,
+                                      ),
                                     ),
-                                    itemBuilder: (context) => [
-                                      const PopupMenuItem(
-                                        value: 'react',
-                                        child: _MenuItemLabel(
-                                          icon: Icons.emoji_emotions_outlined,
-                                          label: 'React',
-                                        ),
+                                    PopupMenuButton<String>(
+                                      tooltip: 'Message actions',
+                                      onSelected: (action) =>
+                                          _handleMessageAction(
+                                        message: resolved,
+                                        mine: mine,
+                                        action: action,
                                       ),
-                                      const PopupMenuItem(
-                                        value: 'share',
-                                        child: _MenuItemLabel(
-                                          icon: Icons.share_outlined,
-                                          label: 'Share',
-                                        ),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'share_external',
-                                        child: _MenuItemLabel(
-                                          icon: Icons.open_in_new,
-                                          label: 'Share externally',
-                                        ),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'copy',
-                                        child: _MenuItemLabel(
-                                          icon: Icons.copy_outlined,
-                                          label: 'Copy text',
-                                        ),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'delete_me',
-                                        child: _MenuItemLabel(
-                                          icon: Icons.delete_outline,
-                                          label: 'Delete for me',
-                                        ),
-                                      ),
-                                      if (mine &&
-                                          resolved.kind == 'text' &&
-                                          !resolved.isDeletedForEveryone)
+                                      itemBuilder: (context) => [
                                         const PopupMenuItem(
-                                          value: 'edit',
+                                          value: 'react',
                                           child: _MenuItemLabel(
-                                            icon: Icons.edit_outlined,
-                                            label: 'Edit',
+                                            icon: Icons.emoji_emotions_outlined,
+                                            label: 'React',
                                           ),
                                         ),
-                                      if (mine &&
-                                          !resolved.isDeletedForEveryone)
                                         const PopupMenuItem(
-                                          value: 'delete_everyone',
+                                          value: 'share',
                                           child: _MenuItemLabel(
-                                            icon: Icons.delete_sweep_outlined,
-                                            label: 'Delete for everyone',
+                                            icon: Icons.share_outlined,
+                                            label: 'Share',
                                           ),
                                         ),
-                                    ],
-                                  ),
-                                )
+                                        const PopupMenuItem(
+                                          value: 'share_external',
+                                          child: _MenuItemLabel(
+                                            icon: Icons.open_in_new,
+                                            label: 'Share externally',
+                                          ),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'copy',
+                                          child: _MenuItemLabel(
+                                            icon: Icons.copy_outlined,
+                                            label: 'Copy text',
+                                          ),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'delete_me',
+                                          child: _MenuItemLabel(
+                                            icon: Icons.delete_outline,
+                                            label: 'Delete for me',
+                                          ),
+                                        ),
+                                        if (mine &&
+                                            resolved.kind == 'text' &&
+                                            !resolved.isDeletedForEveryone)
+                                          const PopupMenuItem(
+                                            value: 'edit',
+                                            child: _MenuItemLabel(
+                                              icon: Icons.edit_outlined,
+                                              label: 'Edit',
+                                            ),
+                                          ),
+                                        if (mine &&
+                                            !resolved.isDeletedForEveryone)
+                                          const PopupMenuItem(
+                                            value: 'delete_everyone',
+                                            child: _MenuItemLabel(
+                                              icon: Icons.delete_sweep_outlined,
+                                              label: 'Delete for everyone',
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                               ],
                             ),
                           ),
@@ -1241,6 +1257,34 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         ],
       ),
     );
+  }
+
+  String _formatMessageTime(DateTime dateTime) {
+    final local = dateTime.toLocal();
+    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final suffix = local.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $suffix';
+  }
+
+  String _messageStatusLabel({
+    required Message message,
+    required List<ConversationMember> memberItems,
+    required String? currentUserId,
+    required bool isGroup,
+  }) {
+    if (currentUserId == null) return 'Sent';
+    final others =
+        memberItems.where((member) => member.userId != currentUserId).toList();
+    if (others.isEmpty) return 'Sent';
+    final isRead = others.every((member) {
+      final readAt = member.lastReadAt;
+      if (readAt == null) return false;
+      return !readAt.isBefore(message.createdAt);
+    });
+    if (!isRead) return 'Sent';
+    if (!isGroup) return 'Read';
+    return others.length == 1 ? 'Read' : 'Read by ${others.length}';
   }
 }
 

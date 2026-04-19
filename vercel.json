@@ -5,13 +5,10 @@
   "outputDirectory": "clients/comms_flutter/build/web",
   "cleanUrls": true,
   "trailingSlash": false,
-  "routes": [
+  "rewrites": [
     {
-      "handle": "filesystem"
+      "source": "/:path*",
+      "destination": "/index.html"
     },
-    {
-      "src": "/.*",
-      "dest": "/index.html"
-    }
   ]
 }

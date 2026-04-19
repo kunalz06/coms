@@ -9,6 +9,7 @@ export async function GET(request: Request) {
   const state = url.searchParams.get("state");
   const error = url.searchParams.get("error");
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? url.origin).replace(/\/$/, "");
+  const backupRoute = `${appUrl}/settings/backup`;
 
   try {
     if (error) throw new Error(error === "access_denied" ? "Google Drive connection was cancelled." : error);
@@ -18,9 +19,9 @@ export async function GET(request: Request) {
       origin: url.origin,
     });
     await saveGoogleDriveConnection(createServiceSupabase(), userId, connection);
-    return NextResponse.redirect(`${appUrl}/app?backup=connected`);
+    return NextResponse.redirect(`${backupRoute}?backup=connected`);
   } catch (caught) {
     const message = encodeURIComponent(caught instanceof Error ? caught.message : "Google Drive connection failed.");
-    return NextResponse.redirect(`${appUrl}/app?backup=failed&message=${message}`);
+    return NextResponse.redirect(`${backupRoute}?backup=failed&message=${message}`);
   }
 }

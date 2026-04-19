@@ -320,6 +320,9 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                               if (canManage && member.userId != me) ...[
                                 PopupMenuButton<String>(
                                   onSelected: (value) {
+                                    final canManageTarget =
+                                        member.role != 'owner';
+                                    if (!canManageTarget) return;
                                     if (value == 'make_admin') {
                                       _run(
                                         () => ref
@@ -358,8 +361,8 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                     }
                                   },
                                   itemBuilder: (context) => [
-                                    if (member.role != 'admin' &&
-                                        member.role != 'owner')
+                                    if (member.role != 'owner' &&
+                                        member.role != 'admin')
                                       const PopupMenuItem(
                                         value: 'make_admin',
                                         child: Text('Make admin'),
@@ -369,10 +372,11 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                         value: 'make_member',
                                         child: Text('Make member'),
                                       ),
-                                    const PopupMenuItem(
-                                      value: 'remove',
-                                      child: Text('Remove member'),
-                                    ),
+                                    if (member.role != 'owner')
+                                      const PopupMenuItem(
+                                        value: 'remove',
+                                        child: Text('Remove member'),
+                                      ),
                                   ],
                                 ),
                               ],

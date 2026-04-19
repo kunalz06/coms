@@ -273,17 +273,24 @@ class CallController extends StateNotifier<CallControllerState> {
   Future<void> end({
     required String currentUserId,
     String reason = 'ended',
+    bool endForEveryone = false,
   }) async {
     final callId = state.activeCallId;
     final peerId = state.peerId;
     if (!state.isGroupCall && (callId == null || peerId == null)) return;
     _signaling.send(
       state.isGroupCall
-          ? CallSignal(
-              type: 'group-call-leave',
-              from: currentUserId,
-              conversationId: state.conversationId,
-            )
+          ? (endForEveryone
+              ? CallSignal(
+                  type: 'group-call-end',
+                  from: currentUserId,
+                  conversationId: state.conversationId,
+                )
+              : CallSignal(
+                  type: 'group-call-leave',
+                  from: currentUserId,
+                  conversationId: state.conversationId,
+                ))
           : CallSignal(
               type: 'call-end',
               callId: callId,
@@ -292,10 +299,12 @@ class CallController extends StateNotifier<CallControllerState> {
               reason: reason,
             ),
     );
-    await _disposeActiveCall();
-    _ringTimer?.cancel();
-    _connectionTimer?.cancel();
-    _transition(CommsCallStatus.ended, clearCall: true);
+    if (!state.isGroupCall || !endForEveryone) {
+      await _disposeActiveCall();
+      _ringTimer?.cancel();
+      _connectionTimer?.cancel();
+      _transition(CommsCallStatus.ended, clearCall: true);
+    }
   }
 
   void toggleMicrophone() {
@@ -477,21 +486,36 @@ class CallController extends StateNotifier<CallControllerState> {
 
     if (signal.type == 'group-call-response') {
       if (signal.raw['ok'] != true) {
-        _transition(
-          CommsCallStatus.failed,
-          error: signal.raw['error']?.toString(),
-          clearCall: true,
-        );
+        final canFailCall = state.status == CommsCallStatus.connecting ||
+            state.status == CommsCallStatus.acquiringMedia ||
+            state.status == CommsCallStatus.incomingRinging ||
+            state.status == CommsCallStatus.outgoingRinging;
+        if (canFailCall) {
+          _transition(
+            CommsCallStatus.failed,
+            error: signal.raw['error']?.toString(),
+            clearCall: true,
+          );
+        } else {
+          state = state.copyWith(error: signal.raw['error']?.toString());
+        }
         return;
       }
       final data = signal.raw['data'];
+      String? hostId;
+      if (data is Map) {
+        final rawHost = data['hostId'];
+        if (rawHost is String && rawHost.trim().isNotEmpty) {
+          hostId = rawHost;
+        }
+      }
       final participantIds = data is Map ? data['participantIds'] : null;
       if (participantIds is List) {
         for (final participantId in participantIds.whereType<String>()) {
           await _sendGroupOffer(userId, participantId);
         }
       }
-      _transition(CommsCallStatus.connected);
+      _transition(CommsCallStatus.connected, peerId: hostId);
       _connectionTimer?.cancel();
       return;
     }
