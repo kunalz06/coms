@@ -1,4 +1,5 @@
 class AppRoutes {
+  static const legacyApp = '/app';
   static const login = '/login';
   static const register = '/register';
   static const resetPassword = '/reset-password';

@@ -52,6 +52,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: AppRoutes.resetPassword,
           builder: (context, state) => const ResetPasswordScreen()),
+      GoRoute(
+        path: AppRoutes.legacyApp,
+        redirect: (context, state) {
+          final backup = state.uri.queryParameters['backup'];
+          final message = state.uri.queryParameters['message'];
+          if (backup != null && backup.isNotEmpty) {
+            final next = Uri(
+              path: AppRoutes.backup,
+              queryParameters: {
+                'backup': backup,
+                if (message != null && message.isNotEmpty) 'message': message,
+              },
+            );
+            return next.toString();
+          }
+          return AppRoutes.chats;
+        },
+      ),
       ShellRoute(
         navigatorKey: _shellNavigatorKey,
         builder: (context, state, child) =>

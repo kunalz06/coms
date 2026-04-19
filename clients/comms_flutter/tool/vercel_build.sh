@@ -38,4 +38,4 @@ if [ ! -f "env/flutter.web.vercel.json" ]; then
   exit 1
 fi
 
-flutter build web --release --dart-define-from-file=env/flutter.web.vercel.json
+flutter build web --release --pwa-strategy=none --dart-define-from-file=env/flutter.web.vercel.json
