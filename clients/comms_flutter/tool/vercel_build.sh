@@ -33,9 +33,9 @@ flutter config --enable-web
 cd "$FLUTTER_DIR"
 flutter pub get
 
-if [ ! -f "env/vercel.json" ]; then
-  echo "Missing clients/comms_flutter/env/vercel.json"
+if [ ! -f "env/flutter.web.vercel.json" ]; then
+  echo "Missing clients/comms_flutter/env/flutter.web.vercel.json"
   exit 1
 fi
 
-flutter build web --release --dart-define-from-file=env/vercel.json
+flutter build web --release --dart-define-from-file=env/flutter.web.vercel.json
