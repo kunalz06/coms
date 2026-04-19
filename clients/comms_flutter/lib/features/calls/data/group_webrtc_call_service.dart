@@ -22,17 +22,27 @@ class GroupWebRtcCallService {
 
   Future<MediaStream> acquireMedia(CallMode mode) async {
     if (_localStream != null) return _localStream!;
-    _localStream = await navigator.mediaDevices.getUserMedia({
-      'audio': true,
-      'video': mode == CallMode.video
-          ? {
-              'facingMode': 'user',
-              'width': {'ideal': 960},
-              'height': {'ideal': 540},
-            }
-          : false,
-    });
-    return _localStream!;
+    try {
+      _localStream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': mode == CallMode.video
+            ? {
+                'facingMode': 'user',
+                'width': {'ideal': 960},
+                'height': {'ideal': 540},
+              }
+            : false,
+      });
+      return _localStream!;
+    } catch (_) {
+      if (mode != CallMode.video) rethrow;
+      // Group call fallback: start/join as audio when camera can't be acquired.
+      _localStream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': false,
+      });
+      return _localStream!;
+    }
   }
 
   Future<RTCPeerConnection> ensurePeer({

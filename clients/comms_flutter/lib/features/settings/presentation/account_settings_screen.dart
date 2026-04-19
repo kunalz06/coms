@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../features/auth/data/auth_repository.dart';
 import '../../../features/uploads/data/cloudinary_upload_service.dart';
+import '../../../shared/widgets/comms_avatar.dart';
 import '../../../shared/widgets/state_views.dart';
 
 class AccountSettingsScreen extends ConsumerStatefulWidget {
@@ -105,6 +106,7 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
       type: FileType.image,
       allowMultiple: false,
       withData: true,
+      withReadStream: true,
     );
     final file = picked?.files.single;
     if (file == null) return;
@@ -148,6 +150,16 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
+          ListTile(
+            leading: CommsAvatar(
+              name: user.displayName ?? user.email ?? 'COMMS user',
+              imageUrl: user.photoURL,
+              radius: 24,
+            ),
+            title: Text(user.displayName ?? 'COMMS user'),
+            subtitle: Text(user.email ?? ''),
+          ),
+          const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.alternate_email),
             title: const Text('Email'),

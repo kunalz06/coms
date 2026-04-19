@@ -480,6 +480,7 @@ class ChatRepository {
     }
 
     final profileNames = <String, String>{};
+    final profileAvatars = <String, String?>{};
     final directPeerIds = rawConversations
         .where((conversation) => conversation.isDirect)
         .map((conversation) => conversation.userOneId == userId
@@ -492,7 +493,7 @@ class ChatRepository {
       final profileRows = await _withTransientRetry(
         () => _supabase
             .from('user_profiles')
-            .select('id,full_name')
+            .select('id,full_name,avatar_url')
             .inFilter('id', directPeerIds),
       );
       for (final row in profileRows) {
@@ -500,6 +501,12 @@ class ChatRepository {
         final fullName = row['full_name']?.toString();
         if (id != null && fullName != null && fullName.trim().isNotEmpty) {
           profileNames[id] = fullName.trim();
+        }
+        if (id != null) {
+          final avatar = row['avatar_url']?.toString();
+          profileAvatars[id] = (avatar == null || avatar.trim().isEmpty)
+              ? null
+              : avatar.trim();
         }
       }
     }
@@ -512,13 +519,16 @@ class ChatRepository {
       final resolvedTitle = peerId == null
           ? (conversation.title ?? 'Direct chat')
           : (profileNames[peerId] ?? conversation.title ?? 'Direct chat');
+      final resolvedAvatar = peerId == null
+          ? conversation.avatarUrl
+          : (profileAvatars[peerId] ?? conversation.avatarUrl);
       return Conversation(
         id: conversation.id,
         type: conversation.type,
         createdAt: conversation.createdAt,
         updatedAt: conversation.updatedAt,
         title: resolvedTitle,
-        avatarUrl: conversation.avatarUrl,
+        avatarUrl: resolvedAvatar,
         createdBy: conversation.createdBy,
         userOneId: conversation.userOneId,
         userTwoId: conversation.userTwoId,

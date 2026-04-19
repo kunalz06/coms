@@ -45,6 +45,57 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
     }
   }
 
+  Future<void> _clearMessagesByRange() async {
+    final now = DateTime.now();
+    final startDate = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: now,
+      initialDate: now.subtract(const Duration(days: 7)),
+      helpText: 'Select start date',
+    );
+    if (!mounted || startDate == null) return;
+
+    final endDate = await showDatePicker(
+      context: context,
+      firstDate: startDate,
+      lastDate: now,
+      initialDate: now,
+      helpText: 'Select end date',
+    );
+    if (!mounted || endDate == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear messages in date range?'),
+        content: Text(
+          'All group messages from ${startDate.toLocal().toString().split(' ').first} to ${endDate.toLocal().toString().split(' ').first} will be cleared for everyone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await _run(
+      () => ref.read(groupRepositoryProvider).clearGroupMessagesInRange(
+            conversationId: widget.conversationId,
+            startInclusive: startDate,
+            endInclusive: endDate,
+          ),
+      message: 'Group messages cleared in selected date range.',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final me = FirebaseAuth.instance.currentUser?.uid;
@@ -257,7 +308,13 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                 message: 'Group messages cleared.',
                               ),
                       icon: const Icon(Icons.delete_sweep_outlined),
-                      label: const Text('Clear messages'),
+                      label: const Text('Clear all messages'),
+                    ),
+                  if (canManage)
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _clearMessagesByRange,
+                      icon: const Icon(Icons.date_range_outlined),
+                      label: const Text('Clear by date range'),
                     ),
                   OutlinedButton.icon(
                     onPressed: _busy

@@ -501,6 +501,45 @@ as $$
   )
 $$;
 
+create or replace function user_can_view_profile(target_user_id text, viewer_user_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    target_user_id = viewer_user_id
+    or exists (
+      select 1
+      from friendships
+      where status = 'accepted'
+        and (
+          (requester_id = viewer_user_id and addressee_id = target_user_id)
+          or
+          (requester_id = target_user_id and addressee_id = viewer_user_id)
+        )
+    )
+    or exists (
+      select 1
+      from conversations c
+      where c.type = 'direct'
+        and (
+          (c.user_one_id = viewer_user_id and c.user_two_id = target_user_id)
+          or
+          (c.user_one_id = target_user_id and c.user_two_id = viewer_user_id)
+        )
+    )
+    or exists (
+      select 1
+      from conversation_members me
+      join conversation_members them
+        on them.conversation_id = me.conversation_id
+      where me.user_id = viewer_user_id
+        and them.user_id = target_user_id
+    )
+$$;
+
 create or replace function get_or_create_direct_conversation(other_user_id text)
 returns conversations
 language plpgsql
@@ -509,8 +548,8 @@ set search_path = public
 as $$
 declare
   current_user_id text := app_user_id();
-  existing_conversation conversations;
-  created_conversation conversations;
+  existing_conversation_id conversations.id%TYPE;
+  created_conversation conversations%ROWTYPE;
 begin
   if current_user_id is null then
     raise exception 'Not authenticated.' using errcode = '42501';
@@ -528,8 +567,8 @@ begin
     raise exception 'This contact is blocked.' using errcode = '42501';
   end if;
 
-  select *
-  into existing_conversation
+  select id
+  into existing_conversation_id
   from conversations
   where type = 'direct'
     and (
@@ -539,8 +578,12 @@ begin
     )
   limit 1;
 
-  if existing_conversation.id is not null then
-    return existing_conversation;
+  if existing_conversation_id is not null then
+    return (
+      select c
+      from conversations c
+      where c.id = existing_conversation_id
+    );
   end if;
 
   begin
@@ -549,8 +592,8 @@ begin
     returning * into created_conversation;
     return created_conversation;
   exception when unique_violation then
-    select *
-    into existing_conversation
+    select id
+    into existing_conversation_id
     from conversations
     where type = 'direct'
       and (
@@ -560,8 +603,12 @@ begin
       )
     limit 1;
 
-    if existing_conversation.id is not null then
-      return existing_conversation;
+    if existing_conversation_id is not null then
+      return (
+        select c
+        from conversations c
+        where c.id = existing_conversation_id
+      );
     end if;
 
     raise;
@@ -594,7 +641,10 @@ alter table presence_events enable row level security;
 
 drop policy if exists "profiles are searchable" on user_profiles;
 create policy "profiles are searchable" on user_profiles
-for select using (app_user_id() is not null);
+for select using (
+  app_user_id() is not null
+  and user_can_view_profile(id, app_user_id())
+);
 
 drop policy if exists "users insert own profile" on user_profiles;
 create policy "users insert own profile" on user_profiles

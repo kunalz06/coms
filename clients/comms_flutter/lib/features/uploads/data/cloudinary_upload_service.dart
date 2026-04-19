@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -33,7 +34,7 @@ class CloudinaryUploadService {
     required String kind,
     required void Function(int progress) onProgress,
   }) async {
-    final bytes = file.bytes;
+    final bytes = await _readFileBytes(file);
     if (bytes == null) {
       throw const FormatException('Could not read this file on this platform.');
     }
@@ -48,6 +49,27 @@ class CloudinaryUploadService {
       mimeType: _mimeTypeFor(file.name, kind),
       onProgress: onProgress,
     );
+  }
+
+  Future<Uint8List?> _readFileBytes(PlatformFile file) async {
+    final directBytes = file.bytes;
+    if (directBytes != null && directBytes.isNotEmpty) {
+      return directBytes;
+    }
+
+    final stream = file.readStream;
+    if (stream != null) {
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in stream) {
+        if (chunk.isNotEmpty) builder.add(chunk);
+      }
+      final streamedBytes = builder.takeBytes();
+      if (streamedBytes.isNotEmpty) {
+        return streamedBytes;
+      }
+    }
+
+    return directBytes;
   }
 
   Future<AttachmentDraft> uploadBytes({

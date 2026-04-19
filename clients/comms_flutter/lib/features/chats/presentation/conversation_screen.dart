@@ -222,6 +222,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           kind == 'image' ? null : const ['pdf', 'doc', 'docx', 'txt'],
       allowMultiple: false,
       withData: true,
+      withReadStream: true,
     );
     final file = result?.files.single;
     if (file == null) return;

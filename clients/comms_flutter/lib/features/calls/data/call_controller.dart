@@ -166,7 +166,7 @@ class CallController extends StateNotifier<CallControllerState> {
       final stream = await _groupWebRtc.acquireMedia(mode);
       state = state.copyWith(
         localStream: stream,
-        cameraEnabled: mode == CallMode.video,
+        cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
         isGroupCall: true,
       );
@@ -211,7 +211,7 @@ class CallController extends StateNotifier<CallControllerState> {
       final stream = await _groupWebRtc.acquireMedia(state.mode);
       state = state.copyWith(
         localStream: stream,
-        cameraEnabled: state.mode == CallMode.video,
+        cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
         isGroupCall: true,
       );
@@ -336,7 +336,7 @@ class CallController extends StateNotifier<CallControllerState> {
       final stream = await _webRtc.acquireMedia(state.mode);
       state = state.copyWith(
         localStream: stream,
-        cameraEnabled: state.mode == CallMode.video,
+        cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
       );
       _transition(CommsCallStatus.connecting);
@@ -612,7 +612,7 @@ class CallController extends StateNotifier<CallControllerState> {
     final stream = await _groupWebRtc.acquireMedia(state.mode);
     state = state.copyWith(
       localStream: stream,
-      cameraEnabled: state.mode == CallMode.video,
+      cameraEnabled: stream.getVideoTracks().isNotEmpty,
       microphoneEnabled: true,
       isGroupCall: true,
     );
@@ -649,7 +649,7 @@ class CallController extends StateNotifier<CallControllerState> {
     final stream = await _webRtc.acquireMedia(state.mode);
     state = state.copyWith(
       localStream: stream,
-      cameraEnabled: state.mode == CallMode.video,
+      cameraEnabled: stream.getVideoTracks().isNotEmpty,
       microphoneEnabled: true,
     );
     await _preparePeer(currentUserId: signal.to!, peerId: peerId);
@@ -678,7 +678,7 @@ class CallController extends StateNotifier<CallControllerState> {
       final stream = await _webRtc.acquireMedia(state.mode);
       state = state.copyWith(
         localStream: stream,
-        cameraEnabled: state.mode == CallMode.video,
+        cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
       );
     }
@@ -738,12 +738,15 @@ class CallController extends StateNotifier<CallControllerState> {
     bool clearCall = false,
   }) {
     if (!canTransitionCall(state.status, status)) return;
-    if (status == CommsCallStatus.connecting) {
+    final nextIsGroupCall =
+        clearCall ? false : (isGroupCall ?? state.isGroupCall);
+    if (status == CommsCallStatus.connecting && !nextIsGroupCall) {
       _startConnectionTimeout();
     }
     if (status == CommsCallStatus.connected ||
         status == CommsCallStatus.ended ||
-        status == CommsCallStatus.failed) {
+        status == CommsCallStatus.failed ||
+        nextIsGroupCall) {
       _connectionTimer?.cancel();
     }
     state = state.copyWith(
@@ -753,7 +756,7 @@ class CallController extends StateNotifier<CallControllerState> {
       conversationId: conversationId,
       mode: mode,
       error: error,
-      isGroupCall: isGroupCall,
+      isGroupCall: nextIsGroupCall,
       clearCall: clearCall,
     );
   }

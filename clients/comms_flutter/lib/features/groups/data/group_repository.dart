@@ -159,6 +159,39 @@ class GroupRepository {
     }).eq('conversation_id', conversationId);
   }
 
+  Future<void> clearGroupMessagesInRange({
+    required String conversationId,
+    required DateTime startInclusive,
+    required DateTime endInclusive,
+  }) async {
+    final start = DateTime(
+      startInclusive.year,
+      startInclusive.month,
+      startInclusive.day,
+    ).toUtc();
+    final end = DateTime(
+      endInclusive.year,
+      endInclusive.month,
+      endInclusive.day,
+      23,
+      59,
+      59,
+      999,
+    ).toUtc();
+    if (end.isBefore(start)) {
+      throw const FormatException('End date cannot be before start date.');
+    }
+
+    await _supabase
+        .from('messages')
+        .update({
+          'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('conversation_id', conversationId)
+        .gte('created_at', start.toIso8601String())
+        .lte('created_at', end.toIso8601String());
+  }
+
   Future<void> deleteGroup({
     required String conversationId,
   }) async {

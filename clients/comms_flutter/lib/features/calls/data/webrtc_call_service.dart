@@ -19,18 +19,29 @@ class WebRtcCallService {
 
   Future<MediaStream> acquireMedia(CallMode mode) async {
     _localStream?.getTracks().forEach((track) => track.stop());
-    final stream = await navigator.mediaDevices.getUserMedia({
-      'audio': true,
-      'video': mode == CallMode.video
-          ? {
-              'facingMode': 'user',
-              'width': {'ideal': 1280},
-              'height': {'ideal': 720},
-            }
-          : false,
-    });
-    _localStream = stream;
-    return stream;
+    try {
+      final stream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': mode == CallMode.video
+            ? {
+                'facingMode': 'user',
+                'width': {'ideal': 1280},
+                'height': {'ideal': 720},
+              }
+            : false,
+      });
+      _localStream = stream;
+      return stream;
+    } catch (_) {
+      if (mode != CallMode.video) rethrow;
+      // Fallback: keep the call alive as audio-only when camera access fails.
+      final stream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': false,
+      });
+      _localStream = stream;
+      return stream;
+    }
   }
 
   Future<RTCPeerConnection> ensurePeer({

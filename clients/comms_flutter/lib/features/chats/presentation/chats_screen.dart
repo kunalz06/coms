@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../core/responsive/breakpoints.dart';
+import '../../../shared/widgets/comms_avatar.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../contacts/presentation/add_contact_sheet.dart';
 import '../../contacts/data/contact_repository.dart';
@@ -118,10 +119,13 @@ class ChatsScreen extends ConsumerWidget {
                         ));
                         final hasUnread = unreadIds.contains(conversation.id);
                         return ListTile(
-                          leading: CircleAvatar(
-                              child: Icon(conversation.isGroup
-                                  ? Icons.groups
-                                  : Icons.person)),
+                          leading: CommsAvatar(
+                            name: conversation.title ??
+                                (conversation.isGroup
+                                    ? 'Group'
+                                    : 'Direct chat'),
+                            imageUrl: conversation.avatarUrl,
+                          ),
                           title: Text(conversation.title ?? 'Direct chat'),
                           subtitle: Text(conversation.isGroup
                               ? 'Group conversation'
