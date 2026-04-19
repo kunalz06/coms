@@ -18,6 +18,7 @@ class ChatRepository {
   final SupabaseClient _supabase;
   static const _pollInterval = Duration(seconds: 8);
   static const _maxPollInterval = Duration(seconds: 45);
+  static const _messageWindowSize = 300;
 
   Stream<List<Conversation>> watchConversations(String userId) {
     return _resilientStream<List<Conversation>>(
@@ -137,27 +138,30 @@ class ChatRepository {
       conversation.userTwoId,
     ].whereType<String>().toList(growable: false);
 
-    final members = <ConversationMember>[];
-    for (final userId in userIds) {
-      final profileData = await _supabase
+    final profilesById = <String, UserProfile>{};
+    if (userIds.isNotEmpty) {
+      final profileRows = await _supabase
           .from('user_profiles')
           .select()
-          .eq('id', userId)
-          .maybeSingle();
-      final profile = profileData == null
-          ? null
-          : UserProfile.fromJson(Map<String, dynamic>.from(profileData));
-      members.add(
-        ConversationMember(
-          id: '$conversationId-$userId',
-          conversationId: conversationId,
-          userId: userId,
-          role: 'member',
-          joinedAt: conversation.createdAt,
-          profile: profile,
-        ),
-      );
+          .inFilter('id', userIds);
+      for (final row in profileRows) {
+        final profile = UserProfile.fromJson(Map<String, dynamic>.from(row));
+        profilesById[profile.id] = profile;
+      }
     }
+
+    final members = userIds
+        .map(
+          (userId) => ConversationMember(
+            id: '$conversationId-$userId',
+            conversationId: conversationId,
+            userId: userId,
+            role: 'member',
+            joinedAt: conversation.createdAt,
+            profile: profilesById[userId],
+          ),
+        )
+        .toList(growable: false);
     return members;
   }
 
@@ -542,10 +546,8 @@ class ChatRepository {
   }
 
   Future<Set<String>> _fetchUnreadConversationIds(String userId) async {
-    final conversations = await _fetchConversations(userId);
-    if (conversations.isEmpty) return const {};
-    final conversationIds =
-        conversations.map((conversation) => conversation.id).toList(growable: false);
+    final conversationIds = await _fetchConversationIdsForUser(userId);
+    if (conversationIds.isEmpty) return const {};
 
     final memberships = await _withTransientRetry(
       () => _supabase
@@ -566,7 +568,7 @@ class ChatRepository {
     }
 
     if (lastReadByConversationId.isEmpty) return const {};
-    final trackedIds = lastReadByConversationId.keys.toList(growable: false);
+    final trackedIds = conversationIds;
 
     final messages = await _withTransientRetry(
       () => _supabase
@@ -589,6 +591,35 @@ class ChatRepository {
       }
     }
     return unread;
+  }
+
+  Future<List<String>> _fetchConversationIdsForUser(String userId) async {
+    final ids = <String>{};
+
+    final memberRows = await _withTransientRetry(
+      () => _supabase
+          .from('conversation_members')
+          .select('conversation_id')
+          .eq('user_id', userId),
+    );
+    for (final row in memberRows) {
+      final id = row['conversation_id']?.toString();
+      if (id != null && id.isNotEmpty) ids.add(id);
+    }
+
+    final directRows = await _withTransientRetry(
+      () => _supabase
+          .from('conversations')
+          .select('id')
+          .eq('type', 'direct')
+          .or('user_one_id.eq.$userId,user_two_id.eq.$userId'),
+    );
+    for (final row in directRows) {
+      final id = row['id']?.toString();
+      if (id != null && id.isNotEmpty) ids.add(id);
+    }
+
+    return ids.toList(growable: false);
   }
 
   Future<Conversation?> _fetchConversation(String conversationId) async {
@@ -648,7 +679,8 @@ class ChatRepository {
           .from('messages')
           .select()
           .eq('conversation_id', conversationId)
-          .order('created_at'),
+          .order('created_at', ascending: false)
+          .limit(_messageWindowSize),
     );
     if (rows.isEmpty) return const [];
 
@@ -702,6 +734,7 @@ class ChatRepository {
           : (reactionsByMessage[messageId] ?? const []);
       messages.add(Message.fromJson(messageRow));
     }
+    messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return messages;
   }
 

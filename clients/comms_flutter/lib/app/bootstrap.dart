@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:async';
 
 import '../core/config/app_config.dart';
 import '../core/logging/app_logger.dart';
@@ -29,10 +30,17 @@ Future<void> bootstrap() async {
   await Hive.openBox('app_settings');
   await NotificationService.instance.initialize();
 
-  runApp(
-    ProviderScope(
-      overrides: [appConfigProvider.overrideWithValue(config)],
-      child: const CommsApp(),
+  FlutterError.onError = (details) {
+    AppLogger.instance.error(details.exception, details.stack);
+  };
+
+  runZonedGuarded(
+    () => runApp(
+      ProviderScope(
+        overrides: [appConfigProvider.overrideWithValue(config)],
+        child: const CommsApp(),
+      ),
     ),
+    (error, stack) => AppLogger.instance.error(error, stack),
   );
 }
