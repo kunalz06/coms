@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../shared/widgets/comms_logo.dart';
+import '../../../shared/widgets/auth_hero.dart';
 import '../data/auth_repository.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -45,7 +45,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
@@ -57,16 +56,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const CommsLogo(size: 72, showWordmark: true),
-                  const SizedBox(height: 8),
-                  Text('Sign in to continue',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyLarge),
+                  const AuthHero(
+                    title: 'Welcome Back',
+                    subtitle: 'Sign in to continue',
+                    logoSize: 72,
+                  ),
                   const SizedBox(height: 32),
                   TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(labelText: 'Email'),
+                    decoration: const InputDecoration(
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.alternate_email_outlined),
+                    ),
                     validator: (value) => value == null || !value.contains('@')
                         ? 'Enter a valid email.'
                         : null,
@@ -75,27 +77,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   TextFormField(
                     controller: _password,
                     obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Password'),
+                    decoration: const InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: Icon(Icons.lock_outline),
+                    ),
                     validator: (value) => value == null || value.length < 6
                         ? 'Enter your password.'
                         : null,
                   ),
                   const SizedBox(height: 20),
-                  FilledButton(
+                  FilledButton.icon(
                     onPressed: _loading ? null : _submit,
-                    child: _loading
+                    icon: _loading
                         ? const SizedBox.square(
                             dimension: 18,
                             child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Sign in'),
+                        : const Icon(Icons.login, size: 18),
+                    label: const Text('Sign in'),
                   ),
                   const SizedBox(height: 12),
-                  TextButton(
+                  TextButton.icon(
                       onPressed: () => context.go(AppRoutes.resetPassword),
-                      child: const Text('Forgot password?')),
-                  TextButton(
+                      icon: const Icon(Icons.key_outlined, size: 16),
+                      label: const Text('Forgot password?')),
+                  TextButton.icon(
                       onPressed: () => context.go(AppRoutes.register),
-                      child: const Text('Create account')),
+                      icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
+                      label: const Text('Create account')),
                 ],
               ),
             ),

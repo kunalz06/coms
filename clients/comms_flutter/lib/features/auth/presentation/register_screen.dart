@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../shared/widgets/comms_logo.dart';
+import '../../../shared/widgets/auth_hero.dart';
 import '../data/auth_repository.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
@@ -46,8 +46,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Create account')),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -58,11 +58,18 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const CommsLogo(size: 64, showWordmark: true),
+                  const AuthHero(
+                    title: 'Create Your Account',
+                    subtitle: 'Set up COMMS in a minute',
+                    logoSize: 64,
+                  ),
                   const SizedBox(height: 28),
                   TextFormField(
                     controller: _name,
-                    decoration: const InputDecoration(labelText: 'Full name'),
+                    decoration: const InputDecoration(
+                      labelText: 'Full name',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
                     validator: (value) =>
                         value == null || value.trim().length < 2
                             ? 'Enter your name.'
@@ -72,7 +79,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(labelText: 'Email'),
+                    decoration: const InputDecoration(
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.alternate_email_outlined),
+                    ),
                     validator: (value) => value == null || !value.contains('@')
                         ? 'Enter a valid email.'
                         : null,
@@ -81,18 +91,32 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   TextFormField(
                     controller: _password,
                     obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Password'),
+                    decoration: const InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: Icon(Icons.lock_outline),
+                    ),
                     validator: (value) => value == null || value.length < 8
                         ? 'Use at least 8 characters.'
                         : null,
                   ),
                   const SizedBox(height: 20),
-                  FilledButton(
-                      onPressed: _loading ? null : _submit,
-                      child: const Text('Create account')),
-                  TextButton(
+                  FilledButton.icon(
+                    onPressed: _loading ? null : _submit,
+                    icon: _loading
+                        ? SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: theme.colorScheme.onPrimary,
+                            ),
+                          )
+                        : const Icon(Icons.app_registration_outlined, size: 18),
+                    label: const Text('Create account'),
+                  ),
+                  TextButton.icon(
                       onPressed: () => context.go(AppRoutes.login),
-                      child: const Text('I already have an account')),
+                      icon: const Icon(Icons.login, size: 16),
+                      label: const Text('I already have an account')),
                 ],
               ),
             ),

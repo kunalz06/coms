@@ -193,13 +193,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             ListTile(
               leading: const Icon(Icons.image_outlined),
               title: const Text('Photo'),
-              subtitle: const Text('Images up to 5 MB'),
+              subtitle: const Text('Images are compressed to 5 MB max'),
               onTap: () => Navigator.of(context).pop('image'),
             ),
             ListTile(
               leading: const Icon(Icons.description_outlined),
               title: const Text('Document'),
-              subtitle: const Text('PDF, Word, or text files up to 5 MB'),
+              subtitle: const Text('PDF, Word, or text files up to 10 MB'),
               onTap: () => Navigator.of(context).pop('document'),
             ),
           ],

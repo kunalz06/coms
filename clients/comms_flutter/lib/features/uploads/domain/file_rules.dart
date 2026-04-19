@@ -20,19 +20,30 @@ class FileDecision {
 }
 
 class FileRules {
-  static const directUploadLimitBytes = 5 * 1024 * 1024;
+  static const directImageLimitBytes = 5 * 1024 * 1024;
+  static const directDocumentLimitBytes = 10 * 1024 * 1024;
   static const compressibleImageLimitBytes = 20 * 1024 * 1024;
 
   static FileDecision decide({
     required int sizeBytes,
     required String mimeType,
+    String? kind,
   }) {
-    if (sizeBytes <= directUploadLimitBytes) return FileDecision.allowDirect();
-    if (mimeType.startsWith('image/') &&
-        sizeBytes <= compressibleImageLimitBytes) {
-      return FileDecision.compressImage();
+    final isImage = kind == 'image' || mimeType.startsWith('image/');
+
+    if (isImage) {
+      if (sizeBytes <= directImageLimitBytes) return FileDecision.allowDirect();
+      if (sizeBytes <= compressibleImageLimitBytes) {
+        return FileDecision.compressImage();
+      }
+      return FileDecision.reject(
+        'Images above 20 MB are not supported. Choose a smaller image.',
+      );
     }
+
+    if (sizeBytes <= directDocumentLimitBytes) return FileDecision.allowDirect();
     return FileDecision.reject(
-        'Only images between 5 MB and 20 MB can be compressed. Choose a smaller document.');
+      'Documents and other files must be 10 MB or smaller.',
+    );
   }
 }

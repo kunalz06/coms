@@ -32,13 +32,36 @@ export type DriveConnection = {
   email: string | null;
 };
 
-function appUrl() {
-  const url = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  return url.replace(/\/$/, "");
+type GoogleDriveUrlOptions = {
+  origin?: string;
+};
+
+function normalizeOrigin(origin?: string) {
+  if (!origin) return null;
+  return origin.replace(/\/$/, "");
 }
 
-export function googleDriveRedirectUri() {
-  return `${appUrl()}/api/backup/google/callback`;
+function appUrl(options: GoogleDriveUrlOptions = {}) {
+  const overrideRedirect = process.env.GOOGLE_DRIVE_REDIRECT_URI?.trim();
+  if (overrideRedirect) {
+    try {
+      return new URL(overrideRedirect).origin.replace(/\/$/, "");
+    } catch (_) {
+      // Fall through to the other app URL sources.
+    }
+  }
+
+  const fromOptions = normalizeOrigin(options.origin);
+  if (fromOptions) return fromOptions;
+
+  const fromEnv = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  return fromEnv.replace(/\/$/, "");
+}
+
+export function googleDriveRedirectUri(options: GoogleDriveUrlOptions = {}) {
+  const override = process.env.GOOGLE_DRIVE_REDIRECT_URI?.trim();
+  if (override) return override.replace(/\/$/, "");
+  return `${appUrl(options)}/api/backup/google/callback`;
 }
 
 function googleClientConfig() {
@@ -73,11 +96,14 @@ export function verifyGoogleOAuthState(state: string) {
   return parsed.userId;
 }
 
-export function buildGoogleDriveAuthUrl(userId: string) {
+export function buildGoogleDriveAuthUrl(
+  userId: string,
+  options: GoogleDriveUrlOptions = {}
+) {
   const { clientId } = googleClientConfig();
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: googleDriveRedirectUri(),
+    redirect_uri: googleDriveRedirectUri(options),
     response_type: "code",
     scope: `${DRIVE_SCOPE} openid email`,
     access_type: "offline",
@@ -114,7 +140,10 @@ async function parseGoogleTokenResponse(response: Response) {
   return payload;
 }
 
-export async function exchangeGoogleDriveCode(code: string): Promise<DriveConnection> {
+export async function exchangeGoogleDriveCode(
+  code: string,
+  options: GoogleDriveUrlOptions = {}
+): Promise<DriveConnection> {
   const { clientId, clientSecret } = googleClientConfig();
   const response = await fetch(GOOGLE_TOKEN_URL, {
     method: "POST",
@@ -123,7 +152,7 @@ export async function exchangeGoogleDriveCode(code: string): Promise<DriveConnec
       code,
       client_id: clientId,
       client_secret: clientSecret,
-      redirect_uri: googleDriveRedirectUri(),
+      redirect_uri: googleDriveRedirectUri(options),
       grant_type: "authorization_code"
     })
   });

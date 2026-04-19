@@ -20,8 +20,9 @@ class _HiddenChatsScreenState extends ConsumerState<HiddenChatsScreen> {
 
   Future<bool> _ensureUnlocked() async {
     final privacy = ref.read(privacyControllerProvider);
-    if (!privacy.hiddenPasswordConfigured || privacy.hiddenUnlocked)
+    if (!privacy.hiddenPasswordConfigured || privacy.hiddenUnlocked) {
       return true;
+    }
     if (_unlocking) return false;
     setState(() => _unlocking = true);
     try {

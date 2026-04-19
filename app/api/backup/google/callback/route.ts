@@ -14,7 +14,9 @@ export async function GET(request: Request) {
     if (error) throw new Error(error === "access_denied" ? "Google Drive connection was cancelled." : error);
     if (!code || !state) throw new Error("Google Drive did not return a valid connection response.");
     const userId = verifyGoogleOAuthState(state);
-    const connection = await exchangeGoogleDriveCode(code);
+    const connection = await exchangeGoogleDriveCode(code, {
+      origin: url.origin,
+    });
     await saveGoogleDriveConnection(createServiceSupabase(), userId, connection);
     return NextResponse.redirect(`${appUrl}/app?backup=connected`);
   } catch (caught) {

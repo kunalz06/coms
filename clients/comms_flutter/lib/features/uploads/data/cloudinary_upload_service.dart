@@ -1,7 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image/image.dart' as img;
 
 import '../../../core/config/app_config.dart';
 import '../../chats/data/chat_repository.dart';
@@ -57,12 +60,27 @@ class CloudinaryUploadService {
     final decision = FileRules.decide(
       sizeBytes: bytes.length,
       mimeType: mimeType,
+      kind: kind,
     );
     if (!decision.allowed) throw FormatException(decision.message);
-    if (decision.shouldCompress) {
-      throw const FormatException(
-        'Image compression is scheduled for the file-polish phase. Choose an image under 5 MB for now.',
+
+    var uploadBytesData = Uint8List.fromList(bytes);
+    var uploadMimeType = mimeType;
+    var uploadFileName = fileName;
+
+    if (decision.shouldCompress && mimeType.startsWith('image/')) {
+      final compressed = await _compressImageToTarget(
+        uploadBytesData,
+        targetBytes: FileRules.directImageLimitBytes,
       );
+      if (compressed == null) {
+        throw const FormatException(
+          'Could not compress this image under 5 MB. Choose a smaller image.',
+        );
+      }
+      uploadBytesData = compressed;
+      uploadMimeType = 'image/jpeg';
+      uploadFileName = _compressedImageFileName(fileName);
     }
 
     if (_config.cloudinaryCloudName.isEmpty) {
@@ -73,8 +91,8 @@ class CloudinaryUploadService {
     final resource = _resourceType(kind, mimeType, fileName);
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(
-        bytes,
-        filename: _safeFileName(fileName),
+        uploadBytesData,
+        filename: _safeFileName(uploadFileName),
       ),
       'api_key': signed.apiKey,
       'timestamp': signed.timestamp.toString(),
@@ -100,10 +118,57 @@ class CloudinaryUploadService {
       url: data['secure_url'] as String,
       publicId: data['public_id'] as String? ?? '',
       resourceType: data['resource_type'] as String? ?? resource,
-      fileName: _safeFileName(fileName),
-      mimeType: mimeType,
-      sizeBytes: bytes.length,
+      fileName: _safeFileName(uploadFileName),
+      mimeType: uploadMimeType,
+      sizeBytes: uploadBytesData.length,
     );
+  }
+
+  Future<Uint8List?> _compressImageToTarget(
+    Uint8List source, {
+    required int targetBytes,
+  }) async {
+    final decoded = img.decodeImage(source);
+    if (decoded == null) return null;
+
+    final baseImage = _resizeIfNeeded(decoded, maxDimension: 1920);
+    final scaleSteps = <double>[1.0, 0.9, 0.8, 0.7, 0.6, 0.5];
+    final qualitySteps = <int>[88, 82, 76, 70, 64, 58, 52, 46, 40, 34, 28];
+
+    Uint8List? best;
+    for (final scale in scaleSteps) {
+      final candidate = scale == 1.0
+          ? baseImage
+          : img.copyResize(
+              baseImage,
+              width: (baseImage.width * scale).round(),
+            );
+      for (final quality in qualitySteps) {
+        final encoded = Uint8List.fromList(
+          img.encodeJpg(candidate, quality: quality),
+        );
+        best = encoded;
+        if (encoded.length <= targetBytes) {
+          return encoded;
+        }
+      }
+    }
+    if (best != null && best.length <= targetBytes) return best;
+    return null;
+  }
+
+  img.Image _resizeIfNeeded(
+    img.Image source, {
+    required int maxDimension,
+  }) {
+    final width = source.width;
+    final height = source.height;
+    final maxSide = width > height ? width : height;
+    if (maxSide <= maxDimension) return source;
+    if (width >= height) {
+      return img.copyResize(source, width: maxDimension);
+    }
+    return img.copyResize(source, height: maxDimension);
   }
 
   Future<_CloudinarySignature> _signature(String kind) async {
@@ -159,6 +224,14 @@ String _safeFileName(String value) {
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
   return sanitized.isEmpty ? 'comms-file' : sanitized;
+}
+
+String _compressedImageFileName(String fileName) {
+  final normalized = fileName.trim();
+  if (normalized.isEmpty) return 'comms-image.jpg';
+  final dot = normalized.lastIndexOf('.');
+  if (dot <= 0) return '$normalized.jpg';
+  return '${normalized.substring(0, dot)}.jpg';
 }
 
 String _mimeTypeFor(String fileName, String kind) {

@@ -165,7 +165,7 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
           ListTile(
             leading: const Icon(Icons.photo_camera_outlined),
             title: const Text('Profile picture'),
-            subtitle: const Text('Upload a new profile image'),
+            subtitle: const Text('Large images are auto-compressed to 5 MB'),
             trailing: TextButton(
               onPressed: _busy ? null : _changeProfilePicture,
               child: const Text('Update'),

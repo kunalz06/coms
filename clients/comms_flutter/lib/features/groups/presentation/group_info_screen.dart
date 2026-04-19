@@ -287,8 +287,9 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                     ),
                                 message: 'Group deleted.',
                               ).then((_) {
-                                if (context.mounted)
+                                if (context.mounted) {
                                   context.go(AppRoutes.chats);
+                                }
                               }),
                       icon: const Icon(Icons.delete_forever_outlined),
                       label: const Text('Delete group'),

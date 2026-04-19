@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../shared/widgets/comms_logo.dart';
+import '../../../shared/widgets/auth_hero.dart';
 import '../data/auth_repository.dart';
 
 class ResetPasswordScreen extends ConsumerStatefulWidget {
@@ -42,20 +42,33 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Center(child: CommsLogo(size: 64, showWordmark: true)),
+                const Center(
+                  child: AuthHero(
+                    title: 'Reset Password',
+                    subtitle: 'We will send a secure reset link',
+                    logoSize: 64,
+                  ),
+                ),
                 const SizedBox(height: 24),
                 Text(_sent ? 'Check your inbox.' : 'Enter your account email.'),
                 const SizedBox(height: 12),
                 TextField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(labelText: 'Email')),
+                    decoration: const InputDecoration(
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.alternate_email_outlined),
+                    )),
                 const SizedBox(height: 20),
-                FilledButton(
-                    onPressed: _send, child: const Text('Send reset link')),
-                TextButton(
+                FilledButton.icon(
+                  onPressed: _send,
+                  icon: const Icon(Icons.mark_email_read_outlined, size: 18),
+                  label: const Text('Send reset link'),
+                ),
+                TextButton.icon(
                     onPressed: () => context.go(AppRoutes.login),
-                    child: const Text('Back to sign in')),
+                    icon: const Icon(Icons.arrow_back, size: 16),
+                    label: const Text('Back to sign in')),
               ],
             ),
           ),
