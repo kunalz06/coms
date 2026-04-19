@@ -86,14 +86,17 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
     );
     if (confirmed != true) return;
 
-    await _run(
-      () => ref.read(groupRepositoryProvider).clearGroupMessagesInRange(
+    await _run(() async {
+      final deleted = await ref.read(groupRepositoryProvider).clearGroupMessagesInRange(
             conversationId: widget.conversationId,
             startInclusive: startDate,
             endInclusive: endDate,
-          ),
-      message: 'Group messages cleared in selected date range.',
-    );
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$deleted messages deleted.')),
+      );
+    });
   }
 
   @override
@@ -299,14 +302,19 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                     OutlinedButton.icon(
                       onPressed: _busy
                           ? null
-                          : () => _run(
-                                () => ref
+                          : () => _run(() async {
+                                final deleted = await ref
                                     .read(groupRepositoryProvider)
                                     .clearGroupMessages(
                                       conversationId: widget.conversationId,
-                                    ),
-                                message: 'Group messages cleared.',
-                              ),
+                                    );
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('$deleted messages deleted.'),
+                                  ),
+                                );
+                              }),
                       icon: const Icon(Icons.delete_sweep_outlined),
                       label: const Text('Clear all messages'),
                     ),

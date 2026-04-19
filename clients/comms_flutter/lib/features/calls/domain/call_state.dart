@@ -52,6 +52,8 @@ const allowedCallTransitions = <CommsCallStatus, Set<CommsCallStatus>>{
     CommsCallStatus.failed
   },
   CommsCallStatus.reconnecting: {
+    CommsCallStatus.acquiringMedia,
+    CommsCallStatus.connecting,
     CommsCallStatus.connected,
     CommsCallStatus.ending,
     CommsCallStatus.ended,

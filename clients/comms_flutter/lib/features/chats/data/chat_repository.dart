@@ -50,14 +50,16 @@ class ChatRepository {
     final lastReadAt = membership == null
         ? null
         : DateTime.tryParse(membership['last_read_at']?.toString() ?? '');
-    if (lastReadAt == null) return 0;
-
-    final messages = await _supabase
+    var query = _supabase
         .from('messages')
         .select('id')
         .eq('conversation_id', conversationId)
         .neq('sender_id', userId)
-        .gt('created_at', lastReadAt.toIso8601String());
+        .isFilter('deleted_for_everyone_at', null);
+    if (lastReadAt != null) {
+      query = query.gt('created_at', lastReadAt.toIso8601String());
+    }
+    final messages = await query;
     return messages.length;
   }
 
@@ -78,14 +80,12 @@ class ChatRepository {
     required String conversationId,
     required String userId,
   }) async {
-    await _supabase.from('conversation_members').upsert(
-      {
-        'conversation_id': conversationId,
-        'user_id': userId,
-        'role': 'member',
-        'last_read_at': DateTime.now().toUtc().toIso8601String(),
+    await _supabase.rpc(
+      'mark_conversation_read',
+      params: {
+        'p_conversation_id': conversationId,
+        'p_read_at': DateTime.now().toUtc().toIso8601String(),
       },
-      onConflict: 'conversation_id,user_id',
     );
   }
 
@@ -542,15 +542,22 @@ class ChatRepository {
   }
 
   Future<Set<String>> _fetchUnreadConversationIds(String userId) async {
+    final conversations = await _fetchConversations(userId);
+    if (conversations.isEmpty) return const {};
+    final conversationIds =
+        conversations.map((conversation) => conversation.id).toList(growable: false);
+
     final memberships = await _withTransientRetry(
       () => _supabase
           .from('conversation_members')
           .select('conversation_id,last_read_at')
-          .eq('user_id', userId),
+          .eq('user_id', userId)
+          .inFilter('conversation_id', conversationIds),
     );
-    if (memberships.isEmpty) return const {};
-
     final lastReadByConversationId = <String, DateTime?>{};
+    for (final conversationId in conversationIds) {
+      lastReadByConversationId[conversationId] = null;
+    }
     for (final row in memberships) {
       final conversationId = row['conversation_id']?.toString();
       if (conversationId == null || conversationId.isEmpty) continue;
@@ -559,15 +566,15 @@ class ChatRepository {
     }
 
     if (lastReadByConversationId.isEmpty) return const {};
-    final conversationIds =
-        lastReadByConversationId.keys.toList(growable: false);
+    final trackedIds = lastReadByConversationId.keys.toList(growable: false);
 
     final messages = await _withTransientRetry(
       () => _supabase
           .from('messages')
           .select('conversation_id,created_at,sender_id')
-          .inFilter('conversation_id', conversationIds)
-          .neq('sender_id', userId),
+          .inFilter('conversation_id', trackedIds)
+          .neq('sender_id', userId)
+          .isFilter('deleted_for_everyone_at', null),
     );
 
     final unread = <String>{};

@@ -151,15 +151,19 @@ class GroupRepository {
     await removeMember(conversationId: conversationId, userId: userId);
   }
 
-  Future<void> clearGroupMessages({
+  Future<int> clearGroupMessages({
     required String conversationId,
   }) async {
-    await _supabase.from('messages').update({
-      'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('conversation_id', conversationId);
+    final result = await _supabase.rpc(
+      'clear_group_messages_for_everyone',
+      params: {
+        'p_conversation_id': conversationId,
+      },
+    );
+    return (result as num?)?.toInt() ?? 0;
   }
 
-  Future<void> clearGroupMessagesInRange({
+  Future<int> clearGroupMessagesInRange({
     required String conversationId,
     required DateTime startInclusive,
     required DateTime endInclusive,
@@ -182,14 +186,15 @@ class GroupRepository {
       throw const FormatException('End date cannot be before start date.');
     }
 
-    await _supabase
-        .from('messages')
-        .update({
-          'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
-        })
-        .eq('conversation_id', conversationId)
-        .gte('created_at', start.toIso8601String())
-        .lte('created_at', end.toIso8601String());
+    final result = await _supabase.rpc(
+      'clear_group_messages_for_everyone',
+      params: {
+        'p_conversation_id': conversationId,
+        'p_start': start.toIso8601String(),
+        'p_end': end.toIso8601String(),
+      },
+    );
+    return (result as num?)?.toInt() ?? 0;
   }
 
   Future<void> deleteGroup({

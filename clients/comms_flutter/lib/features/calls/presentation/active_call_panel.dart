@@ -177,10 +177,15 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                           .read(callControllerProvider.notifier)
                           .toggleCamera(),
                     ),
-                  if (call.status == CommsCallStatus.incomingRinging)
+                  if (call.status == CommsCallStatus.incomingRinging ||
+                      call.status == CommsCallStatus.reconnecting)
                     _RoundCallButton(
-                      icon: Icons.call,
-                      label: 'Join',
+                      icon: call.status == CommsCallStatus.reconnecting
+                          ? Icons.refresh
+                          : Icons.call,
+                      label: call.status == CommsCallStatus.reconnecting
+                          ? 'Rejoin'
+                          : 'Join',
                       color: Colors.green,
                       onPressed: () {
                         final controller =

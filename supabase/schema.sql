@@ -350,6 +350,8 @@ create or replace function enforce_message_update_rules()
 returns trigger
 language plpgsql
 as $$
+declare
+  bypass_group_clear boolean := coalesce(current_setting('comms.group_clear', true), '') = '1';
 begin
   if new.conversation_id is distinct from old.conversation_id
     or new.sender_id is distinct from old.sender_id
@@ -370,11 +372,25 @@ begin
     if new.deleted_for_everyone_at is null then
       raise exception 'Deleted messages cannot be restored';
     end if;
-    if old.sender_id <> app_user_id() then
-      raise exception 'Only the sender can delete this message for everyone';
-    end if;
-    if old.created_at < now() - interval '1 minute' then
-      raise exception 'Messages can only be deleted for everyone within one minute';
+    if bypass_group_clear then
+      if not exists (
+        select 1
+        from conversations
+        where id = old.conversation_id
+          and type = 'group'
+      ) then
+        raise exception 'Group clear mode can only be used for group conversations';
+      end if;
+      if not user_can_manage_conversation(old.conversation_id, app_user_id()) then
+        raise exception 'Only group owners/admins can clear messages for everyone';
+      end if;
+    else
+      if old.sender_id <> app_user_id() then
+        raise exception 'Only the sender can delete this message for everyone';
+      end if;
+      if old.created_at < now() - interval '1 minute' then
+        raise exception 'Messages can only be deleted for everyone within one minute';
+      end if;
     end if;
     new.deleted_by := app_user_id();
     new.content := null;
@@ -548,7 +564,7 @@ set search_path = public
 as $$
 declare
   current_user_id text := app_user_id();
-  existing_conversation_id conversations.id%TYPE;
+  existing_conversation_id uuid;
   created_conversation conversations%ROWTYPE;
 begin
   if current_user_id is null then
@@ -579,11 +595,12 @@ begin
   limit 1;
 
   if existing_conversation_id is not null then
-    return (
-      select c
-      from conversations c
-      where c.id = existing_conversation_id
-    );
+    select *
+    into created_conversation
+    from conversations
+    where id = existing_conversation_id
+    limit 1;
+    return created_conversation;
   end if;
 
   begin
@@ -604,11 +621,12 @@ begin
     limit 1;
 
     if existing_conversation_id is not null then
-      return (
-        select c
-        from conversations c
-        where c.id = existing_conversation_id
-      );
+      select *
+      into created_conversation
+      from conversations
+      where id = existing_conversation_id
+      limit 1;
+      return created_conversation;
     end if;
 
     raise;
@@ -617,6 +635,107 @@ end;
 $$;
 
 grant execute on function get_or_create_direct_conversation(text) to anon, authenticated;
+
+create or replace function mark_conversation_read(
+  p_conversation_id uuid,
+  p_read_at timestamptz default now()
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id text := app_user_id();
+  read_at timestamptz := coalesce(p_read_at, now());
+  touched integer := 0;
+begin
+  if current_user_id is null then
+    raise exception 'Not authenticated.' using errcode = '42501';
+  end if;
+
+  if p_conversation_id is null then
+    raise exception 'Conversation is required.' using errcode = '22023';
+  end if;
+
+  if not user_is_conversation_participant(p_conversation_id, current_user_id) then
+    raise exception 'Only participants can mark read.' using errcode = '42501';
+  end if;
+
+  update conversation_members
+  set last_read_at = read_at
+  where conversation_id = p_conversation_id
+    and user_id = current_user_id;
+  get diagnostics touched = row_count;
+
+  if touched = 0 then
+    insert into conversation_members (conversation_id, user_id, role, last_read_at)
+    values (p_conversation_id, current_user_id, 'member', read_at)
+    on conflict (conversation_id, user_id)
+    do update set last_read_at = excluded.last_read_at;
+  end if;
+end;
+$$;
+
+grant execute on function mark_conversation_read(uuid, timestamptz) to anon, authenticated;
+
+create or replace function clear_group_messages_for_everyone(
+  p_conversation_id uuid,
+  p_start timestamptz default null,
+  p_end timestamptz default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id text := app_user_id();
+  deleted_count integer := 0;
+begin
+  if current_user_id is null then
+    raise exception 'Not authenticated.' using errcode = '42501';
+  end if;
+
+  if p_conversation_id is null then
+    raise exception 'Conversation is required.' using errcode = '22023';
+  end if;
+
+  if not exists (
+    select 1
+    from conversations
+    where id = p_conversation_id
+      and type = 'group'
+  ) then
+    raise exception 'Group conversation not found.' using errcode = '22023';
+  end if;
+
+  if not user_can_manage_conversation(p_conversation_id, current_user_id) then
+    raise exception 'Only owner/admin can clear group messages.' using errcode = '42501';
+  end if;
+
+  perform set_config('comms.group_clear', '1', true);
+
+  with affected as (
+    select id
+    from messages
+    where conversation_id = p_conversation_id
+      and deleted_for_everyone_at is null
+      and (p_start is null or created_at >= p_start)
+      and (p_end is null or created_at <= p_end)
+  )
+  update messages m
+  set deleted_for_everyone_at = now(),
+      deleted_by = current_user_id
+  from affected
+  where m.id = affected.id;
+
+  get diagnostics deleted_count = row_count;
+  return coalesce(deleted_count, 0);
+end;
+$$;
+
+grant execute on function clear_group_messages_for_everyone(uuid, timestamptz, timestamptz) to anon, authenticated;
 
 alter table user_profiles enable row level security;
 alter table notification_settings enable row level security;

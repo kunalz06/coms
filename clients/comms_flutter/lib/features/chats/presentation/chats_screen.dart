@@ -315,6 +315,10 @@ class ChatsScreen extends ConsumerWidget {
                               conversationId: conversation.id,
                             );
                             if (!canOpen || !context.mounted) return;
+                            await ref.read(chatRepositoryProvider).markRead(
+                                  conversationId: conversation.id,
+                                  userId: user.uid,
+                                );
                             context.go(
                               AppRoutes.conversation.replaceFirst(
                                   ':conversationId', conversation.id),
