@@ -64,13 +64,15 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
           'COMMS keeps active content for 3 days. After that, old messages may not be restorable until backup is reconnected.',
         ),
         actions: [
-          TextButton(
+          TextButton.icon(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancel'),
           ),
-          FilledButton(
+          FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Disable'),
+            icon: const Icon(Icons.block),
+            label: const Text('Disable'),
           ),
         ],
       ),

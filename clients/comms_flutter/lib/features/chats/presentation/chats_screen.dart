@@ -235,44 +235,69 @@ class ChatsScreen extends ConsumerWidget {
                                 itemBuilder: (context) => [
                                   const PopupMenuItem(
                                     value: 'hide',
-                                    child: Text('Hide chat'),
+                                    child: _MenuItemLabel(
+                                      icon: Icons.visibility_off_outlined,
+                                      label: 'Hide chat',
+                                    ),
                                   ),
                                   PopupMenuItem(
                                     value: locked ? 'unlock' : 'lock',
-                                    child: Text(
-                                        locked ? 'Remove lock' : 'Lock chat'),
+                                    child: _MenuItemLabel(
+                                      icon: locked
+                                          ? Icons.lock_open_outlined
+                                          : Icons.lock_outline,
+                                      label:
+                                          locked ? 'Remove lock' : 'Lock chat',
+                                    ),
                                   ),
                                   PopupMenuItem(
                                     value: pinnedIds.contains(conversation.id)
                                         ? 'unpin'
                                         : 'pin',
-                                    child: Text(
-                                      pinnedIds.contains(conversation.id)
+                                    child: _MenuItemLabel(
+                                      icon: pinnedIds.contains(conversation.id)
+                                          ? Icons.push_pin_outlined
+                                          : Icons.push_pin,
+                                      label: pinnedIds.contains(conversation.id)
                                           ? 'Unpin chat'
                                           : 'Pin chat',
                                     ),
                                   ),
                                   PopupMenuItem(
                                     value: muted ? 'unmute' : 'mute',
-                                    child: Text(
-                                        muted ? 'Unmute chat' : 'Mute chat'),
+                                    child: _MenuItemLabel(
+                                      icon: muted
+                                          ? Icons.volume_up_outlined
+                                          : Icons.volume_off_outlined,
+                                      label:
+                                          muted ? 'Unmute chat' : 'Mute chat',
+                                    ),
                                   ),
                                   if (conversation.isDirect)
                                     const PopupMenuItem(
                                       value: 'delete_direct',
-                                      child: Text('Delete contact'),
+                                      child: _MenuItemLabel(
+                                        icon: Icons.person_remove_outlined,
+                                        label: 'Delete contact',
+                                      ),
                                     ),
                                   if (conversation.isGroup &&
                                       conversation.createdBy != user.uid)
                                     const PopupMenuItem(
                                       value: 'leave_group',
-                                      child: Text('Leave group'),
+                                      child: _MenuItemLabel(
+                                        icon: Icons.logout,
+                                        label: 'Leave group',
+                                      ),
                                     ),
                                   if (conversation.isGroup &&
                                       conversation.createdBy == user.uid)
                                     const PopupMenuItem(
                                       value: 'delete_group',
-                                      child: Text('Delete group'),
+                                      child: _MenuItemLabel(
+                                        icon: Icons.delete_outline,
+                                        label: 'Delete group',
+                                      ),
                                     ),
                                 ],
                               ),
@@ -458,13 +483,15 @@ Future<void> _openGlobalSearch(BuildContext context, WidgetRef ref) async {
               ),
             ),
             actions: [
-              TextButton(
+              TextButton.icon(
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('Close'),
+                icon: const Icon(Icons.close),
+                label: const Text('Close'),
               ),
-              FilledButton(
+              FilledButton.icon(
                 onPressed: runSearch,
-                child: const Text('Search'),
+                icon: const Icon(Icons.search),
+                label: const Text('Search'),
               ),
             ],
           );
@@ -494,13 +521,15 @@ Future<bool> _canOpenConversation({
         decoration: const InputDecoration(hintText: 'Enter chat lock password'),
       ),
       actions: [
-        TextButton(
+        TextButton.icon(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          icon: const Icon(Icons.close),
+          label: const Text('Cancel'),
         ),
-        FilledButton(
+        FilledButton.icon(
           onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-          child: const Text('Unlock'),
+          icon: const Icon(Icons.lock_open_outlined),
+          label: const Text('Unlock'),
         ),
       ],
     ),
@@ -556,6 +585,27 @@ class _UnreadArgs {
 
   @override
   int get hashCode => Object.hash(conversationId, userId);
+}
+
+class _MenuItemLabel extends StatelessWidget {
+  const _MenuItemLabel({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18),
+        const SizedBox(width: 8),
+        Text(label),
+      ],
+    );
+  }
 }
 
 class _StartChatSheet extends StatelessWidget {

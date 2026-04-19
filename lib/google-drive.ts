@@ -42,6 +42,9 @@ function normalizeOrigin(origin?: string) {
 }
 
 function appUrl(options: GoogleDriveUrlOptions = {}) {
+  const fromOptions = normalizeOrigin(options.origin);
+  if (fromOptions) return fromOptions;
+
   const overrideRedirect = process.env.GOOGLE_DRIVE_REDIRECT_URI?.trim();
   if (overrideRedirect) {
     try {
@@ -50,9 +53,6 @@ function appUrl(options: GoogleDriveUrlOptions = {}) {
       // Fall through to the other app URL sources.
     }
   }
-
-  const fromOptions = normalizeOrigin(options.origin);
-  if (fromOptions) return fromOptions;
 
   const fromEnv = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   return fromEnv.replace(/\/$/, "");

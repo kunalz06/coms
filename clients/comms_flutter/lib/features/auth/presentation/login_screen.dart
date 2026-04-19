@@ -102,7 +102,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       label: const Text('Forgot password?')),
                   TextButton.icon(
                       onPressed: () => context.go(AppRoutes.register),
-                      icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
+                      icon:
+                          const Icon(Icons.person_add_alt_1_outlined, size: 16),
                       label: const Text('Create account')),
                 ],
               ),

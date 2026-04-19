@@ -30,13 +30,15 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
           decoration: const InputDecoration(hintText: 'new@email.com'),
         ),
         actions: [
-          TextButton(
+          TextButton.icon(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancel'),
           ),
-          FilledButton(
+          FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('Update'),
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Update'),
           ),
         ],
       ),
@@ -67,13 +69,15 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
           decoration: const InputDecoration(hintText: 'Minimum 8 characters'),
         ),
         actions: [
-          TextButton(
+          TextButton.icon(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancel'),
           ),
-          FilledButton(
+          FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('Update'),
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Update'),
           ),
         ],
       ),
@@ -148,27 +152,30 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
             leading: const Icon(Icons.alternate_email),
             title: const Text('Email'),
             subtitle: Text(user.email ?? 'Unknown'),
-            trailing: TextButton(
+            trailing: TextButton.icon(
               onPressed: _busy ? null : _changeEmail,
-              child: const Text('Change'),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Change'),
             ),
           ),
           ListTile(
             leading: const Icon(Icons.lock_outline),
             title: const Text('Password'),
             subtitle: const Text('Update your account password'),
-            trailing: TextButton(
+            trailing: TextButton.icon(
               onPressed: _busy ? null : _changePassword,
-              child: const Text('Change'),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Change'),
             ),
           ),
           ListTile(
             leading: const Icon(Icons.photo_camera_outlined),
             title: const Text('Profile picture'),
             subtitle: const Text('Large images are auto-compressed to 5 MB'),
-            trailing: TextButton(
+            trailing: TextButton.icon(
               onPressed: _busy ? null : _changeProfilePicture,
-              child: const Text('Update'),
+              icon: const Icon(Icons.photo_camera_outlined),
+              label: const Text('Update'),
             ),
           ),
         ],

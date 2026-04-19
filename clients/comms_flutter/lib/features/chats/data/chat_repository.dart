@@ -602,19 +602,18 @@ class ChatRepository {
     }
 
     final profiles = <String, UserProfile>{};
-    for (final member in members) {
-      final userId = member['user_id'] as String?;
-      if (userId == null || profiles.containsKey(userId)) continue;
-      final data = await _withTransientRetry(
-        () => _supabase
-            .from('user_profiles')
-            .select()
-            .eq('id', userId)
-            .maybeSingle(),
+    final userIds = members
+        .map((member) => member['user_id']?.toString())
+        .whereType<String>()
+        .toSet()
+        .toList(growable: false);
+    if (userIds.isNotEmpty) {
+      final profileRows = await _withTransientRetry(
+        () => _supabase.from('user_profiles').select().inFilter('id', userIds),
       );
-      if (data != null) {
-        profiles[userId] =
-            UserProfile.fromJson(Map<String, dynamic>.from(data));
+      for (final row in profileRows) {
+        final profile = UserProfile.fromJson(Map<String, dynamic>.from(row));
+        profiles[profile.id] = profile;
       }
     }
 

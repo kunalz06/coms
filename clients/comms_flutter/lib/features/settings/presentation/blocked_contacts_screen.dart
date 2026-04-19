@@ -41,7 +41,7 @@ class BlockedContactsScreen extends ConsumerWidget {
                 ),
                 title: Text(profile?.fullName ?? item.blockedId),
                 subtitle: Text(profile?.email ?? item.blockedId),
-                trailing: TextButton(
+                trailing: TextButton.icon(
                   onPressed: () async {
                     await ref.read(settingsRepositoryProvider).unblock(
                           blockerId: userId,
@@ -54,7 +54,8 @@ class BlockedContactsScreen extends ConsumerWidget {
                       );
                     }
                   },
-                  child: const Text('Unblock'),
+                  icon: const Icon(Icons.lock_open_outlined),
+                  label: const Text('Unblock'),
                 ),
               );
             },

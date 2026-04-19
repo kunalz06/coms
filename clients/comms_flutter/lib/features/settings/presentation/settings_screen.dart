@@ -198,9 +198,10 @@ class SettingsScreen extends ConsumerWidget {
                   leading: const Icon(Icons.info_outline),
                   title: const Text('COMMS'),
                   subtitle: const Text('Flutter-first messaging and calling'),
-                  trailing: TextButton(
+                  trailing: TextButton.icon(
                     onPressed: () => ref.read(authRepositoryProvider).signOut(),
-                    child: const Text('Sign out'),
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Sign out'),
                   ),
                 ),
               ],

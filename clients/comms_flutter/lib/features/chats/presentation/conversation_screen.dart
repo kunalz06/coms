@@ -95,14 +95,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 const InputDecoration(hintText: 'Enter chat lock password'),
           ),
           actions: [
-            TextButton(
+            TextButton.icon(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Back'),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
             ),
-            FilledButton(
+            FilledButton.icon(
               onPressed: () =>
                   Navigator.of(context).pop(controller.text.trim()),
-              child: const Text('Unlock'),
+              icon: const Icon(Icons.lock_open_outlined),
+              label: const Text('Unlock'),
             ),
           ],
         ),
@@ -406,12 +408,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   if (context.mounted) Navigator.of(context).pop();
                 },
               ),
-              FilledButton(
+              FilledButton.icon(
                 onPressed: () async {
                   await _addReaction(message, _reactionController.text, 'text');
                   if (context.mounted) Navigator.of(context).pop();
                 },
-                child: const Text('Add reaction'),
+                icon: const Icon(Icons.emoji_emotions_outlined),
+                label: const Text('Add reaction'),
               ),
             ],
           ),
@@ -448,13 +451,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           decoration: const InputDecoration(hintText: 'Edit message'),
         ),
         actions: [
-          TextButton(
+          TextButton.icon(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancel'),
           ),
-          FilledButton(
+          FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(editor.text.trim()),
-            child: const Text('Save'),
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Save'),
           ),
         ],
       ),
@@ -471,8 +476,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final conversations =
-        await ref.read(chatRepositoryProvider).fetchConversationsSnapshot(user.uid);
+    final conversations = await ref
+        .read(chatRepositoryProvider)
+        .fetchConversationsSnapshot(user.uid);
     final candidates = conversations
         .where((conversation) => conversation.id != widget.conversationId)
         .toList(growable: false);
@@ -592,13 +598,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           'The chat history stays, but this person is removed from your normal chat list.',
         ),
         actions: [
-          TextButton(
+          TextButton.icon(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancel'),
           ),
-          FilledButton(
+          FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Delete'),
           ),
         ],
       ),
@@ -626,13 +634,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           'Blocked users cannot message or call you directly in COMMS.',
         ),
         actions: [
-          TextButton(
+          TextButton.icon(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancel'),
           ),
-          FilledButton(
+          FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Block'),
+            icon: const Icon(Icons.block_outlined),
+            label: const Text('Block'),
           ),
         ],
       ),
@@ -786,11 +796,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               itemBuilder: (context) => const [
                 PopupMenuItem(
                   value: 'delete',
-                  child: Text('Delete friend'),
+                  child: _MenuItemLabel(
+                    icon: Icons.person_remove_outlined,
+                    label: 'Delete friend',
+                  ),
                 ),
                 PopupMenuItem(
                   value: 'block',
-                  child: Text('Block contact'),
+                  child: _MenuItemLabel(
+                    icon: Icons.block_outlined,
+                    label: 'Block contact',
+                  ),
                 ),
               ],
             ),
@@ -881,29 +897,52 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               return [
                 PopupMenuItem(
                   value: locked ? 'unlock' : 'lock',
-                  child: Text(locked ? 'Remove lock' : 'Lock chat'),
+                  child: _MenuItemLabel(
+                    icon:
+                        locked ? Icons.lock_open_outlined : Icons.lock_outline,
+                    label: locked ? 'Remove lock' : 'Lock chat',
+                  ),
                 ),
                 PopupMenuItem(
                   value: hidden ? 'unhide' : 'hide',
-                  child: Text(hidden ? 'Unhide chat' : 'Hide chat'),
+                  child: _MenuItemLabel(
+                    icon: hidden
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                    label: hidden ? 'Unhide chat' : 'Hide chat',
+                  ),
                 ),
                 PopupMenuItem(
                   value: isPinned ? 'unpin' : 'pin',
-                  child: Text(isPinned ? 'Unpin chat' : 'Pin chat'),
+                  child: _MenuItemLabel(
+                    icon: isPinned ? Icons.push_pin_outlined : Icons.push_pin,
+                    label: isPinned ? 'Unpin chat' : 'Pin chat',
+                  ),
                 ),
                 PopupMenuItem(
                   value: isMuted ? 'unmute' : 'mute',
-                  child: Text(isMuted ? 'Unmute chat' : 'Mute chat'),
+                  child: _MenuItemLabel(
+                    icon: isMuted
+                        ? Icons.volume_up_outlined
+                        : Icons.volume_off_outlined,
+                    label: isMuted ? 'Unmute chat' : 'Mute chat',
+                  ),
                 ),
                 const PopupMenuItem(
                   value: 'clear_me',
-                  child: Text('Clear messages for me'),
+                  child: _MenuItemLabel(
+                    icon: Icons.cleaning_services_outlined,
+                    label: 'Clear messages for me',
+                  ),
                 ),
                 if ((currentConversation?.isDirect == true) ||
                     (currentConversation?.isGroup == true && canManageGroup))
                   const PopupMenuItem(
                     value: 'clear_all',
-                    child: Text('Clear messages for everyone'),
+                    child: _MenuItemLabel(
+                      icon: Icons.delete_sweep_outlined,
+                      label: 'Clear messages for everyone',
+                    ),
                   ),
               ];
             },
@@ -1065,36 +1104,57 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                     itemBuilder: (context) => [
                                       const PopupMenuItem(
                                         value: 'react',
-                                        child: Text('React'),
+                                        child: _MenuItemLabel(
+                                          icon: Icons.emoji_emotions_outlined,
+                                          label: 'React',
+                                        ),
                                       ),
                                       const PopupMenuItem(
                                         value: 'share',
-                                        child: Text('Share'),
+                                        child: _MenuItemLabel(
+                                          icon: Icons.share_outlined,
+                                          label: 'Share',
+                                        ),
                                       ),
                                       const PopupMenuItem(
                                         value: 'share_external',
-                                        child: Text('Share externally'),
+                                        child: _MenuItemLabel(
+                                          icon: Icons.open_in_new,
+                                          label: 'Share externally',
+                                        ),
                                       ),
                                       const PopupMenuItem(
                                         value: 'copy',
-                                        child: Text('Copy text'),
+                                        child: _MenuItemLabel(
+                                          icon: Icons.copy_outlined,
+                                          label: 'Copy text',
+                                        ),
                                       ),
                                       const PopupMenuItem(
                                         value: 'delete_me',
-                                        child: Text('Delete for me'),
+                                        child: _MenuItemLabel(
+                                          icon: Icons.delete_outline,
+                                          label: 'Delete for me',
+                                        ),
                                       ),
                                       if (mine &&
                                           resolved.kind == 'text' &&
                                           !resolved.isDeletedForEveryone)
                                         const PopupMenuItem(
                                           value: 'edit',
-                                          child: Text('Edit'),
+                                          child: _MenuItemLabel(
+                                            icon: Icons.edit_outlined,
+                                            label: 'Edit',
+                                          ),
                                         ),
                                       if (mine &&
                                           !resolved.isDeletedForEveryone)
                                         const PopupMenuItem(
                                           value: 'delete_everyone',
-                                          child: Text('Delete for everyone'),
+                                          child: _MenuItemLabel(
+                                            icon: Icons.delete_sweep_outlined,
+                                            label: 'Delete for everyone',
+                                          ),
                                         ),
                                     ],
                                   ),
@@ -1355,3 +1415,24 @@ final _pinnedIdsProvider = StreamProvider.family((ref, String userId) {
 final _mutedIdsProvider = StreamProvider.family((ref, String userId) {
   return ref.watch(chatRepositoryProvider).watchMutedConversationIds(userId);
 });
+
+class _MenuItemLabel extends StatelessWidget {
+  const _MenuItemLabel({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18),
+        const SizedBox(width: 8),
+        Text(label),
+      ],
+    );
+  }
+}

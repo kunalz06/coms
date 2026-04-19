@@ -41,7 +41,8 @@ class FileRules {
       );
     }
 
-    if (sizeBytes <= directDocumentLimitBytes) return FileDecision.allowDirect();
+    if (sizeBytes <= directDocumentLimitBytes)
+      return FileDecision.allowDirect();
     return FileDecision.reject(
       'Documents and other files must be 10 MB or smaller.',
     );
