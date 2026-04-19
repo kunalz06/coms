@@ -190,9 +190,10 @@ class CallController extends StateNotifier<CallControllerState> {
       throw StateError('Calling server is unavailable.');
     } catch (error) {
       await _groupWebRtc.disposeCall();
+      final existingError = state.error;
       _transition(
         CommsCallStatus.failed,
-        error: _friendlyCallError(error),
+        error: existingError ?? _friendlyCallError(error),
         clearCall: true,
       );
       rethrow;
@@ -234,9 +235,10 @@ class CallController extends StateNotifier<CallControllerState> {
       );
     } catch (error) {
       await _disposeActiveCall();
+      final existingError = state.error;
       _transition(
         CommsCallStatus.failed,
-        error: _friendlyCallError(error),
+        error: existingError ?? _friendlyCallError(error),
         clearCall: true,
       );
     }
@@ -359,9 +361,10 @@ class CallController extends StateNotifier<CallControllerState> {
       );
     } catch (error) {
       await _disposeActiveCall();
+      final existingError = state.error;
       _transition(
         CommsCallStatus.failed,
-        error: _friendlyCallError(error),
+        error: existingError ?? _friendlyCallError(error),
         clearCall: true,
       );
     }
@@ -823,6 +826,13 @@ class CallController extends StateNotifier<CallControllerState> {
 
   String _friendlyCallError(Object error) {
     final text = error.toString().toLowerCase();
+    if (text.contains('calling server is unavailable') ||
+        text.contains('websocket') ||
+        text.contains('ws') ||
+        text.contains('connection refused') ||
+        text.contains('network')) {
+      return 'Calling server is unavailable right now. Please retry in a moment.';
+    }
     if (text.contains('permission') ||
         text.contains('notallowed') ||
         text.contains('denied')) {
@@ -835,7 +845,10 @@ class CallController extends StateNotifier<CallControllerState> {
           ? 'Camera or microphone was not found on this device.'
           : 'Microphone was not found on this device.';
     }
-    return 'Call could not start. Check permissions and try again.';
+    if (text.contains('notreadable') || text.contains('track') || text.contains('hardware')) {
+      return 'Media device is busy or unavailable. Close other apps using camera/mic and retry.';
+    }
+    return 'Call could not start. Please check network and media access, then try again.';
   }
 
   @override

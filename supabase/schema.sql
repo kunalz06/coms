@@ -558,80 +558,43 @@ $$;
 
 create or replace function get_or_create_direct_conversation(other_user_id text)
 returns conversations
-language plpgsql
+language sql
 security definer
 set search_path = public
 as $$
-declare
-  current_user_id text := app_user_id();
-  existing_conversation_id uuid;
-  created_conversation conversations%ROWTYPE;
-begin
-  if current_user_id is null then
-    raise exception 'Not authenticated.' using errcode = '42501';
-  end if;
-
-  if other_user_id is null or other_user_id = current_user_id then
-    raise exception 'Choose another COMMS user.' using errcode = '22023';
-  end if;
-
-  if not exists (select 1 from user_profiles where id = other_user_id) then
-    raise exception 'No COMMS user exists for this conversation.' using errcode = '22023';
-  end if;
-
-  if users_are_blocked(current_user_id, other_user_id) then
-    raise exception 'This contact is blocked.' using errcode = '42501';
-  end if;
-
-  select id
-  into existing_conversation_id
-  from conversations
-  where type = 'direct'
-    and (
-      (user_one_id = current_user_id and user_two_id = other_user_id)
-      or
-      (user_one_id = other_user_id and user_two_id = current_user_id)
-    )
-  limit 1;
-
-  if existing_conversation_id is not null then
-    select *
-    into created_conversation
-    from conversations
-    where id = existing_conversation_id
-    limit 1;
-    return created_conversation;
-  end if;
-
-  begin
-    insert into conversations (type, user_one_id, user_two_id)
-    values ('direct', least(current_user_id, other_user_id), greatest(current_user_id, other_user_id))
-    returning * into created_conversation;
-    return created_conversation;
-  exception when unique_violation then
-    select id
-    into existing_conversation_id
-    from conversations
-    where type = 'direct'
+  with ctx as (
+    select app_user_id() as current_user_id
+  ),
+  existing as (
+    select c.*
+    from conversations c, ctx
+    where c.type = 'direct'
       and (
-        (user_one_id = current_user_id and user_two_id = other_user_id)
+        (c.user_one_id = ctx.current_user_id and c.user_two_id = other_user_id)
         or
-        (user_one_id = other_user_id and user_two_id = current_user_id)
+        (c.user_one_id = other_user_id and c.user_two_id = ctx.current_user_id)
       )
-    limit 1;
-
-    if existing_conversation_id is not null then
-      select *
-      into created_conversation
-      from conversations
-      where id = existing_conversation_id
-      limit 1;
-      return created_conversation;
-    end if;
-
-    raise;
-  end;
-end;
+    limit 1
+  ),
+  inserted as (
+    insert into conversations (type, user_one_id, user_two_id)
+    select 'direct', least(ctx.current_user_id, other_user_id), greatest(ctx.current_user_id, other_user_id)
+    from ctx
+    where ctx.current_user_id is not null
+      and other_user_id is not null
+      and other_user_id <> ctx.current_user_id
+      and exists (select 1 from user_profiles where id = other_user_id)
+      and not users_are_blocked(ctx.current_user_id, other_user_id)
+      and not exists (select 1 from existing)
+    on conflict (least(user_one_id, user_two_id), greatest(user_one_id, user_two_id)) do nothing
+    returning *
+  )
+  select *
+  from inserted
+  union all
+  select *
+  from existing
+  limit 1;
 $$;
 
 grant execute on function get_or_create_direct_conversation(text) to anon, authenticated;
