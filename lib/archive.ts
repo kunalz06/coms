@@ -45,6 +45,12 @@ type InternalArchivePayload = Omit<ArchiveFilePayload, "messages"> & {
   messages: BackedUpMessagePayload[];
 };
 
+function hasInlineAttachmentData(
+  attachment: ArchivedAttachmentPayload | BackedUpAttachmentPayload
+): attachment is BackedUpAttachmentPayload & { inline_data_base64: string } {
+  return typeof (attachment as BackedUpAttachmentPayload).inline_data_base64 === "string" && (attachment as BackedUpAttachmentPayload).inline_data_base64.length > 0;
+}
+
 function encryptionKey() {
   const secret = process.env.BACKUP_TOKEN_ENCRYPTION_KEY;
   if (!secret) throw new Error("BACKUP_TOKEN_ENCRYPTION_KEY is not configured.");
@@ -456,10 +462,10 @@ export async function restoreArchivedAttachment(supabase: any, userId: string, q
   const messages = await loadArchiveMessages(supabase, userId, query.conversationId);
   const message = messages.find((item) => item.id === query.messageId);
   if (!message) throw new Error("Archived message was not found.");
-  const attachment = (message.attachments ?? []).find((item) => item.id === query.attachmentId);
+  const attachment = ((message.attachments ?? []) as BackedUpAttachmentPayload[]).find((item) => item.id === query.attachmentId);
   if (!attachment) throw new Error("Archived attachment was not found.");
 
-  if (attachment.inline_data_base64) {
+  if (hasInlineAttachmentData(attachment)) {
     return {
       body: Buffer.from(attachment.inline_data_base64, "base64"),
       mimeType: attachment.mime_type,

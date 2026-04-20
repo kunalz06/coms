@@ -49,3 +49,7 @@ npm run backend:dev
 - Vercel deploys Flutter web from `build/web` using `tool/vercel_build.sh`.
 - Render hosts backend/signaling (`server/index.ts` + `app/api/*`).
 
+## Mobile distribution (sideload only)
+
+- APK + IPA sideload flow is documented in `docs/SIDELOAD_BUILD.md`.
+- This project does not require Play Store/App Store publishing for release builds.
