@@ -16,8 +16,8 @@ class ChatRepository {
   ChatRepository(this._supabase);
 
   final SupabaseClient _supabase;
-  static const _pollInterval = Duration(seconds: 8);
-  static const _maxPollInterval = Duration(seconds: 45);
+  static const _pollInterval = Duration(seconds: 2);
+  static const _maxPollInterval = Duration(seconds: 20);
   static const _messageWindowSize = 150;
 
   Stream<List<Conversation>> watchConversations(String userId) {
@@ -205,6 +205,7 @@ class ChatRepository {
     await _supabase
         .from('messages')
         .update({'content': trimmed}).eq('id', messageId);
+    await _touchMessage(messageId);
   }
 
   Future<void> deleteMessageForEveryone({
@@ -213,6 +214,7 @@ class ChatRepository {
     await _supabase.from('messages').update({
       'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
     }).eq('id', messageId);
+    await _touchMessage(messageId);
   }
 
   Future<void> deleteMessageForMe({
@@ -226,6 +228,7 @@ class ChatRepository {
       },
       onConflict: 'message_id,user_id',
     );
+    await _touchMessage(messageId);
   }
 
   Future<void> clearConversationForMe({
@@ -404,6 +407,7 @@ class ChatRepository {
       'kind': kind,
       'content': trimmed.length > 80 ? trimmed.substring(0, 80) : trimmed,
     });
+    await _touchMessage(messageId);
   }
 
   Future<void> removeReaction({
@@ -421,6 +425,13 @@ class ChatRepository {
         .eq('user_id', userId)
         .eq('kind', kind)
         .eq('content', trimmed);
+    await _touchMessage(messageId);
+  }
+
+  Future<void> _touchMessage(String messageId) async {
+    await _supabase.from('messages').update({
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', messageId);
   }
 
   Future<void> shareMessageToConversation({

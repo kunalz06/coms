@@ -187,8 +187,8 @@ class CallController extends StateNotifier<CallControllerState> {
   }) async {
     try {
       await connect(currentUserId);
-      await _webRtc.disposeCall();
-      await _groupWebRtc.disposeCall();
+      await _safeDisposeCall(_webRtc.disposeCall);
+      await _safeDisposeCall(_groupWebRtc.disposeCall);
       _resetIfTerminal();
       _transition(
         CommsCallStatus.acquiringMedia,
@@ -200,13 +200,18 @@ class CallController extends StateNotifier<CallControllerState> {
         isMinimized: false,
         callStarterUserId: currentUserId,
       );
-      final stream = await _groupWebRtc.acquireMedia(mode);
+      final stream = await _acquireGroupMediaResilient(mode);
+      final effectiveMode = mode == CallMode.video &&
+              stream.getVideoTracks().isEmpty
+          ? CallMode.audio
+          : mode;
       state = state.copyWith(
         localStream: _groupWebRtc.previewStream ?? stream,
         cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
         isGroupCall: true,
         isMinimized: false,
+        mode: effectiveMode,
       );
       _transition(CommsCallStatus.connecting);
       final sent = _signaling.send(
@@ -214,7 +219,7 @@ class CallController extends StateNotifier<CallControllerState> {
           type: 'group-call-start',
           from: currentUserId,
           conversationId: conversationId,
-          mode: mode,
+          mode: effectiveMode,
           raw: {'requestId': _repository.newCallId()},
         ),
       );
@@ -245,16 +250,21 @@ class CallController extends StateNotifier<CallControllerState> {
       final conversationId = state.conversationId;
       if (conversationId == null) return;
       await connect(currentUserId);
-      await _webRtc.disposeCall();
+      await _safeDisposeCall(_webRtc.disposeCall);
       _ringTimer?.cancel();
       _transition(CommsCallStatus.acquiringMedia);
-      final stream = await _groupWebRtc.acquireMedia(state.mode);
+      final stream = await _acquireGroupMediaResilient(state.mode);
+      final effectiveMode = state.mode == CallMode.video &&
+              stream.getVideoTracks().isEmpty
+          ? CallMode.audio
+          : state.mode;
       state = state.copyWith(
         localStream: _groupWebRtc.previewStream ?? stream,
         cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
         isGroupCall: true,
         isMinimized: false,
+        mode: effectiveMode,
       );
       _transition(CommsCallStatus.connecting);
       final sent = _signaling.send(
@@ -262,7 +272,7 @@ class CallController extends StateNotifier<CallControllerState> {
           type: 'group-call-join',
           from: currentUserId,
           conversationId: conversationId,
-          mode: state.mode,
+          mode: effectiveMode,
           raw: {'requestId': _repository.newCallId()},
         ),
       );
@@ -469,7 +479,7 @@ class CallController extends StateNotifier<CallControllerState> {
       final peerId = state.peerId;
       final conversationId = state.conversationId;
       if (callId == null || peerId == null || conversationId == null) return;
-      await _groupWebRtc.disposeCall();
+      await _safeDisposeCall(_groupWebRtc.disposeCall);
       _ringTimer?.cancel();
       _transition(CommsCallStatus.acquiringMedia);
       final stream = await _webRtc.acquireMedia(state.mode);
@@ -800,6 +810,37 @@ class CallController extends StateNotifier<CallControllerState> {
         offer: offer,
       ),
     );
+  }
+
+  Future<void> _safeDisposeCall(Future<void> Function() dispose) async {
+    try {
+      await dispose();
+    } catch (_) {
+      // Best-effort cleanup before starting another call flow.
+    }
+  }
+
+  Future<MediaStream> _acquireGroupMediaResilient(CallMode mode) async {
+    try {
+      return await _groupWebRtc.acquireMedia(mode);
+    } catch (_) {
+      await _safeDisposeCall(_groupWebRtc.disposeCall);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      try {
+        return await _groupWebRtc.acquireMedia(mode);
+      } catch (secondError) {
+        final text = secondError.toString().toLowerCase();
+        if (mode == CallMode.video &&
+            (text.contains('permission') ||
+                text.contains('notallowed') ||
+                text.contains('notreadable') ||
+                text.contains('overconstrained') ||
+                text.contains('operationerror'))) {
+          return _groupWebRtc.acquireMedia(CallMode.audio);
+        }
+        rethrow;
+      }
+    }
   }
 
   Future<bool> _canShareScreenWithoutApproval({

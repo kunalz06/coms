@@ -8,8 +8,8 @@ type ClientSocket = WebSocket & {
 };
 
 type GroupCallMessage =
-  | { type: "group-call-start"; requestId: string; from: string; conversationId: string; mode: "audio" | "video" }
-  | { type: "group-call-join"; requestId: string; from: string; conversationId: string; mode: "audio" | "video" }
+  | { type: "group-call-start"; requestId?: string; from: string; conversationId: string; mode: "audio" | "video" }
+  | { type: "group-call-join"; requestId?: string; from: string; conversationId: string; mode: "audio" | "video" }
   | { type: "group-call-leave"; requestId?: string; from: string; conversationId: string }
   | { type: "group-call-end"; requestId?: string; from: string; conversationId: string }
   | { type: "group-call-offer"; from: string; to: string; conversationId: string; offer: unknown }
@@ -61,7 +61,7 @@ export function isGroupCallMessage(message: unknown): message is GroupCallMessag
   switch (message.type) {
     case "group-call-start":
     case "group-call-join":
-      return isNonEmptyString(message.requestId) && isMode(message.mode);
+      return (message.requestId === undefined || isNonEmptyString(message.requestId)) && isMode(message.mode);
     case "group-call-leave":
     case "group-call-end":
       return message.requestId === undefined || isNonEmptyString(message.requestId);
@@ -191,7 +191,7 @@ export class GroupCallInviteManager {
     await this.joinSession(socket, session, message.from, message.requestId);
   }
 
-  private async joinSession(socket: ClientSocket, session: GroupCallSession, userId: string, requestId: string) {
+  private async joinSession(socket: ClientSocket, session: GroupCallSession, userId: string, requestId?: string) {
     const existingParticipantIds = [...session.participantIds].filter((participantId) => participantId !== userId);
     if (!session.participantIds.has(userId) && session.participantIds.size >= MAX_GROUP_CALL_PARTICIPANTS) {
       throw new Error("Group calls are limited to 10 people in this MVP.");
