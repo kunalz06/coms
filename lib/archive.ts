@@ -9,6 +9,12 @@ import type {
 } from "@/types";
 import { downloadGoogleDriveFile, refreshGoogleDriveAccessToken, type GoogleDriveConnection, uploadGoogleDriveJson } from "@/lib/google-drive";
 
+type BackupPreferenceRow = BackupPreference & {
+  drive_access_token_enc: string | null;
+  drive_refresh_token_enc: string | null;
+  drive_token_expires_at: string | null;
+};
+
 type MessageAttachmentRow = {
   id: string;
   message_id: string;
@@ -89,10 +95,10 @@ async function ensureParticipant(supabase: any, userId: string, conversationId: 
   if (!member) throw new Error("You do not have access to this conversation.");
 }
 
-async function getPreference(supabase: any, userId: string): Promise<BackupPreference | null> {
+async function getPreference(supabase: any, userId: string): Promise<BackupPreferenceRow | null> {
   const { data, error } = await supabase.from("backup_preferences").select("*").eq("user_id", userId).maybeSingle();
   if (error) throw new Error(error.message);
-  return ((data as BackupPreference | null) ?? null);
+  return ((data as BackupPreferenceRow | null) ?? null);
 }
 
 async function patchPreference(supabase: any, userId: string, patch: Record<string, unknown>) {
@@ -114,8 +120,8 @@ async function validAccessToken(supabase: any, userId: string) {
     throw new Error("Backup is not enabled for this user.");
   }
 
-  const currentToken = decryptToken((preference as any).drive_access_token_enc ?? null);
-  const refreshToken = decryptToken((preference as any).drive_refresh_token_enc ?? null);
+  const currentToken = decryptToken(preference.drive_access_token_enc ?? null);
+  const refreshToken = decryptToken(preference.drive_refresh_token_enc ?? null);
   const expiresAt = preference.drive_token_expires_at ? new Date(preference.drive_token_expires_at).getTime() : null;
   const safety = Date.now() + 30_000;
 
