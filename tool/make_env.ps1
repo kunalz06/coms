@@ -1,5 +1,5 @@
 param(
-  [string]$RootEnv = "..\..\.env.local",
+  [string]$RootEnv = ".env.local",
   [string]$Output = "env\local.json",
   [string]$DotEnvOutput = ".env.local"
 )

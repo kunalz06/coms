@@ -4,13 +4,12 @@
   "private": true,
   "description": "COMMS is a minimal messaging and audio/video calling app.",
   "scripts": {
-    "dev": "cd clients/comms_flutter && flutter run -d chrome --dart-define-from-file=env/local.json",
-    "build": "cd clients/comms_flutter && flutter build web --release --dart-define-from-file=env/local.json",
+    "dev": "flutter run -d chrome --dart-define-from-file=env/local.json",
+    "build": "flutter build web --release --dart-define-from-file=env/local.json",
     "start": "npm run backend:start",
     "backend:dev": "tsx watch server/index.ts",
     "backend:build": "next build && tsc -p tsconfig.server.json",
     "backend:start": "node dist-server/server/index.js",
-    "legacy:web:build": "next build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-FLUTTER_DIR="$ROOT_DIR/clients/comms_flutter"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FLUTTER_DIR="$ROOT_DIR"
 FLUTTER_VERSION="${FLUTTER_VERSION:-3.29.2}"
 FLUTTER_HOME="$ROOT_DIR/.flutter-sdk"
 FLUTTER_ARCHIVE="/tmp/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
@@ -34,7 +34,7 @@ cd "$FLUTTER_DIR"
 flutter pub get
 
 if [ ! -f "env/flutter.web.vercel.json" ]; then
-  echo "Missing clients/comms_flutter/env/flutter.web.vercel.json"
+  echo "Missing env/flutter.web.vercel.json"
   exit 1
 fi
 

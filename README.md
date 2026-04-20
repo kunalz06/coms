@@ -1,92 +1,51 @@
 # COMMS
 
-COMMS is now a Flutter-first client with a Node support backend.
+Flutter is now the main app at repository root.
 
-## Main App (Flutter)
+## Main client
 
-- Primary client: `clients/comms_flutter`
+- Flutter source: root (`lib`, `android`, `ios`, `web`)
 - Platforms: Web, Android, iOS
-- Flutter is the default development and deployment workflow.
 
-## Support Backend (Node + Next Runtime)
-
-The backend remains in the repository for API and signaling compatibility during migration:
-
-- WebSocket signaling: `WS /ws`
-- Health: `GET /healthz`
-- API routes: `app/api/*`
-- Server entry: `server/index.ts`
-
-This backend is not the primary frontend anymore.
-
-## Repository Workflow
-
-Root scripts now default to Flutter:
+Run locally:
 
 ```bash
-npm run dev
-npm run build
+flutter pub get
+flutter run -d chrome --dart-define-from-file=env/local.json
 ```
 
-Backend scripts are explicit:
+Build web:
+
+```bash
+flutter build web --release --dart-define-from-file=env/local.json
+```
+
+## Backend support service
+
+The Node service is still kept for production stability:
+
+- Signaling: `WS /ws`
+- Health check: `GET /healthz`
+- API handlers: `app/api/*`
+- Server entry: `server/index.ts`
+
+Run backend locally:
 
 ```bash
 npm run backend:dev
-npm run backend:build
-npm run backend:start
 ```
 
-Legacy Next frontend build command remains for compatibility only:
+## Environment
 
-```bash
-npm run legacy:web:build
-```
-
-## Local Setup
-
-1. Create root env:
-   - Copy `.env.example` to `.env.local`
-2. Generate Flutter env from root env:
+1. Copy `.env.example` to `.env.local`
+2. Generate Flutter env JSON:
 
 ```powershell
-cd clients\comms_flutter
 .\tool\make_env.ps1
 ```
 
-3. Run Flutter web locally:
+## Deployment
 
-```powershell
-cd ..\..
-npm run dev
-```
+- Vercel deploys Flutter web from `build/web` using `tool/vercel_build.sh`.
+- Render hosts backend/signaling (`server/index.ts` + `app/api/*`).
 
-4. Run backend signaling/API support server:
-
-```powershell
-npm run backend:dev
-```
-
-## Deployment Model
-
-### Frontend
-
-- Deploy Flutter web output to Vercel from `clients/comms_flutter/build/web`.
-
-### Backend
-
-- Keep backend/signaling on Render (or equivalent Node host).
-- Flutter must point to backend via:
-  - `COMMS_API_BASE_URL`
-  - `COMMS_SIGNALING_URL`
-
-## Vercel Notes
-
-- Vercel config is in `vercel.json`.
-- Build script installs Flutter in CI and builds `clients/comms_flutter`.
-- Output directory is `clients/comms_flutter/build/web`.
-
-## Migration Status
-
-- Flutter is the main client.
-- Backend contracts are frozen under `docs/migration`.
-- Legacy Next frontend is retained as non-primary migration support code.
