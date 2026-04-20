@@ -14,7 +14,10 @@ type GroupCallMessage =
   | { type: "group-call-end"; requestId?: string; from: string; conversationId: string }
   | { type: "group-call-offer"; from: string; to: string; conversationId: string; offer: unknown }
   | { type: "group-call-answer"; from: string; to: string; conversationId: string; answer: unknown }
-  | { type: "group-call-ice-candidate"; from: string; to: string; conversationId: string; candidate: unknown };
+  | { type: "group-call-ice-candidate"; from: string; to: string; conversationId: string; candidate: unknown }
+  | { type: "group-call-share-request"; requestId: string; from: string; conversationId: string }
+  | { type: "group-call-share-decision"; from: string; to: string; conversationId: string; approved: boolean }
+  | { type: "group-call-share-status"; from: string; conversationId: string; enabled: boolean };
 
 type GroupCallSession = {
   id: string;
@@ -23,6 +26,7 @@ type GroupCallSession = {
   mode: "audio" | "video";
   invitedUserIds: Set<string>;
   participantIds: Set<string>;
+  approvedScreenSharers: Set<string>;
   startedAt: number;
 };
 
@@ -67,6 +71,12 @@ export function isGroupCallMessage(message: unknown): message is GroupCallMessag
       return isNonEmptyString(message.to) && "answer" in message;
     case "group-call-ice-candidate":
       return isNonEmptyString(message.to) && "candidate" in message;
+    case "group-call-share-request":
+      return isNonEmptyString(message.requestId);
+    case "group-call-share-decision":
+      return isNonEmptyString(message.to) && typeof message.approved === "boolean";
+    case "group-call-share-status":
+      return typeof message.enabled === "boolean";
     default:
       return false;
   }
@@ -110,6 +120,15 @@ export class GroupCallInviteManager {
         case "group-call-ice-candidate":
           await this.relay(message);
           return;
+        case "group-call-share-request":
+          await this.requestShare(message);
+          return;
+        case "group-call-share-decision":
+          await this.shareDecision(message);
+          return;
+        case "group-call-share-status":
+          await this.shareStatus(message);
+          return;
       }
     } catch (error) {
       this.respond(message.from, "requestId" in message ? message.requestId : undefined, false, null, toErrorMessage(error));
@@ -146,6 +165,7 @@ export class GroupCallInviteManager {
         mode: message.mode,
         invitedUserIds: new Set(memberIds),
         participantIds: new Set(),
+        approvedScreenSharers: new Set([message.from]),
         startedAt: Date.now()
       };
       const createdSession = session;
@@ -180,6 +200,9 @@ export class GroupCallInviteManager {
     const wasAlreadyParticipant = session.participantIds.has(userId);
     session.participantIds.add(userId);
     session.invitedUserIds.add(userId);
+    if (await this.isPrivilegedSharer(session, userId)) {
+      session.approvedScreenSharers.add(userId);
+    }
     this.socketsByUser.set(socket, session.conversationId);
     if (!wasAlreadyParticipant) {
       await this.persist?.join(session, userId).catch((error) => console.error("Group call join persistence failed", { conversationId: session.conversationId, userId, message: toErrorMessage(error) }));
@@ -226,6 +249,80 @@ export class GroupCallInviteManager {
     this.sessions.delete(message.conversationId);
   }
 
+  private async requestShare(message: Extract<GroupCallMessage, { type: "group-call-share-request" }>) {
+    const session = this.sessions.get(message.conversationId);
+    if (!session || !session.participantIds.has(message.from)) {
+      throw new Error("This group call has ended.");
+    }
+    const canShareDirectly = await this.isPrivilegedSharer(session, message.from);
+    if (canShareDirectly) {
+      session.approvedScreenSharers.add(message.from);
+      this.respond(message.from, message.requestId, true, { approved: true });
+      return;
+    }
+
+    const approvers = [...session.participantIds].filter((participantId) => participantId !== message.from);
+    let sent = 0;
+    for (const approverId of approvers) {
+      if (!(await this.isPrivilegedSharer(session, approverId))) continue;
+      this.sendToUser(approverId, {
+        type: "group-call-share-request",
+        conversationId: session.conversationId,
+        from: message.from
+      });
+      sent += 1;
+    }
+    if (sent === 0) {
+      this.respond(message.from, message.requestId, false, null, "No owner/admin/call-starter is available to approve screen sharing.");
+      return;
+    }
+    this.respond(message.from, message.requestId, true, { requested: true });
+  }
+
+  private async shareDecision(message: Extract<GroupCallMessage, { type: "group-call-share-decision" }>) {
+    const session = this.sessions.get(message.conversationId);
+    if (!session || !session.participantIds.has(message.to) || !session.participantIds.has(message.from)) return;
+    const canApprove = await this.isPrivilegedSharer(session, message.from);
+    if (!canApprove) {
+      throw new Error("Only owner/admin/call-starter can approve screen sharing.");
+    }
+    if (message.approved) {
+      session.approvedScreenSharers.add(message.to);
+    } else {
+      session.approvedScreenSharers.delete(message.to);
+    }
+    this.sendToUser(message.to, {
+      type: "group-call-share-decision",
+      conversationId: message.conversationId,
+      from: message.from,
+      approved: message.approved
+    });
+  }
+
+  private async shareStatus(message: Extract<GroupCallMessage, { type: "group-call-share-status" }>) {
+    const session = this.sessions.get(message.conversationId);
+    if (!session || !session.participantIds.has(message.from)) return;
+    const privileged = await this.isPrivilegedSharer(session, message.from);
+    const allowed = privileged || session.approvedScreenSharers.has(message.from);
+    if (!allowed) {
+      throw new Error("Screen sharing approval is required.");
+    }
+    session.participantIds.forEach((participantId) => {
+      if (participantId === message.from) return;
+      this.sendToUser(participantId, {
+        type: "group-call-share-status",
+        conversationId: message.conversationId,
+        from: message.from,
+        enabled: message.enabled
+      });
+    });
+  }
+
+  private async isPrivilegedSharer(session: GroupCallSession, userId: string) {
+    if (session.hostId === userId) return true;
+    return this.canEndCall(session.conversationId, userId);
+  }
+
   private leave(conversationId: string, userId: string, requestId?: string) {
     const session = this.sessions.get(conversationId);
     if (!session || !session.participantIds.has(userId)) {
@@ -233,6 +330,7 @@ export class GroupCallInviteManager {
       return;
     }
     session.participantIds.delete(userId);
+    session.approvedScreenSharers.delete(userId);
     void this.persist?.leave(session, userId).catch((error) => console.error("Group call leave persistence failed", { conversationId, userId, message: toErrorMessage(error) }));
     session.participantIds.forEach((participantId) => {
       this.sendToUser(participantId, { type: "group-call-peer-left", conversationId, userId });

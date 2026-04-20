@@ -2,7 +2,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../app/router/app_routes.dart';
 import '../../chats/data/chat_repository.dart';
 import '../../../shared/models/conversation_member.dart';
 import '../data/call_controller.dart';
@@ -81,12 +83,58 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
         )
         .role;
     final canEndGroupCall = call.isGroupCall &&
-        (myRole == 'owner' || myRole == 'admin' || call.peerId == user.uid);
+        (myRole == 'owner' ||
+            myRole == 'admin' ||
+            call.callStarterUserId == user.uid);
+    final canShareDirectly = !call.isGroupCall ||
+        myRole == 'owner' ||
+        myRole == 'admin' ||
+        call.callStarterUserId == user.uid;
+    final pendingShareRequester = call.pendingScreenShareFromUserId;
 
     return Material(
       color: Theme.of(context).colorScheme.surface,
       child: Column(
         children: [
+          if (pendingShareRequester != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                            '$pendingShareRequester requested screen share'),
+                      ),
+                      TextButton(
+                        onPressed: () => ref
+                            .read(callControllerProvider.notifier)
+                            .denyScreenShareRequest(
+                              currentUserId: user.uid,
+                              requesterUserId: pendingShareRequester,
+                            ),
+                        child: const Text('Deny'),
+                      ),
+                      FilledButton(
+                        onPressed: () => ref
+                            .read(callControllerProvider.notifier)
+                            .approveScreenShareRequest(
+                              currentUserId: user.uid,
+                              requesterUserId: pendingShareRequester,
+                            ),
+                        child: const Text('Allow'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           Expanded(
             child: hasVideo
                 ? Stack(
@@ -128,15 +176,16 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                                   .colorScheme
                                   .surfaceContainerHighest,
                             ),
-                            child:
-                                call.localStream == null || !call.cameraEnabled
-                                    ? const Icon(Icons.videocam_off_outlined)
-                                    : RTCVideoView(
-                                        _localRenderer,
-                                        mirror: true,
-                                        objectFit: RTCVideoViewObjectFit
-                                            .RTCVideoViewObjectFitCover,
-                                      ),
+                            child: call.localStream == null ||
+                                    (!call.cameraEnabled &&
+                                        !call.isScreenSharing)
+                                ? const Icon(Icons.videocam_off_outlined)
+                                : RTCVideoView(
+                                    _localRenderer,
+                                    mirror: true,
+                                    objectFit: RTCVideoViewObjectFit
+                                        .RTCVideoViewObjectFitCover,
+                                  ),
                           ),
                         ),
                       ),
@@ -204,6 +253,46 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                     onPressed: () => ref
                         .read(callControllerProvider.notifier)
                         .end(currentUserId: user.uid),
+                  ),
+                  if (hasVideo)
+                    _RoundCallButton(
+                      icon: call.isScreenSharing
+                          ? Icons.stop_screen_share_outlined
+                          : Icons.screen_share_outlined,
+                      label: call.isScreenSharing
+                          ? 'Stop share'
+                          : call.screenShareRequestPending
+                              ? 'Share requested'
+                              : canShareDirectly
+                                  ? 'Share screen'
+                                  : 'Request share',
+                      onPressed: call.screenShareRequestPending
+                          ? () {}
+                          : () => ref
+                              .read(callControllerProvider.notifier)
+                              .toggleScreenShare(currentUserId: user.uid),
+                    ),
+                  _RoundCallButton(
+                    icon: Icons.picture_in_picture_alt_outlined,
+                    label: 'Minimize',
+                    onPressed: () {
+                      ref
+                          .read(callControllerProvider.notifier)
+                          .setMinimized(true);
+                      final conversationId = call.conversationId;
+                      if (conversationId != null && context.mounted) {
+                        context.go(
+                          AppRoutes.conversation.replaceFirst(
+                            ':conversationId',
+                            conversationId,
+                          ),
+                        );
+                        return;
+                      }
+                      if (context.mounted) {
+                        context.go(AppRoutes.chats);
+                      }
+                    },
                   ),
                   if (canEndGroupCall)
                     _RoundCallButton(

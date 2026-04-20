@@ -69,12 +69,56 @@ class AppShell extends ConsumerWidget {
       ],
     );
 
+    Widget withMiniOverlay(Widget child) {
+      if (user == null) return child;
+      final showMini = callState.isMinimized &&
+          callState.status != CommsCallStatus.idle &&
+          callState.status != CommsCallStatus.ended &&
+          callState.status != CommsCallStatus.failed;
+      if (!showMini) return child;
+      return Stack(
+        children: [
+          child,
+          Positioned(
+            right: 14,
+            bottom: 18,
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  ref.read(callControllerProvider.notifier).setMinimized(false);
+                  context.go(AppRoutes.calls);
+                },
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.call, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        callState.isGroupCall ? 'Group call' : 'Call',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final windowClass = windowClassForWidth(constraints.maxWidth);
         if (windowClass == WindowClass.compact) {
           return Scaffold(
-            body: SafeArea(child: content),
+            body: SafeArea(child: withMiniOverlay(content)),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _index,
               onDestinationSelected: (index) => _go(context, index),
@@ -126,7 +170,7 @@ class AppShell extends ConsumerWidget {
                 VerticalDivider(
                     width: 1,
                     color: Theme.of(context).colorScheme.outlineVariant),
-                Expanded(child: content),
+                Expanded(child: withMiniOverlay(content)),
               ],
             ),
           ),
@@ -183,7 +227,10 @@ class _GlobalCallBanner extends ConsumerWidget {
                 child: const Text('Join'),
               ),
             TextButton(
-              onPressed: () => context.go(AppRoutes.calls),
+              onPressed: () {
+                ref.read(callControllerProvider.notifier).setMinimized(false);
+                context.go(AppRoutes.calls);
+              },
               child: const Text('Open'),
             ),
             TextButton(

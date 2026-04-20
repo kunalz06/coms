@@ -74,6 +74,21 @@ class CallRepository {
     return 'call-$timestamp-$suffix';
   }
 
+  Future<String?> conversationRole({
+    required String conversationId,
+    required String userId,
+  }) async {
+    final row = await _supabase
+        .from('conversation_members')
+        .select('role')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    final role = row?['role']?.toString();
+    if (role == null || role.isEmpty) return null;
+    return role;
+  }
+
   Future<List<DirectCallSession>> _fetchRecentDirectCalls(String userId) async {
     final rows = await _supabase
         .from('call_sessions')

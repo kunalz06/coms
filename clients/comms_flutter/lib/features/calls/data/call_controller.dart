@@ -34,6 +34,11 @@ class CallControllerState {
     this.isGroupCall = false,
     this.microphoneEnabled = true,
     this.cameraEnabled = true,
+    this.isMinimized = false,
+    this.isScreenSharing = false,
+    this.screenShareRequestPending = false,
+    this.pendingScreenShareFromUserId,
+    this.callStarterUserId,
     this.error,
   });
 
@@ -48,6 +53,11 @@ class CallControllerState {
   final bool isGroupCall;
   final bool microphoneEnabled;
   final bool cameraEnabled;
+  final bool isMinimized;
+  final bool isScreenSharing;
+  final bool screenShareRequestPending;
+  final String? pendingScreenShareFromUserId;
+  final String? callStarterUserId;
   final String? error;
 
   CallControllerState copyWith({
@@ -62,6 +72,12 @@ class CallControllerState {
     bool? isGroupCall,
     bool? microphoneEnabled,
     bool? cameraEnabled,
+    bool? isMinimized,
+    bool? isScreenSharing,
+    bool? screenShareRequestPending,
+    String? pendingScreenShareFromUserId,
+    bool clearPendingScreenShareRequester = false,
+    String? callStarterUserId,
     String? error,
     bool clearCall = false,
   }) {
@@ -77,6 +93,20 @@ class CallControllerState {
       isGroupCall: clearCall ? false : isGroupCall ?? this.isGroupCall,
       microphoneEnabled: microphoneEnabled ?? this.microphoneEnabled,
       cameraEnabled: cameraEnabled ?? this.cameraEnabled,
+      isMinimized: clearCall ? false : isMinimized ?? this.isMinimized,
+      isScreenSharing:
+          clearCall ? false : isScreenSharing ?? this.isScreenSharing,
+      screenShareRequestPending: clearCall
+          ? false
+          : screenShareRequestPending ?? this.screenShareRequestPending,
+      pendingScreenShareFromUserId: clearCall
+          ? null
+          : clearPendingScreenShareRequester
+              ? null
+              : pendingScreenShareFromUserId ??
+                  this.pendingScreenShareFromUserId,
+      callStarterUserId:
+          clearCall ? null : callStarterUserId ?? this.callStarterUserId,
       error: error,
     );
   }
@@ -117,6 +147,7 @@ class CallController extends StateNotifier<CallControllerState> {
     required CallMode mode,
   }) async {
     await connect(currentUserId);
+    await _groupWebRtc.disposeCall();
     _resetIfTerminal();
     final callId = _repository.newCallId();
     _transition(
@@ -125,6 +156,8 @@ class CallController extends StateNotifier<CallControllerState> {
       peerId: peerId,
       conversationId: conversationId,
       mode: mode,
+      isMinimized: false,
+      callStarterUserId: currentUserId,
     );
     final sent = _signaling.send(
       CallSignal(
@@ -154,6 +187,8 @@ class CallController extends StateNotifier<CallControllerState> {
   }) async {
     try {
       await connect(currentUserId);
+      await _webRtc.disposeCall();
+      await _groupWebRtc.disposeCall();
       _resetIfTerminal();
       _transition(
         CommsCallStatus.acquiringMedia,
@@ -162,13 +197,16 @@ class CallController extends StateNotifier<CallControllerState> {
         peerId: 'Group call',
         mode: mode,
         isGroupCall: true,
+        isMinimized: false,
+        callStarterUserId: currentUserId,
       );
       final stream = await _groupWebRtc.acquireMedia(mode);
       state = state.copyWith(
-        localStream: stream,
+        localStream: _groupWebRtc.previewStream ?? stream,
         cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
         isGroupCall: true,
+        isMinimized: false,
       );
       _transition(CommsCallStatus.connecting);
       final sent = _signaling.send(
@@ -207,14 +245,16 @@ class CallController extends StateNotifier<CallControllerState> {
       final conversationId = state.conversationId;
       if (conversationId == null) return;
       await connect(currentUserId);
+      await _webRtc.disposeCall();
       _ringTimer?.cancel();
       _transition(CommsCallStatus.acquiringMedia);
       final stream = await _groupWebRtc.acquireMedia(state.mode);
       state = state.copyWith(
-        localStream: stream,
+        localStream: _groupWebRtc.previewStream ?? stream,
         cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
         isGroupCall: true,
+        isMinimized: false,
       );
       _transition(CommsCallStatus.connecting);
       final sent = _signaling.send(
@@ -325,6 +365,102 @@ class CallController extends StateNotifier<CallControllerState> {
     state = state.copyWith(cameraEnabled: next);
   }
 
+  void setMinimized(bool minimized) {
+    state = state.copyWith(isMinimized: minimized);
+  }
+
+  Future<void> toggleScreenShare({
+    required String currentUserId,
+  }) async {
+    if (state.mode != CallMode.video) {
+      state = state.copyWith(
+        error: 'Screen sharing is available only in video calls.',
+      );
+      return;
+    }
+    if (state.status != CommsCallStatus.connected) {
+      state = state.copyWith(
+        error: 'Connect the call first, then start screen sharing.',
+      );
+      return;
+    }
+
+    if (state.isScreenSharing) {
+      await _stopScreenShare(currentUserId: currentUserId);
+      return;
+    }
+
+    if (state.isGroupCall) {
+      final canShareDirectly =
+          await _canShareScreenWithoutApproval(currentUserId: currentUserId);
+      if (!canShareDirectly) {
+        final sent = _signaling.send(
+          CallSignal(
+            type: 'group-call-share-request',
+            from: currentUserId,
+            conversationId: state.conversationId,
+            raw: {'requestId': _repository.newCallId()},
+          ),
+        );
+        if (!sent) {
+          state = state.copyWith(
+            error: 'Could not send screen-share request.',
+          );
+          return;
+        }
+        state = state.copyWith(
+          screenShareRequestPending: true,
+          error: 'Screen-share request sent. Waiting for approval.',
+        );
+        return;
+      }
+    }
+
+    await _startScreenShare(currentUserId: currentUserId);
+  }
+
+  Future<void> approveScreenShareRequest({
+    required String currentUserId,
+    required String requesterUserId,
+  }) async {
+    final sent = _signaling.send(
+      CallSignal(
+        type: 'group-call-share-decision',
+        from: currentUserId,
+        to: requesterUserId,
+        conversationId: state.conversationId,
+        raw: {'approved': true},
+      ),
+    );
+    if (sent) {
+      state = state.copyWith(
+        clearPendingScreenShareRequester: true,
+        error: 'Screen-share request approved.',
+      );
+    }
+  }
+
+  Future<void> denyScreenShareRequest({
+    required String currentUserId,
+    required String requesterUserId,
+  }) async {
+    final sent = _signaling.send(
+      CallSignal(
+        type: 'group-call-share-decision',
+        from: currentUserId,
+        to: requesterUserId,
+        conversationId: state.conversationId,
+        raw: {'approved': false},
+      ),
+    );
+    if (sent) {
+      state = state.copyWith(
+        clearPendingScreenShareRequester: true,
+        error: 'Screen-share request declined.',
+      );
+    }
+  }
+
   Future<void> join({
     required String currentUserId,
   }) async {
@@ -333,13 +469,15 @@ class CallController extends StateNotifier<CallControllerState> {
       final peerId = state.peerId;
       final conversationId = state.conversationId;
       if (callId == null || peerId == null || conversationId == null) return;
+      await _groupWebRtc.disposeCall();
       _ringTimer?.cancel();
       _transition(CommsCallStatus.acquiringMedia);
       final stream = await _webRtc.acquireMedia(state.mode);
       state = state.copyWith(
-        localStream: stream,
+        localStream: _webRtc.previewStream ?? stream,
         cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
+        isMinimized: false,
       );
       _transition(CommsCallStatus.connecting);
       final sent = _signaling.send(
@@ -394,6 +532,8 @@ class CallController extends StateNotifier<CallControllerState> {
         peerId: from,
         conversationId: conversationId,
         mode: mode,
+        isMinimized: false,
+        callStarterUserId: from,
       );
       _startRingTimeout(currentUserId: _currentUserId, peerId: from);
       return;
@@ -483,6 +623,8 @@ class CallController extends StateNotifier<CallControllerState> {
         peerId: from ?? 'Group call',
         mode: mode,
         isGroupCall: true,
+        isMinimized: false,
+        callStarterUserId: from,
       );
       return;
     }
@@ -500,7 +642,10 @@ class CallController extends StateNotifier<CallControllerState> {
             clearCall: true,
           );
         } else {
-          state = state.copyWith(error: signal.raw['error']?.toString());
+          state = state.copyWith(
+            screenShareRequestPending: false,
+            error: signal.raw['error']?.toString(),
+          );
         }
         return;
       }
@@ -518,7 +663,11 @@ class CallController extends StateNotifier<CallControllerState> {
           await _sendGroupOffer(userId, participantId);
         }
       }
-      _transition(CommsCallStatus.connected, peerId: hostId);
+      _transition(
+        CommsCallStatus.connected,
+        peerId: hostId ?? state.peerId,
+        callStarterUserId: hostId ?? state.callStarterUserId,
+      );
       _connectionTimer?.cancel();
       return;
     }
@@ -589,6 +738,49 @@ class CallController extends StateNotifier<CallControllerState> {
       return;
     }
 
+    if (signal.type == 'group-call-share-request') {
+      final requesterId = signal.from;
+      if (requesterId == null || requesterId == userId) return;
+      final canApprove =
+          await _canShareScreenWithoutApproval(currentUserId: userId);
+      if (!canApprove) return;
+      state = state.copyWith(
+        pendingScreenShareFromUserId: requesterId,
+        error: '$requesterId requested permission to share screen.',
+      );
+      return;
+    }
+
+    if (signal.type == 'group-call-share-decision') {
+      final approved = signal.raw['approved'] == true;
+      if (!approved) {
+        state = state.copyWith(
+          screenShareRequestPending: false,
+          error: 'Screen-share request was declined.',
+        );
+        return;
+      }
+      state = state.copyWith(
+        screenShareRequestPending: false,
+        error: 'Screen-share request approved.',
+      );
+      await _startScreenShare(currentUserId: userId);
+      return;
+    }
+
+    if (signal.type == 'group-call-share-status') {
+      final from = signal.from;
+      final enabled = signal.raw['enabled'] == true;
+      if (from != null && from != userId) {
+        state = state.copyWith(
+          error: enabled
+              ? '$from started screen sharing.'
+              : '$from stopped screen sharing.',
+        );
+      }
+      return;
+    }
+
     if (signal.type == 'group-call-ended') {
       await _groupWebRtc.disposeCall();
       _transition(CommsCallStatus.ended, clearCall: true);
@@ -610,11 +802,93 @@ class CallController extends StateNotifier<CallControllerState> {
     );
   }
 
+  Future<bool> _canShareScreenWithoutApproval({
+    required String currentUserId,
+  }) async {
+    if (!state.isGroupCall) return true;
+    if (currentUserId == state.callStarterUserId) return true;
+    final conversationId = state.conversationId;
+    if (conversationId == null) return false;
+    final role = await _repository.conversationRole(
+      conversationId: conversationId,
+      userId: currentUserId,
+    );
+    return role == 'owner' || role == 'admin';
+  }
+
+  Future<void> _startScreenShare({
+    required String currentUserId,
+  }) async {
+    try {
+      if (state.isGroupCall) {
+        final stream = await _groupWebRtc.startScreenShare();
+        state = state.copyWith(
+          localStream: stream,
+          isScreenSharing: true,
+          cameraEnabled: true,
+          screenShareRequestPending: false,
+          error: 'You are sharing your screen.',
+        );
+        _signaling.send(
+          CallSignal(
+            type: 'group-call-share-status',
+            from: currentUserId,
+            conversationId: state.conversationId,
+            raw: {'enabled': true},
+          ),
+        );
+      } else {
+        final stream = await _webRtc.startScreenShare();
+        state = state.copyWith(
+          localStream: stream,
+          isScreenSharing: true,
+          cameraEnabled: true,
+          error: 'You are sharing your screen.',
+        );
+      }
+    } catch (error) {
+      state = state.copyWith(
+        screenShareRequestPending: false,
+        error: _friendlyCallError(error),
+      );
+    }
+  }
+
+  Future<void> _stopScreenShare({
+    required String currentUserId,
+  }) async {
+    if (state.isGroupCall) {
+      final stream = await _groupWebRtc.stopScreenShare();
+      state = state.copyWith(
+        localStream: stream,
+        isScreenSharing: false,
+        cameraEnabled: stream?.getVideoTracks().isNotEmpty == true,
+        error: 'Screen sharing stopped.',
+      );
+      _signaling.send(
+        CallSignal(
+          type: 'group-call-share-status',
+          from: currentUserId,
+          conversationId: state.conversationId,
+          raw: {'enabled': false},
+        ),
+      );
+      return;
+    }
+    final stream = await _webRtc.stopScreenShare();
+    state = state.copyWith(
+      localStream: stream,
+      isScreenSharing: false,
+      cameraEnabled: stream?.getVideoTracks().isNotEmpty == true,
+      error: 'Screen sharing stopped.',
+    );
+  }
+
   Future<void> _ensureGroupMedia() async {
     if (state.localStream != null) return;
     final stream = await _groupWebRtc.acquireMedia(state.mode);
     state = state.copyWith(
-      localStream: stream,
+      localStream: _groupWebRtc.previewStream ?? stream,
       cameraEnabled: stream.getVideoTracks().isNotEmpty,
       microphoneEnabled: true,
       isGroupCall: true,
@@ -651,7 +925,7 @@ class CallController extends StateNotifier<CallControllerState> {
     _transition(CommsCallStatus.acquiringMedia);
     final stream = await _webRtc.acquireMedia(state.mode);
     state = state.copyWith(
-      localStream: stream,
+      localStream: _webRtc.previewStream ?? stream,
       cameraEnabled: stream.getVideoTracks().isNotEmpty,
       microphoneEnabled: true,
     );
@@ -680,7 +954,7 @@ class CallController extends StateNotifier<CallControllerState> {
     if (state.localStream == null) {
       final stream = await _webRtc.acquireMedia(state.mode);
       state = state.copyWith(
-        localStream: stream,
+        localStream: _webRtc.previewStream ?? stream,
         cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
       );
@@ -738,6 +1012,9 @@ class CallController extends StateNotifier<CallControllerState> {
     CallMode? mode,
     String? error,
     bool? isGroupCall,
+    bool? isMinimized,
+    String? callStarterUserId,
+    bool clearPendingScreenShareRequester = false,
     bool clearCall = false,
   }) {
     if (!canTransitionCall(state.status, status)) return;
@@ -760,6 +1037,9 @@ class CallController extends StateNotifier<CallControllerState> {
       mode: mode,
       error: error,
       isGroupCall: nextIsGroupCall,
+      isMinimized: isMinimized,
+      callStarterUserId: callStarterUserId,
+      clearPendingScreenShareRequester: clearPendingScreenShareRequester,
       clearCall: clearCall,
     );
   }

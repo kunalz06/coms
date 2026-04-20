@@ -324,17 +324,17 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                     onPressed: _busy
                         ? null
                         : () async {
-                            await _run(
-                              () =>
-                                  ref.read(groupRepositoryProvider).leaveGroup(
-                                        conversationId: widget.conversationId,
-                                        userId: me,
-                                      ),
-                              message: 'You left the group.',
-                            );
-                            if (!mounted) return;
-                            context.go(AppRoutes.chats);
-                          },
+                              await _run(
+                                () =>
+                                    ref.read(groupRepositoryProvider).leaveGroup(
+                                          conversationId: widget.conversationId,
+                                          userId: me,
+                                        ),
+                                message: 'You left the group.',
+                              );
+                              if (!context.mounted) return;
+                              context.go(AppRoutes.chats);
+                            },
                     icon: const Icon(Icons.logout),
                     label: const Text('Leave group'),
                   ),
@@ -351,7 +351,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                                     ),
                                 message: 'Group deleted.',
                               );
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               context.go(AppRoutes.chats);
                             },
                       icon: const Icon(Icons.delete_forever_outlined),

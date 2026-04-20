@@ -26,7 +26,7 @@ class CallsScreen extends ConsumerWidget {
         controller.status != CommsCallStatus.ended &&
         controller.status != CommsCallStatus.failed;
 
-    if (callActive) {
+    if (callActive && !controller.isMinimized) {
       return Scaffold(
         appBar: AppBar(
           title: Text(controller.isGroupCall ? 'Group call' : 'Direct call'),
@@ -49,6 +49,40 @@ class CallsScreen extends ConsumerWidget {
         ),
         body: Column(
           children: [
+            if (callActive && controller.isMinimized)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.call_outlined),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            controller.isGroupCall
+                                ? 'Group call active'
+                                : 'Direct call active',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => ref
+                              .read(callControllerProvider.notifier)
+                              .setMinimized(false),
+                          child: const Text('Resume'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             if (controller.status == CommsCallStatus.failed &&
                 controller.error != null)
               Padding(

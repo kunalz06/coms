@@ -14,8 +14,12 @@ class WebRtcCallService {
   final AppConfig _config;
   RTCPeerConnection? _peer;
   MediaStream? _localStream;
+  MediaStream? _screenStream;
+  MediaStream? _previewStream;
 
   MediaStream? get localStream => _localStream;
+  MediaStream? get previewStream =>
+      _previewStream ?? _screenStream ?? _localStream;
 
   Future<MediaStream> acquireMedia(CallMode mode) async {
     _localStream?.getTracks().forEach((track) => track.stop());
@@ -31,6 +35,7 @@ class WebRtcCallService {
             : false,
       });
       _localStream = stream;
+      _previewStream = stream;
       return stream;
     } catch (_) {
       if (mode != CallMode.video) rethrow;
@@ -40,8 +45,56 @@ class WebRtcCallService {
         'video': false,
       });
       _localStream = stream;
+      _previewStream = stream;
       return stream;
     }
+  }
+
+  Future<MediaStream> startScreenShare() async {
+    final peer = _requirePeer();
+    final display = await navigator.mediaDevices.getDisplayMedia({
+      'video': true,
+      'audio': false,
+    });
+    final displayTrack = display.getVideoTracks().isNotEmpty
+        ? display.getVideoTracks().first
+        : null;
+    if (displayTrack == null) {
+      display.getTracks().forEach((track) => track.stop());
+      throw StateError('Screen share stream is unavailable.');
+    }
+
+    for (final sender in await peer.getSenders()) {
+      if (sender.track?.kind == 'video') {
+        await sender.replaceTrack(displayTrack);
+      }
+    }
+
+    displayTrack.onEnded = () {
+      stopScreenShare();
+    };
+
+    _screenStream = display;
+    _previewStream = display;
+    return display;
+  }
+
+  Future<MediaStream?> stopScreenShare() async {
+    final peer = _peer;
+    final localTrack = _localStream?.getVideoTracks().isNotEmpty == true
+        ? _localStream!.getVideoTracks().first
+        : null;
+    if (peer != null) {
+      for (final sender in await peer.getSenders()) {
+        if (sender.track?.kind == 'video') {
+          await sender.replaceTrack(localTrack);
+        }
+      }
+    }
+    _screenStream?.getTracks().forEach((track) => track.stop());
+    _screenStream = null;
+    _previewStream = _localStream;
+    return _previewStream;
   }
 
   Future<RTCPeerConnection> ensurePeer({
@@ -109,8 +162,11 @@ class WebRtcCallService {
   Future<void> disposeCall() async {
     await _peer?.close();
     _peer = null;
+    _screenStream?.getTracks().forEach((track) => track.stop());
+    _screenStream = null;
     _localStream?.getTracks().forEach((track) => track.stop());
     _localStream = null;
+    _previewStream = null;
   }
 
   bool setMicrophoneEnabled(bool enabled) {

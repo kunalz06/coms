@@ -1438,13 +1438,13 @@ class _ReactionSummary extends StatelessWidget {
               itemBuilder: (context, index) {
                 final reaction = message.reactions[index];
                 final profile = membersById[reaction.userId]?.profile;
-                final isMine = currentUserId != null &&
-                    reaction.userId == currentUserId;
+                final isMine =
+                    currentUserId != null && reaction.userId == currentUserId;
                 final userLabel = isMine
                     ? 'You'
-                    : (profile?.fullName?.trim().isNotEmpty == true
+                    : (profile?.fullName.trim().isNotEmpty == true
                         ? profile!.fullName
-                        : (profile?.email?.trim().isNotEmpty == true
+                        : (profile?.email.trim().isNotEmpty == true
                             ? profile!.email
                             : reaction.userId));
                 return ListTile(
