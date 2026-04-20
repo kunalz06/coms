@@ -692,7 +692,12 @@ class CallController extends StateNotifier<CallControllerState> {
       final participantIds = data is Map ? data['participantIds'] : null;
       if (participantIds is List) {
         for (final participantId in participantIds.whereType<String>()) {
-          await _sendGroupOfferSafely(userId, participantId);
+          if (_shouldInitiateGroupOffer(
+            currentUserId: userId,
+            peerId: participantId,
+          )) {
+            await _sendGroupOfferSafely(userId, participantId);
+          }
         }
       }
       _transition(
@@ -707,7 +712,12 @@ class CallController extends StateNotifier<CallControllerState> {
     if (signal.type == 'group-call-peer-joined') {
       final peerId = signal.raw['userId'] as String?;
       if (peerId != null && peerId != userId) {
-        await _sendGroupOfferSafely(userId, peerId);
+        if (_shouldInitiateGroupOffer(
+          currentUserId: userId,
+          peerId: peerId,
+        )) {
+          await _sendGroupOfferSafely(userId, peerId);
+        }
       }
       return;
     }
@@ -841,6 +851,15 @@ class CallController extends StateNotifier<CallControllerState> {
       // Keep the group call alive even if one peer negotiation fails.
       state = state.copyWith(error: 'Could not connect participant $peerId yet.');
     }
+  }
+
+  bool _shouldInitiateGroupOffer({
+    required String currentUserId,
+    required String peerId,
+  }) {
+    // Deterministic offerer selection avoids WebRTC glare:
+    // only one side in each peer pair creates/sends an offer.
+    return currentUserId.compareTo(peerId) < 0;
   }
 
   Future<void> _safeDisposeCall(Future<void> Function() dispose) async {
