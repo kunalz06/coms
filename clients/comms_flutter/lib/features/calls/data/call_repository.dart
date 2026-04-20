@@ -40,7 +40,7 @@ class CallRepository {
   CallRepository(this._supabase);
 
   final SupabaseClient _supabase;
-  static const _pollInterval = Duration(seconds: 4);
+  static const _pollInterval = Duration(seconds: 2);
 
   Stream<List<DirectCallSession>> watchRecentDirectCalls(String userId) {
     return _resilientStream<List<DirectCallSession>>(

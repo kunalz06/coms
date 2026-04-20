@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:record/record.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../shared/models/conversation.dart';
@@ -1347,7 +1348,11 @@ class _AttachmentPreview extends StatelessWidget {
       );
     }
 
-    return _FileChip(fileName: fileName, icon: Icons.description_outlined);
+    return _FileChip(
+      fileName: fileName,
+      icon: Icons.description_outlined,
+      url: url,
+    );
   }
 }
 
@@ -1507,16 +1512,32 @@ class _FileChip extends StatelessWidget {
   const _FileChip({
     required this.fileName,
     required this.icon,
+    this.url,
   });
 
   final String fileName;
   final IconData icon;
+  final String? url;
 
   @override
   Widget build(BuildContext context) {
-    return Chip(
+    Future<void> openAttachment() async {
+      final raw = url?.trim();
+      if (raw == null || raw.isEmpty) return;
+      final uri = Uri.tryParse(raw);
+      if (uri == null) return;
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open this document.')),
+        );
+      }
+    }
+
+    return ActionChip(
       avatar: Icon(icon, size: 18),
       label: Text(fileName, overflow: TextOverflow.ellipsis),
+      onPressed: url == null ? null : openAttachment,
     );
   }
 }

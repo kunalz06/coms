@@ -17,7 +17,7 @@ class ChatRepository {
 
   final SupabaseClient _supabase;
   static const _pollInterval = Duration(seconds: 2);
-  static const _maxPollInterval = Duration(seconds: 20);
+  static const _maxPollInterval = Duration(seconds: 2);
   static const _messageWindowSize = 150;
 
   Stream<List<Conversation>> watchConversations(String userId) {
