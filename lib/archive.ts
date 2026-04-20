@@ -90,9 +90,9 @@ async function ensureParticipant(supabase: any, userId: string, conversationId: 
 }
 
 async function getPreference(supabase: any, userId: string): Promise<BackupPreference | null> {
-  const { data, error } = await supabase.from("backup_preferences").select("*").eq("user_id", userId).maybeSingle<BackupPreference>();
+  const { data, error } = await supabase.from("backup_preferences").select("*").eq("user_id", userId).maybeSingle();
   if (error) throw new Error(error.message);
-  return data ?? null;
+  return ((data as BackupPreference | null) ?? null);
 }
 
 async function patchPreference(supabase: any, userId: string, patch: Record<string, unknown>) {
@@ -173,12 +173,11 @@ async function buildArchivePayload(
   const { data: attachmentsData, error: attachmentsError } = await supabase
     .from("message_attachments")
     .select("*")
-    .in("message_id", messageIds)
-    .returns<MessageAttachmentRow[]>();
+    .in("message_id", messageIds);
   if (attachmentsError) throw new Error(attachmentsError.message);
 
   const attachmentsByMessage = new Map<string, MessageAttachmentRow[]>();
-  for (const attachment of attachmentsData ?? []) {
+  for (const attachment of (attachmentsData as MessageAttachmentRow[] | null) ?? []) {
     const list = attachmentsByMessage.get(attachment.message_id) ?? [];
     list.push(attachment);
     attachmentsByMessage.set(attachment.message_id, list);
@@ -302,10 +301,9 @@ export async function runBackupForUser(supabase: any, userId: string) {
       .eq("archive_status", "pending")
       .is("content_redacted_at", null)
       .order("created_at", { ascending: true })
-      .limit(1000)
-      .returns<Message[]>();
+      .limit(1000);
     if (messageError) throw new Error(messageError.message);
-    const messages = messageRows ?? [];
+    const messages = ((messageRows as Message[] | null) ?? []);
 
     if (!messages.length) {
       await patchPreference(supabase, userId, {

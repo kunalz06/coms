@@ -36,14 +36,13 @@ export async function sendWebPushToUsers(supabase: any, userIds: string[], paylo
   const { data, error } = await supabase
     .from("push_subscriptions")
     .select("endpoint,p256dh,auth")
-    .in("user_id", userIds)
-    .returns<SubscriptionRow[]>();
+    .in("user_id", userIds);
 
   if (error) {
     throw new Error(error.message ?? "Failed to load push subscriptions.");
   }
 
-  const subscriptions = data ?? [];
+  const subscriptions = ((data as SubscriptionRow[] | null) ?? []);
   if (!subscriptions.length) return { sent: 0, failed: 0 };
 
   let sent = 0;
