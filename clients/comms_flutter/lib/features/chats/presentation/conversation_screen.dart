@@ -335,27 +335,62 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
-    _recordingBytes = BytesBuilder(copy: false);
-    final stream = await _recorder.startStream(
-      const RecordConfig(
-        encoder: AudioEncoder.wav,
-        sampleRate: 16000,
-        numChannels: 1,
-      ),
-    );
-    _recordingSubscription = stream.listen((chunk) {
-      _recordingBytes?.add(chunk);
-    });
-    if (mounted) setState(() => _recording = true);
+    try {
+      _recordingBytes = BytesBuilder(copy: false);
+      final stream = await _recorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+      );
+      _recordingSubscription = stream.listen(
+        (chunk) {
+          if (chunk.isNotEmpty) _recordingBytes?.add(chunk);
+        },
+        onError: (Object error, StackTrace stackTrace) async {
+          await _recordingSubscription?.cancel();
+          _recordingSubscription = null;
+          _recordingBytes = null;
+          if (mounted) {
+            setState(() => _recording = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Voice recording failed. Check microphone permission and retry.',
+                ),
+              ),
+            );
+          }
+        },
+      );
+      if (mounted) setState(() => _recording = true);
+    } catch (error) {
+      _recordingBytes = null;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not start recording: $error',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _stopAndSendRecording() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    await _recorder.stop();
+    try {
+      await _recorder.stop();
+    } catch (_) {
+      // Best effort. We'll still try to flush buffered chunks.
+    }
     await Future<void>.delayed(const Duration(milliseconds: 120));
-    await _recordingSubscription?.cancel();
+    try {
+      await _recordingSubscription?.cancel();
+    } catch (_) {}
     _recordingSubscription = null;
     final bytes = _recordingBytes?.takeBytes() ?? Uint8List(0);
     _recordingBytes = null;
@@ -408,8 +443,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _cancelRecording() async {
-    await _recorder.cancel();
-    await _recordingSubscription?.cancel();
+    try {
+      await _recorder.cancel();
+    } catch (_) {}
+    try {
+      await _recordingSubscription?.cancel();
+    } catch (_) {}
     _recordingSubscription = null;
     _recordingBytes = null;
     if (mounted) setState(() => _recording = false);
