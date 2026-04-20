@@ -602,6 +602,16 @@ class CallController extends StateNotifier<CallControllerState> {
       await _handleSignal(signal);
     } catch (error) {
       final wasGroupCall = state.isGroupCall;
+      final status = state.status;
+      final keepGroupSessionAlive = wasGroupCall &&
+          (status == CommsCallStatus.connected ||
+              status == CommsCallStatus.connecting ||
+              status == CommsCallStatus.reconnecting ||
+              status == CommsCallStatus.incomingRinging);
+      if (keepGroupSessionAlive) {
+        state = state.copyWith(error: _friendlyCallError(error));
+        return;
+      }
       _transition(
         CommsCallStatus.failed,
         error: _friendlyCallError(error),
@@ -618,6 +628,18 @@ class CallController extends StateNotifier<CallControllerState> {
   Future<void> _handleGroupSignal(CallSignal signal) async {
     final userId = _currentUserId;
     if (userId == null) return;
+    final activeConversationId = state.conversationId;
+    final signalConversationId = signal.conversationId;
+    final isInviteLike =
+        signal.type == 'group-call-invite' || signal.type == 'group-call-available';
+    if (!isInviteLike &&
+        state.isGroupCall &&
+        activeConversationId != null &&
+        signalConversationId != null &&
+        signalConversationId != activeConversationId) {
+      // Ignore stale group events for older/other conversations.
+      return;
+    }
 
     if (signal.type == 'group-call-invite' ||
         signal.type == 'group-call-available') {
@@ -670,7 +692,7 @@ class CallController extends StateNotifier<CallControllerState> {
       final participantIds = data is Map ? data['participantIds'] : null;
       if (participantIds is List) {
         for (final participantId in participantIds.whereType<String>()) {
-          await _sendGroupOffer(userId, participantId);
+          await _sendGroupOfferSafely(userId, participantId);
         }
       }
       _transition(
@@ -685,7 +707,7 @@ class CallController extends StateNotifier<CallControllerState> {
     if (signal.type == 'group-call-peer-joined') {
       final peerId = signal.raw['userId'] as String?;
       if (peerId != null && peerId != userId) {
-        await _sendGroupOffer(userId, peerId);
+        await _sendGroupOfferSafely(userId, peerId);
       }
       return;
     }
@@ -812,6 +834,15 @@ class CallController extends StateNotifier<CallControllerState> {
     );
   }
 
+  Future<void> _sendGroupOfferSafely(String currentUserId, String peerId) async {
+    try {
+      await _sendGroupOffer(currentUserId, peerId);
+    } catch (error) {
+      // Keep the group call alive even if one peer negotiation fails.
+      state = state.copyWith(error: 'Could not connect participant $peerId yet.');
+    }
+  }
+
   Future<void> _safeDisposeCall(Future<void> Function() dispose) async {
     try {
       await dispose();
@@ -927,7 +958,7 @@ class CallController extends StateNotifier<CallControllerState> {
 
   Future<void> _ensureGroupMedia() async {
     if (state.localStream != null) return;
-    final stream = await _groupWebRtc.acquireMedia(state.mode);
+    final stream = await _acquireGroupMediaResilient(state.mode);
     state = state.copyWith(
       localStream: _groupWebRtc.previewStream ?? stream,
       cameraEnabled: stream.getVideoTracks().isNotEmpty,

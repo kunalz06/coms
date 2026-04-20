@@ -25,7 +25,16 @@ class GroupWebRtcCallService {
       Map.unmodifiable(_remoteStreams);
 
   Future<MediaStream> acquireMedia(CallMode mode) async {
-    if (_localStream != null) return _localStream!;
+    final existing = _localStream;
+    if (existing != null) {
+      final tracks = existing.getTracks();
+      if (tracks.isNotEmpty) return existing;
+      for (final track in tracks) {
+        track.stop();
+      }
+      _localStream = null;
+      _previewStream = null;
+    }
     try {
       _localStream = await navigator.mediaDevices.getUserMedia({
         'audio': true,
