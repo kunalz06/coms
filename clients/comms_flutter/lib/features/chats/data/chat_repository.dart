@@ -211,9 +211,18 @@ class ChatRepository {
   Future<void> deleteMessageForEveryone({
     required String messageId,
   }) async {
-    await _supabase.from('messages').update({
-      'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', messageId);
+    try {
+      await _supabase.from('messages').update({
+        'deleted_for_everyone_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', messageId);
+    } on PostgrestException catch (error) {
+      if (error.code == 'P0001') {
+        throw const FormatException(
+          'Delete for everyone is available only within 1 minute after sending.',
+        );
+      }
+      rethrow;
+    }
     await _touchMessage(messageId);
   }
 
@@ -362,14 +371,18 @@ class ChatRepository {
     required String senderId,
     required String kind,
     required AttachmentDraft attachment,
+    String? caption,
   }) async {
+    final trimmedCaption = caption?.trim();
     final message = await _supabase
         .from('messages')
         .insert({
           'conversation_id': conversationId,
           'sender_id': senderId,
           'kind': kind,
-          'content': attachment.fileName,
+          'content': (trimmedCaption != null && trimmedCaption.isNotEmpty)
+              ? trimmedCaption
+              : attachment.fileName,
           'status': 'sent',
         })
         .select('id')
@@ -463,6 +476,7 @@ class ChatRepository {
           mimeType: attachment.mimeType,
           sizeBytes: attachment.sizeBytes,
         ),
+        caption: message.content,
       );
     }
   }

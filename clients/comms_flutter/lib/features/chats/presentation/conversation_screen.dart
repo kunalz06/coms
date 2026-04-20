@@ -227,6 +227,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
     final file = result?.files.single;
     if (file == null) return;
+    final caption = await _showAttachmentCaptionDialog(
+      kind: kind,
+      fileName: file.name,
+    );
+    if (caption == null) return;
 
     setState(() {
       _uploadingName = file.name;
@@ -246,6 +251,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             senderId: user.uid,
             kind: kind,
             attachment: attachment,
+            caption: caption,
           );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -264,6 +270,54 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         });
       }
     }
+  }
+
+  Future<String?> _showAttachmentCaptionDialog({
+    required String kind,
+    required String fileName,
+  }) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(kind == 'image' ? 'Send photo' : 'Send document'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              fileName,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLength: 220,
+              minLines: 1,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                hintText: 'Add a caption (optional)',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).pop(null),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            icon: const Icon(Icons.send_outlined),
+            label: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
   }
 
   Future<void> _toggleRecording() async {
@@ -590,6 +644,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           return;
         case 'delete_everyone':
           if (!mine) return;
+          if (!_canDeleteForEveryone(message)) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Delete for everyone is available for 1 minute after sending.',
+                ),
+              ),
+            );
+            return;
+          }
           await ref.read(chatRepositoryProvider).deleteMessageForEveryone(
                 messageId: message.id,
               );
@@ -601,6 +666,68 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         SnackBar(content: Text(error.toString())),
       );
     }
+  }
+
+  bool _canDeleteForEveryone(Message message) {
+    if (message.isDeletedForEveryone) return false;
+    final age = DateTime.now().toUtc().difference(message.createdAt.toUtc());
+    return age <= const Duration(minutes: 1);
+  }
+
+  Future<void> _showImagePreviewDialog({
+    required String imageUrl,
+    required String title,
+  }) async {
+    final trimmed = imageUrl.trim();
+    if (trimmed.isEmpty) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        final size = MediaQuery.sizeOf(context);
+        final width = size.width < 600 ? size.width * 0.84 : 360.0;
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(20),
+          child: Stack(
+            children: [
+              Container(
+                width: width,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: AspectRatio(
+                    aspectRatio: 1,
+                    child: Image.network(
+                      trimmed,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Center(
+                        child: Text('Could not load $title image'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Material(
+                  color: Colors.black54,
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _deleteFriend(String otherUserId) async {
@@ -764,6 +891,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final otherUserId = otherMember?.userId ?? fallbackPeerId;
     final canStartCall =
         currentConversation?.isGroup == true || otherUserId != null;
+    final avatarUrl = currentConversation?.isGroup == true
+        ? currentConversation?.avatarUrl
+        : otherMember?.profile?.avatarUrl;
+    final titleText = _conversationTitle(currentConversation, members.valueOrNull);
     final myRole = memberItems
         .firstWhere(
           (member) => member.userId == userId,
@@ -781,7 +912,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     return Scaffold(
       appBar: AppBar(
         title: conversation.when(
-          data: (item) => Text(_conversationTitle(item, members.valueOrNull)),
+          data: (item) => _ConversationHeaderTitle(
+            title: titleText,
+            avatarUrl: avatarUrl,
+            isGroup: item?.isGroup == true,
+            onAvatarTap: (avatarUrl == null || avatarUrl.trim().isEmpty)
+                ? null
+                : () => _showImagePreviewDialog(
+                      imageUrl: avatarUrl,
+                      title: item?.isGroup == true ? 'Group' : 'Profile',
+                    ),
+          ),
           loading: () => const Text('Conversation'),
           error: (_, __) => const Text('Conversation'),
         ),
@@ -1011,8 +1152,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       title: 'No messages', message: 'Send the first message.');
                 }
                 final redacted = items.where((item) => item.isRedacted).length;
+                final isCompact = MediaQuery.sizeOf(context).width < 700;
                 return ListView.builder(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.all(isCompact ? 10 : 16),
                   reverse: false,
                   itemCount: items.length + 1,
                   itemBuilder: (context, index) {
@@ -1072,7 +1214,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       alignment:
                           mine ? Alignment.centerRight : Alignment.centerLeft,
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 520),
+                        constraints: BoxConstraints(
+                          maxWidth: isCompact
+                              ? MediaQuery.sizeOf(context).width * 0.86
+                              : 520,
+                        ),
                         child: Card(
                           color: mine
                               ? Theme.of(context).colorScheme.primaryContainer
@@ -1191,9 +1337,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                           ),
                                         if (mine &&
                                             !resolved.isDeletedForEveryone)
-                                          const PopupMenuItem(
+                                          PopupMenuItem(
                                             value: 'delete_everyone',
-                                            child: _MenuItemLabel(
+                                            enabled:
+                                                _canDeleteForEveryone(resolved),
+                                            child: const _MenuItemLabel(
                                               icon: Icons.delete_sweep_outlined,
                                               label: 'Delete for everyone',
                                             ),
@@ -1594,6 +1742,47 @@ class _MenuItemLabel extends StatelessWidget {
         Icon(icon, size: 18),
         const SizedBox(width: 8),
         Text(label),
+      ],
+    );
+  }
+}
+
+class _ConversationHeaderTitle extends StatelessWidget {
+  const _ConversationHeaderTitle({
+    required this.title,
+    required this.isGroup,
+    this.avatarUrl,
+    this.onAvatarTap,
+  });
+
+  final String title;
+  final bool isGroup;
+  final String? avatarUrl;
+  final VoidCallback? onAvatarTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAvatar = avatarUrl != null && avatarUrl!.trim().isNotEmpty;
+    return Row(
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onAvatarTap,
+          child: CircleAvatar(
+            radius: 18,
+            backgroundImage: hasAvatar ? NetworkImage(avatarUrl!.trim()) : null,
+            child: hasAvatar
+                ? null
+                : Icon(isGroup ? Icons.groups : Icons.person_outline),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ],
     );
   }

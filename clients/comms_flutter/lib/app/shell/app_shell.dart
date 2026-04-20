@@ -76,12 +76,15 @@ class AppShell extends ConsumerWidget {
           callState.status != CommsCallStatus.ended &&
           callState.status != CommsCallStatus.failed;
       if (!showMini) return child;
+      final compact = windowClassForWidth(MediaQuery.sizeOf(context).width) ==
+          WindowClass.compact;
       return Stack(
         children: [
           child,
           Positioned(
             right: 14,
-            bottom: 18,
+            top: compact ? 14 : null,
+            bottom: compact ? null : 18,
             child: Material(
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(14),
