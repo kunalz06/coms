@@ -4,6 +4,11 @@ This project is configured for direct distribution builds without Play Store/App
 
 ## Android APK (no Play Store)
 
+Recommended local toolchain:
+- Android Studio current stable
+- JDK 17 for Gradle builds
+- Android SDK Platform 35 installed
+
 1. Create a release key:
    - `keytool -genkey -v -keystore comms-release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias comms`
 2. Place `comms-release-key.jks` at repo root.
@@ -16,6 +21,12 @@ This project is configured for direct distribution builds without Play Store/App
 Notes:
 - If `android/key.properties` is missing, build config falls back to debug signing for local testing only.
 - Use release signing for production sideloading.
+- If Gradle still reports a JDK image / `jlink` transform error after this update:
+  - `flutter clean`
+  - delete `android/.gradle`
+  - delete `%USERPROFILE%\.gradle\caches\transforms-3`
+  - rerun `flutter pub get`
+  - rebuild the APK
 
 ## iOS IPA (no App Store)
 
@@ -42,3 +53,4 @@ Prerequisites:
 Notes:
 - This uses Ad Hoc export options, not App Store export.
 - For personal-device installs, Development export can also be used via Xcode Organizer.
+- If pods were installed before this setup, run `cd ios && pod deintegrate && pod install && cd ..`.

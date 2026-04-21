@@ -45,10 +45,9 @@ type InternalArchivePayload = Omit<ArchiveFilePayload, "messages"> & {
   messages: BackedUpMessagePayload[];
 };
 
-function hasInlineAttachmentData(
-  attachment: ArchivedAttachmentPayload | BackedUpAttachmentPayload
-): attachment is BackedUpAttachmentPayload & { inline_data_base64: string } {
-  return typeof (attachment as BackedUpAttachmentPayload).inline_data_base64 === "string" && (attachment as BackedUpAttachmentPayload).inline_data_base64.length > 0;
+function inlineAttachmentData(attachment: ArchivedAttachmentPayload | BackedUpAttachmentPayload) {
+  const value = (attachment as { inline_data_base64?: unknown }).inline_data_base64;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function encryptionKey() {
@@ -465,9 +464,10 @@ export async function restoreArchivedAttachment(supabase: any, userId: string, q
   const attachment = ((message.attachments ?? []) as BackedUpAttachmentPayload[]).find((item) => item.id === query.attachmentId);
   if (!attachment) throw new Error("Archived attachment was not found.");
 
-  if (hasInlineAttachmentData(attachment)) {
+  const inlineData = inlineAttachmentData(attachment);
+  if (inlineData) {
     return {
-      body: Buffer.from(attachment.inline_data_base64, "base64"),
+      body: Buffer.from(inlineData, "base64"),
       mimeType: attachment.mime_type,
       fileName: attachment.file_name
     };
