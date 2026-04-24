@@ -7,14 +7,40 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../data/privacy_controller.dart';
 
-class PrivacyScreen extends ConsumerWidget {
+class PrivacyScreen extends ConsumerStatefulWidget {
   const PrivacyScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PrivacyScreen> createState() => _PrivacyScreenState();
+}
+
+class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
+  String? _handledResetToken;
+
+  @override
+  Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final privacy = ref.watch(privacyControllerProvider);
     if (user == null || privacy.loading) return const LoadingState();
+
+    final uri = GoRouterState.of(context).uri;
+    final resetType = uri.queryParameters['privacyReset'];
+    final resetToken = uri.queryParameters['token'];
+    if ((resetType == 'lock' || resetType == 'hidden') &&
+        resetToken != null &&
+        resetToken.isNotEmpty &&
+        resetToken != _handledResetToken) {
+      _handledResetToken = resetToken;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showApplyResetLink(
+          context: context,
+          ref: ref,
+          type: resetType!,
+          token: resetToken,
+        );
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Privacy')),
@@ -33,14 +59,29 @@ class PrivacyScreen extends ConsumerWidget {
                         : 'Not configured',
                   ),
                   trailing: TextButton(
-                    onPressed: () => _showSetPasswordDialog(
+                    onPressed: () => _showPasswordDialog(
                       context: context,
                       title: privacy.chatLockConfigured
                           ? 'Change chat lock password'
                           : 'Set chat lock password',
-                      onSubmit: (value) => ref
-                          .read(privacyControllerProvider.notifier)
-                          .setChatLockPassword(value),
+                      oldPasswordRequired: privacy.chatLockConfigured,
+                      onSubmit: ({
+                        required String newPassword,
+                        required String oldPassword,
+                      }) async {
+                        if (privacy.chatLockConfigured) {
+                          return ref
+                              .read(privacyControllerProvider.notifier)
+                              .changeChatLockPassword(
+                                oldPassword: oldPassword,
+                                newPassword: newPassword,
+                              );
+                        }
+                        await ref
+                            .read(privacyControllerProvider.notifier)
+                            .setChatLockPassword(newPassword);
+                        return true;
+                      },
                     ),
                     child: Text(privacy.chatLockConfigured ? 'Change' : 'Set'),
                   ),
@@ -54,14 +95,29 @@ class PrivacyScreen extends ConsumerWidget {
                         : 'Not configured',
                   ),
                   trailing: TextButton(
-                    onPressed: () => _showSetPasswordDialog(
+                    onPressed: () => _showPasswordDialog(
                       context: context,
                       title: privacy.hiddenPasswordConfigured
                           ? 'Change hidden chats password'
                           : 'Set hidden chats password',
-                      onSubmit: (value) => ref
-                          .read(privacyControllerProvider.notifier)
-                          .setHiddenPassword(value),
+                      oldPasswordRequired: privacy.hiddenPasswordConfigured,
+                      onSubmit: ({
+                        required String newPassword,
+                        required String oldPassword,
+                      }) async {
+                        if (privacy.hiddenPasswordConfigured) {
+                          return ref
+                              .read(privacyControllerProvider.notifier)
+                              .changeHiddenPassword(
+                                oldPassword: oldPassword,
+                                newPassword: newPassword,
+                              );
+                        }
+                        await ref
+                            .read(privacyControllerProvider.notifier)
+                            .setHiddenPassword(newPassword);
+                        return true;
+                      },
                     ),
                     child: Text(
                         privacy.hiddenPasswordConfigured ? 'Change' : 'Set'),
@@ -83,23 +139,21 @@ class PrivacyScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.password_outlined),
                   title: const Text('Reset chat lock password'),
-                  subtitle: const Text('Token valid for 15 minutes'),
-                  onTap: () => _showResetFlow(
+                  subtitle: const Text('Email link valid for 10 minutes'),
+                  onTap: () => _sendResetEmail(
                     context: context,
                     ref: ref,
                     type: 'lock',
-                    email: user.email ?? '',
                   ),
                 ),
                 ListTile(
                   leading: const Icon(Icons.restart_alt_outlined),
                   title: const Text('Reset hidden chats password'),
-                  subtitle: const Text('Token valid for 15 minutes'),
-                  onTap: () => _showResetFlow(
+                  subtitle: const Text('Email link valid for 10 minutes'),
+                  onTap: () => _sendResetEmail(
                     context: context,
                     ref: ref,
                     type: 'hidden',
-                    email: user.email ?? '',
                   ),
                 ),
               ],
@@ -123,152 +177,206 @@ class PrivacyScreen extends ConsumerWidget {
   }
 }
 
-Future<void> _showSetPasswordDialog({
+typedef PrivacyPasswordSubmit = Future<bool> Function({
+  required String newPassword,
+  required String oldPassword,
+});
+
+Future<void> _showPasswordDialog({
   required BuildContext context,
   required String title,
-  required Future<void> Function(String password) onSubmit,
+  required bool oldPasswordRequired,
+  required PrivacyPasswordSubmit onSubmit,
 }) async {
-  final controller = TextEditingController();
-  final value = await showDialog<String>(
+  final messenger = ScaffoldMessenger.of(context);
+  final oldController = TextEditingController();
+  final newController = TextEditingController();
+  final confirmController = TextEditingController();
+  final submitted = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       title: Text(title),
-      content: TextField(
-        controller: controller,
-        obscureText: true,
-        decoration: const InputDecoration(
-          hintText: 'At least 4 characters',
-        ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (oldPasswordRequired) ...[
+            TextField(
+              controller: oldController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                hintText: 'Old password',
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          TextField(
+            controller: newController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              hintText: 'New password',
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: confirmController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              hintText: 'Confirm new password',
+            ),
+          ),
+        ],
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+          onPressed: () => Navigator.of(context).pop(true),
           child: const Text('Save'),
         ),
       ],
     ),
   );
-  if (value == null || value.length < 4) {
-    if (!context.mounted || value == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-          content: Text('Use a password with at least 4 characters.')),
-    );
+  if (submitted != true) return;
+  if (!context.mounted) return;
+
+  final oldPassword = oldController.text.trim();
+  final newPassword = newController.text.trim();
+  final confirmPassword = confirmController.text.trim();
+  if (oldPasswordRequired && oldPassword.isEmpty) {
+    _showSnack(messenger, 'Enter your old password.');
+    return;
+  }
+  if (newPassword.length < 4) {
+    _showSnack(messenger, 'Use a password with at least 4 characters.');
+    return;
+  }
+  if (newPassword != confirmPassword) {
+    _showSnack(messenger, 'Passwords do not match.');
     return;
   }
 
   try {
-    await onSubmit(value);
+    final ok = await onSubmit(
+      oldPassword: oldPassword,
+      newPassword: newPassword,
+    );
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Privacy password updated.')),
+    _showSnack(
+      messenger,
+      ok
+          ? 'Privacy password updated.'
+          : 'Old password did not match. Use reset password to recover it.',
     );
   } catch (error) {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error.toString())),
-    );
+    _showSnack(messenger, error.toString());
   }
 }
 
-Future<void> _showResetFlow({
+Future<void> _sendResetEmail({
   required BuildContext context,
   required WidgetRef ref,
   required String type,
-  required String email,
 }) async {
-  if (email.trim().isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('No account email is available.')),
-    );
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await ref.read(privacyControllerProvider.notifier).sendResetEmail(
+          type: type,
+        );
+    if (!context.mounted) return;
+    _showSnack(messenger, 'Reset link sent to your COMMS account email.');
+  } catch (error) {
+    if (!context.mounted) return;
+    _showSnack(messenger, error.toString());
+  }
+}
+
+Future<void> _showApplyResetLink({
+  required BuildContext context,
+  required WidgetRef ref,
+  required String type,
+  required String token,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final router = GoRouter.of(context);
+  final passwordController = TextEditingController();
+  final confirmController = TextEditingController();
+  final submitted = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(
+        type == 'lock'
+            ? 'Reset chat lock password'
+            : 'Reset hidden chats password',
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: passwordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              hintText: 'New privacy password',
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: confirmController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              hintText: 'Confirm new password',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Reset'),
+        ),
+      ],
+    ),
+  );
+  if (submitted != true) return;
+  if (!context.mounted) return;
+
+  final password = passwordController.text.trim();
+  final confirmPassword = confirmController.text.trim();
+  if (password.length < 4) {
+    _showSnack(messenger, 'Use a password with at least 4 characters.');
+    return;
+  }
+  if (password != confirmPassword) {
+    _showSnack(messenger, 'Passwords do not match.');
     return;
   }
 
   try {
-    final token =
-        await ref.read(privacyControllerProvider.notifier).issueResetToken(
-              type: type,
-              email: email,
-            );
-
+    final ok = await ref.read(privacyControllerProvider.notifier).applyResetLink(
+          type: type,
+          token: token,
+          newPassword: password,
+        );
     if (!context.mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Privacy reset token'),
-        content: SelectableText(
-          'Email: $email\nToken: $token\n\nThis token expires in 15 minutes and can be used once.',
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
+    _showSnack(
+      messenger,
+      ok ? 'Privacy password reset complete.' : 'Invalid or expired reset link.',
     );
-
-    if (!context.mounted) return;
-    final tokenController = TextEditingController();
-    final passwordController = TextEditingController();
-    final submitted = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Apply reset token'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: tokenController,
-              decoration: const InputDecoration(hintText: 'Enter token'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                hintText: 'New privacy password',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Apply'),
-          ),
-        ],
-      ),
-    );
-    if (submitted != true) return;
-
-    final ok =
-        await ref.read(privacyControllerProvider.notifier).applyResetToken(
-              type: type,
-              email: email,
-              token: tokenController.text.trim(),
-              newPassword: passwordController.text.trim(),
-            );
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          ok ? 'Privacy password reset complete.' : 'Invalid or expired token.',
-        ),
-      ),
-    );
+    router.go(AppRoutes.privacy);
   } catch (error) {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error.toString())),
-    );
+    _showSnack(messenger, error.toString());
   }
+}
+
+void _showSnack(ScaffoldMessengerState messenger, String message) {
+  messenger.showSnackBar(
+    SnackBar(content: Text(message)),
+  );
 }

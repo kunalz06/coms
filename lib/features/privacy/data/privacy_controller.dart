@@ -2,10 +2,11 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/network/api_client.dart';
 import 'privacy_repository.dart';
 
 final privacyRepositoryProvider = Provider<PrivacyRepository>((ref) {
-  return PrivacyRepository();
+  return PrivacyRepository(ref.watch(apiClientProvider));
 });
 
 final privacyControllerProvider =
@@ -97,9 +98,33 @@ class PrivacyController extends StateNotifier<PrivacyState> {
     state = state.copyWith(chatLockConfigured: true);
   }
 
+  Future<bool> changeChatLockPassword({
+    required String oldPassword,
+    required String newPassword,
+  }) async {
+    final ok = await _repository.changeChatLockPassword(
+      oldPassword: oldPassword,
+      newPassword: newPassword,
+    );
+    if (ok) state = state.copyWith(chatLockConfigured: true);
+    return ok;
+  }
+
   Future<void> setHiddenPassword(String password) async {
     await _repository.setHiddenChatsPassword(password);
     state = state.copyWith(hiddenPasswordConfigured: true);
+  }
+
+  Future<bool> changeHiddenPassword({
+    required String oldPassword,
+    required String newPassword,
+  }) async {
+    final ok = await _repository.changeHiddenChatsPassword(
+      oldPassword: oldPassword,
+      newPassword: newPassword,
+    );
+    if (ok) state = state.copyWith(hiddenPasswordConfigured: true);
+    return ok;
   }
 
   Future<bool> unlockChatLock(String password) async {
@@ -155,22 +180,19 @@ class PrivacyController extends StateNotifier<PrivacyState> {
     state = state.copyWith(hiddenConversationIds: next);
   }
 
-  Future<String> issueResetToken({
+  Future<void> sendResetEmail({
     required String type,
-    required String email,
   }) async {
-    return _repository.issueResetToken(type: type, email: email);
+    await _repository.sendResetEmail(type: type);
   }
 
-  Future<bool> applyResetToken({
+  Future<bool> applyResetLink({
     required String type,
-    required String email,
     required String token,
     required String newPassword,
   }) async {
-    final ok = await _repository.applyResetToken(
+    final ok = await _repository.applyResetLink(
       type: type,
-      email: email,
       token: token,
       newPassword: newPassword,
     );

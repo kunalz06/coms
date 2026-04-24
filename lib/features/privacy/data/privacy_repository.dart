@@ -4,18 +4,19 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../../../core/network/api_client.dart';
+
 class PrivacyRepository {
-  PrivacyRepository({FlutterSecureStorage? storage})
+  PrivacyRepository(this._api, {FlutterSecureStorage? storage})
       : _storage = storage ?? const FlutterSecureStorage();
 
+  final ApiClient _api;
   final FlutterSecureStorage _storage;
 
   static const _lockHashKey = 'comms.privacy.lock_hash';
   static const _hiddenHashKey = 'comms.privacy.hidden_hash';
   static const _lockedConversationsKey = 'comms.privacy.locked_conversations';
   static const _hiddenConversationsKey = 'comms.privacy.hidden_conversations';
-  static const _lockResetKey = 'comms.privacy.lock_reset';
-  static const _hiddenResetKey = 'comms.privacy.hidden_reset';
 
   Future<bool> hasChatLockPassword() async =>
       (await _storage.read(key: _lockHashKey)) != null;
@@ -27,6 +28,16 @@ class PrivacyRepository {
     await _storage.write(key: _lockHashKey, value: _createStoredHash(password));
   }
 
+  Future<bool> changeChatLockPassword({
+    required String oldPassword,
+    required String newPassword,
+  }) async {
+    final ok = await verifyChatLockPassword(oldPassword);
+    if (!ok) return false;
+    await setChatLockPassword(newPassword);
+    return true;
+  }
+
   Future<bool> verifyChatLockPassword(String password) async {
     final saved = await _storage.read(key: _lockHashKey);
     return saved != null && _verifyStoredHash(saved, password);
@@ -35,6 +46,16 @@ class PrivacyRepository {
   Future<void> setHiddenChatsPassword(String password) async {
     await _storage.write(
         key: _hiddenHashKey, value: _createStoredHash(password));
+  }
+
+  Future<bool> changeHiddenChatsPassword({
+    required String oldPassword,
+    required String newPassword,
+  }) async {
+    final ok = await verifyHiddenChatsPassword(oldPassword);
+    if (!ok) return false;
+    await setHiddenChatsPassword(newPassword);
+    return true;
   }
 
   Future<bool> verifyHiddenChatsPassword(String password) async {
@@ -75,61 +96,29 @@ class PrivacyRepository {
     await _saveStringSet(_hiddenConversationsKey, values);
   }
 
-  Future<String> issueResetToken({
+  Future<void> sendResetEmail({
     required String type,
-    required String email,
   }) async {
-    final key = _resetKeyFor(type);
-    final token = _token();
-    final salt = _salt();
-    final payload = {
-      'email': email.trim().toLowerCase(),
-      'salt': salt,
-      'token_hash': _hash(token, salt),
-      'expires_at': DateTime.now()
-          .toUtc()
-          .add(const Duration(minutes: 15))
-          .toIso8601String(),
-      'used': false,
-    };
-    await _storage.write(key: key, value: jsonEncode(payload));
-    return token;
+    await _api.post('/api/privacy/password-reset', data: {
+      'type': type,
+    });
   }
 
-  Future<bool> applyResetToken({
+  Future<bool> applyResetLink({
     required String type,
-    required String email,
     required String token,
     required String newPassword,
   }) async {
-    final key = _resetKeyFor(type);
-    final raw = await _storage.read(key: key);
-    if (raw == null) return false;
-    final json = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-    final expectedEmail = (json['email'] as String?) ?? '';
-    final used = json['used'] as bool? ?? false;
-    final expiresAt = DateTime.tryParse((json['expires_at'] as String?) ?? '');
-    final salt = json['salt'] as String?;
-    final tokenHash = json['token_hash'] as String?;
-
-    if (used ||
-        expiresAt == null ||
-        DateTime.now().toUtc().isAfter(expiresAt) ||
-        salt == null ||
-        tokenHash == null ||
-        expectedEmail != email.trim().toLowerCase() ||
-        _hash(token, salt) != tokenHash) {
-      return false;
-    }
+    await _api.post('/api/privacy/password-reset', data: {
+      'type': type,
+      'token': token,
+    });
 
     if (type == 'lock') {
       await setChatLockPassword(newPassword);
     } else {
       await setHiddenChatsPassword(newPassword);
     }
-
-    json['used'] = true;
-    await _storage.write(key: key, value: jsonEncode(json));
     return true;
   }
 
@@ -153,12 +142,6 @@ class PrivacyRepository {
     return _storage.write(key: key, value: jsonEncode(values.toList()..sort()));
   }
 
-  String _resetKeyFor(String type) {
-    if (type == 'lock') return _lockResetKey;
-    if (type == 'hidden') return _hiddenResetKey;
-    throw ArgumentError('Unknown reset type: $type');
-  }
-
   String _createStoredHash(String value) {
     final salt = _salt();
     return '$salt:${_hash(value, salt)}';
@@ -179,11 +162,5 @@ class PrivacyRepository {
     final random = Random.secure();
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
     return base64UrlEncode(bytes);
-  }
-
-  String _token() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    final random = Random.secure();
-    return List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
   }
 }
