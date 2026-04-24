@@ -307,6 +307,20 @@ async function archiveBatchesForConversation(supabase: any, userId: string, conv
   return data ?? [];
 }
 
+async function upsertArchiveBatch(supabase: any, batch: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from("archive_batches")
+    .upsert(batch, { onConflict: "user_id,conversation_id,provider,batch_key" })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  const id = data?.id;
+  if (typeof id !== "string" || !id) {
+    throw new Error("Archive batch could not be prepared.");
+  }
+  return id;
+}
+
 export async function getBackupStatus(supabase: any, userId: string) {
   const preference = await getPreference(supabase, userId);
   if (preference) return preference;
@@ -433,8 +447,8 @@ export async function runBackupForUser(supabase: any, userId: string) {
         message_count: payload.messages.length,
         started_at: nowIso
       };
-      const { error: batchInsertError } = await supabase.from("archive_batches").upsert(provisionalBatch, { onConflict: "id" });
-      if (batchInsertError) throw new Error(batchInsertError.message);
+      const archiveBatchId = await upsertArchiveBatch(supabase, provisionalBatch);
+      payload.batchId = archiveBatchId;
 
       const fileName = `comms-${conversationId}-${payload.batchKey}.json`;
       const uploaded = await uploadGoogleDriveJson(accessToken, fileName, payload);
@@ -448,13 +462,13 @@ export async function runBackupForUser(supabase: any, userId: string) {
           completed_at: new Date().toISOString(),
           error_message: null
         })
-        .eq("id", payload.batchId);
+        .eq("id", archiveBatchId);
       if (batchCompleteError) throw new Error(batchCompleteError.message);
 
       const archiveRows: Omit<MessageArchive, "id" | "archived_at">[] = groupMessages.map((message) => ({
         message_id: message.id,
         user_id: userId,
-        archive_batch_id: payload.batchId
+        archive_batch_id: archiveBatchId
       }));
       const { error: archiveError } = await supabase.from("message_archives").upsert(archiveRows, { onConflict: "message_id,user_id" });
       if (archiveError) throw new Error(archiveError.message);
