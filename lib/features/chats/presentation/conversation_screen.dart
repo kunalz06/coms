@@ -36,6 +36,10 @@ class ConversationScreen extends ConsumerStatefulWidget {
 }
 
 class _ConversationScreenState extends ConsumerState<ConversationScreen> {
+  static const _voiceSampleRate = 16000;
+  static const _voiceChannels = 1;
+  static const _voiceBitsPerSample = 16;
+
   final _controller = TextEditingController();
   final _reactionController = TextEditingController();
   final _recorder = AudioRecorder();
@@ -337,12 +341,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
 
     try {
+      final format = await _voiceRecordingFormat();
       _recordingBytes = BytesBuilder(copy: false);
       final stream = await _recorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.wav,
-          sampleRate: 16000,
-          numChannels: 1,
+        RecordConfig(
+          encoder: format.encoder,
+          sampleRate: _voiceSampleRate,
+          numChannels: _voiceChannels,
         ),
       );
       _recordingSubscription = stream.listen(
@@ -379,6 +384,27 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
   }
 
+  Future<_VoiceRecordingFormat> _voiceRecordingFormat() async {
+    if (await _recorder.isEncoderSupported(AudioEncoder.pcm16bits)) {
+      return const _VoiceRecordingFormat(
+        encoder: AudioEncoder.pcm16bits,
+        extension: 'wav',
+        mimeType: 'audio/wav',
+        wrapPcmAsWav: true,
+      );
+    }
+    if (await _recorder.isEncoderSupported(AudioEncoder.wav)) {
+      return const _VoiceRecordingFormat(
+        encoder: AudioEncoder.wav,
+        extension: 'wav',
+        mimeType: 'audio/wav',
+      );
+    }
+    throw const FormatException(
+      'Voice notes are not supported by this browser or device.',
+    );
+  }
+
   Future<void> _stopAndSendRecording() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -411,13 +437,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     });
 
     try {
+      final format = await _voiceRecordingFormat();
       final attachment =
           await ref.read(cloudinaryUploadServiceProvider).uploadBytes(
-                bytes: bytes,
+                bytes: format.wrapPcmAsWav ? _wavFromPcm(bytes) : bytes,
                 fileName:
-                    'comms-voice-${DateTime.now().millisecondsSinceEpoch}.wav',
+                    'comms-voice-${DateTime.now().millisecondsSinceEpoch}.${format.extension}',
                 kind: 'voice',
-                mimeType: 'audio/wav',
+                mimeType: format.mimeType,
                 onProgress: (progress) {
                   if (mounted) setState(() => _uploadProgress = progress);
                 },
@@ -441,6 +468,41 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         });
       }
     }
+  }
+
+  Uint8List _wavFromPcm(Uint8List pcm) {
+    final byteRate =
+        _voiceSampleRate * _voiceChannels * _voiceBitsPerSample ~/ 8;
+    final blockAlign = _voiceChannels * _voiceBitsPerSample ~/ 8;
+    final dataSize = pcm.length;
+    final output = BytesBuilder(copy: false);
+    output.add(_ascii('RIFF'));
+    output.add(_uint32(36 + dataSize));
+    output.add(_ascii('WAVE'));
+    output.add(_ascii('fmt '));
+    output.add(_uint32(16));
+    output.add(_uint16(1));
+    output.add(_uint16(_voiceChannels));
+    output.add(_uint32(_voiceSampleRate));
+    output.add(_uint32(byteRate));
+    output.add(_uint16(blockAlign));
+    output.add(_uint16(_voiceBitsPerSample));
+    output.add(_ascii('data'));
+    output.add(_uint32(dataSize));
+    output.add(pcm);
+    return output.takeBytes();
+  }
+
+  Uint8List _ascii(String value) => Uint8List.fromList(value.codeUnits);
+
+  Uint8List _uint16(int value) {
+    final bytes = ByteData(2)..setUint16(0, value, Endian.little);
+    return bytes.buffer.asUint8List();
+  }
+
+  Uint8List _uint32(int value) {
+    final bytes = ByteData(4)..setUint32(0, value, Endian.little);
+    return bytes.buffer.asUint8List();
   }
 
   Future<void> _cancelRecording() async {
@@ -1624,6 +1686,20 @@ class _AttachmentPreview extends StatelessWidget {
       url: url,
     );
   }
+}
+
+class _VoiceRecordingFormat {
+  const _VoiceRecordingFormat({
+    required this.encoder,
+    required this.extension,
+    required this.mimeType,
+    this.wrapPcmAsWav = false,
+  });
+
+  final AudioEncoder encoder;
+  final String extension;
+  final String mimeType;
+  final bool wrapPcmAsWav;
 }
 
 class _VoicePreview extends StatefulWidget {
