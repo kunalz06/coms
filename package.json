@@ -20,6 +20,7 @@
     "firebase-admin": "latest",
     "lucide-react": "latest",
     "next": "latest",
+    "nodemailer": "latest",
     "react": "latest",
     "react-dom": "latest",
     "react-hook-form": "latest",
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "latest",
     "@types/node": "latest",
+    "@types/nodemailer": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@types/web-push": "^3.6.4",

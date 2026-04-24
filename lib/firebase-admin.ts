@@ -29,6 +29,11 @@ function ensureFirebaseAdmin() {
   });
 }
 
+export function firebaseAdminAuth() {
+  ensureFirebaseAdmin();
+  return getAuth();
+}
+
 function bearerToken(request: Request) {
   const header = request.headers.get("authorization") ?? "";
   if (!header.startsWith("Bearer ")) return null;
@@ -37,10 +42,9 @@ function bearerToken(request: Request) {
 }
 
 export async function verifyFirebaseRequest(request: Request): Promise<FirebaseDecoded> {
-  ensureFirebaseAdmin();
   const token = bearerToken(request);
   if (!token) throw new Error("Missing Firebase bearer token.");
-  const decoded = await getAuth().verifyIdToken(token, true);
+  const decoded = await firebaseAdminAuth().verifyIdToken(token, true);
   return {
     uid: decoded.uid,
     email: decoded.email

@@ -28,6 +28,9 @@ class BackupRepository {
 
   Future<void> disable() => _api.post('/api/backup/disable').then((_) {});
 
+  Future<void> removeGoogleAccount() =>
+      _api.post('/api/backup/google/remove').then((_) {});
+
   Future<void> runNow() => _api.post('/api/backup/run').then((_) {});
 
   Future<List<Message>> restore(String conversationId) async {

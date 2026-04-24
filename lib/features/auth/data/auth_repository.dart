@@ -2,11 +2,15 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../shared/models/user_profile.dart';
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository(
-      firebase_auth.FirebaseAuth.instance, Supabase.instance.client);
+    firebase_auth.FirebaseAuth.instance,
+    Supabase.instance.client,
+    ref.watch(apiClientProvider),
+  );
 });
 
 final authStateProvider = StreamProvider<firebase_auth.User?>((ref) {
@@ -14,10 +18,11 @@ final authStateProvider = StreamProvider<firebase_auth.User?>((ref) {
 });
 
 class AuthRepository {
-  AuthRepository(this._firebaseAuth, this._supabase);
+  AuthRepository(this._firebaseAuth, this._supabase, this._api);
 
   final firebase_auth.FirebaseAuth _firebaseAuth;
   final SupabaseClient _supabase;
+  final ApiClient _api;
 
   Stream<firebase_auth.User?> authStateChanges() =>
       _firebaseAuth.authStateChanges();
@@ -43,7 +48,16 @@ class AuthRepository {
   }
 
   Future<void> sendPasswordReset(String email) {
-    return _firebaseAuth.sendPasswordResetEmail(email: email.trim());
+    return _api.post('/api/auth/password-reset',
+        data: {'email': email.trim()}).then((_) {});
+  }
+
+  Future<void> applyPasswordReset({
+    required String token,
+    required String password,
+  }) {
+    return _api.post('/api/auth/password-reset',
+        data: {'token': token, 'password': password}).then((_) {});
   }
 
   Future<void> changeEmail(String email) async {

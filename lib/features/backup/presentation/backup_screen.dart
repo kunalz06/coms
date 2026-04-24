@@ -95,6 +95,45 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     }
   }
 
+  Future<void> _removeGoogleAccount() async {
+    final shouldRemove = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove Google account?'),
+        content: const Text(
+          'This clears the connected Drive account from COMMS. Existing archive files in Google Drive are not deleted.',
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).pop(false),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).pop(true),
+            icon: const Icon(Icons.link_off),
+            label: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (shouldRemove != true) return;
+
+    try {
+      await ref.read(backupRepositoryProvider).removeGoogleAccount();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Google account removed.')),
+      );
+      await _refresh();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(_backupStatusProvider);
@@ -191,6 +230,14 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                                 onPressed: _disableBackup,
                                 icon: const Icon(Icons.block),
                                 label: const Text('Disable backup'),
+                              ),
+                            ),
+                          if (preference?.googleDriveEmail != null)
+                            MagnifyButtonWrapper(
+                              child: OutlinedButton.icon(
+                                onPressed: _removeGoogleAccount,
+                                icon: const Icon(Icons.link_off),
+                                label: const Text('Remove Google account'),
                               ),
                             ),
                         ],

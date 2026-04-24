@@ -80,6 +80,14 @@ function decryptToken(value: string | null) {
   return plain.toString("utf8");
 }
 
+function decryptStoredToken(value: string | null, label: string) {
+  try {
+    return decryptToken(value);
+  } catch {
+    throw new Error(`Stored Google Drive ${label} could not be read. Remove the Google account and connect Drive again.`);
+  }
+}
+
 async function ensureParticipant(supabase: any, userId: string, conversationId: string) {
   const { data: direct } = await supabase
     .from("conversations")
@@ -152,8 +160,20 @@ async function validAccessToken(supabase: any, userId: string) {
     throw new Error("Backup is not enabled for this user.");
   }
 
-  const currentToken = decryptToken(preference.drive_access_token_enc ?? null);
-  const refreshToken = decryptToken(preference.drive_refresh_token_enc ?? null);
+  let currentToken: string | null;
+  let refreshToken: string | null;
+  try {
+    currentToken = decryptStoredToken(preference.drive_access_token_enc ?? null, "access token");
+    refreshToken = decryptStoredToken(preference.drive_refresh_token_enc ?? null, "refresh token");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Stored Google Drive credentials could not be read.";
+    await patchPreference(supabase, userId, {
+      status: "reconnect_required",
+      reconnect_required: true,
+      last_backup_error: message
+    });
+    throw new Error(message);
+  }
   const expiresAt = preference.drive_token_expires_at ? new Date(preference.drive_token_expires_at).getTime() : null;
   const safety = Date.now() + 30_000;
 
@@ -340,6 +360,21 @@ export async function disableBackup(supabase: any, userId: string) {
   await patchPreference(supabase, userId, {
     enabled: false,
     status: "disabled",
+    reconnect_required: false,
+    last_backup_error: null
+  });
+}
+
+export async function removeGoogleDriveConnection(supabase: any, userId: string) {
+  await patchPreference(supabase, userId, {
+    provider: null,
+    enabled: false,
+    status: "disabled",
+    google_drive_email: null,
+    drive_scope: null,
+    drive_access_token_enc: null,
+    drive_refresh_token_enc: null,
+    drive_token_expires_at: null,
     reconnect_required: false,
     last_backup_error: null
   });
