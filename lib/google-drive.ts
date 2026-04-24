@@ -31,7 +31,7 @@ export type GoogleDriveConnection = {
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata openid email profile";
 const STATE_TTL_SECONDS = 10 * 60;
 
 function required(name: string) {
@@ -83,6 +83,21 @@ function maybeDecodeEmail(idToken?: string) {
   }
 }
 
+async function fetchGoogleEmail(accessToken: string) {
+  try {
+    const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+    if (!response.ok) return null;
+    const json = (await response.json().catch(() => ({}))) as { email?: string };
+    return typeof json.email === "string" ? json.email.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function tokenRequest(payload: URLSearchParams) {
   const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
     method: "POST",
@@ -124,12 +139,14 @@ export async function exchangeGoogleDriveCode(code: string, options: ExchangeOpt
   });
   const json = await tokenRequest(payload);
   const expiresAt = typeof json.expires_in === "number" ? new Date(Date.now() + json.expires_in * 1000).toISOString() : null;
+  const decodedEmail = maybeDecodeEmail(json.id_token)?.toLowerCase() ?? null;
+  const resolvedEmail = decodedEmail ?? (await fetchGoogleEmail(json.access_token));
   return {
     accessToken: json.access_token,
     refreshToken: json.refresh_token ?? null,
     expiresAt,
     scope: json.scope ?? null,
-    email: maybeDecodeEmail(json.id_token)
+    email: resolvedEmail
   };
 }
 
@@ -143,12 +160,14 @@ export async function refreshGoogleDriveAccessToken(refreshToken: string, option
   });
   const json = await tokenRequest(payload);
   const expiresAt = typeof json.expires_in === "number" ? new Date(Date.now() + json.expires_in * 1000).toISOString() : null;
+  const decodedEmail = maybeDecodeEmail(json.id_token)?.toLowerCase() ?? null;
+  const resolvedEmail = decodedEmail ?? (await fetchGoogleEmail(json.access_token));
   return {
     accessToken: json.access_token,
     refreshToken,
     expiresAt,
     scope: json.scope ?? null,
-    email: maybeDecodeEmail(json.id_token)
+    email: resolvedEmail
   };
 }
 

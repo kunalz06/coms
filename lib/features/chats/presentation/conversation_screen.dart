@@ -16,6 +16,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/models/conversation.dart';
 import '../../../shared/models/conversation_member.dart';
 import '../../../shared/models/message.dart';
+import '../../../shared/widgets/magnify_button_wrapper.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../backup/data/backup_repository.dart';
 import '../../calls/data/call_controller.dart';
@@ -769,6 +770,69 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
   }
 
+  Future<void> _showMessageImageDialog({
+    required String imageUrl,
+    required String title,
+  }) async {
+    final trimmed = imageUrl.trim();
+    if (trimmed.isEmpty) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.94,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+          ),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 10, 10, 46),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: InteractiveViewer(
+                    minScale: 1,
+                    maxScale: 4,
+                    child: Image.network(
+                      trimmed,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Center(
+                        child: Text('Could not load $title'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 8,
+                top: 8,
+                child: IconButton(
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 12,
+                child: Text(
+                  'Pinch or scroll to zoom',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _deleteFriend(String otherUserId) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _contactActionRunning) return;
@@ -1290,6 +1354,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                       kind: resolved.kind,
                                       fileName: attachment.fileName,
                                       url: attachment.url,
+                                      onOpenImage: resolved.kind == 'image'
+                                          ? () => _showMessageImageDialog(
+                                                imageUrl: attachment.url,
+                                                title: attachment.fileName,
+                                              )
+                                          : null,
                                     ),
                                   ),
                                 if (resolved.reactions.isNotEmpty) ...[
@@ -1429,25 +1499,31 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   ],
                   Row(
                     children: [
-                      IconButton(
-                          onPressed: _uploadingName == null
-                              ? _showAttachmentPicker
-                              : null,
-                          icon: const Icon(Icons.add),
-                          tooltip: 'Attach'),
-                      IconButton(
-                        onPressed:
-                            _uploadingName == null ? _toggleRecording : null,
-                        icon: Icon(_recording ? Icons.stop : Icons.mic_none),
-                        tooltip: _recording
-                            ? 'Stop and send voice note'
-                            : 'Record voice note',
+                      MagnifyButtonWrapper(
+                        child: IconButton(
+                            onPressed: _uploadingName == null
+                                ? _showAttachmentPicker
+                                : null,
+                            icon: const Icon(Icons.add),
+                            tooltip: 'Attach'),
+                      ),
+                      MagnifyButtonWrapper(
+                        child: IconButton(
+                          onPressed:
+                              _uploadingName == null ? _toggleRecording : null,
+                          icon: Icon(_recording ? Icons.stop : Icons.mic_none),
+                          tooltip: _recording
+                              ? 'Stop and send voice note'
+                              : 'Record voice note',
+                        ),
                       ),
                       if (_recording)
-                        IconButton(
-                          onPressed: _cancelRecording,
-                          icon: const Icon(Icons.close),
-                          tooltip: 'Cancel recording',
+                        MagnifyButtonWrapper(
+                          child: IconButton(
+                            onPressed: _cancelRecording,
+                            icon: const Icon(Icons.close),
+                            tooltip: 'Cancel recording',
+                          ),
                         ),
                       Expanded(
                         child: TextField(
@@ -1460,8 +1536,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      FilledButton(
-                          onPressed: _send, child: const Icon(Icons.send)),
+                      MagnifyButtonWrapper(
+                        child: FilledButton(
+                            onPressed: _send, child: const Icon(Icons.send)),
+                      ),
                     ],
                   ),
                 ],
@@ -1507,11 +1585,13 @@ class _AttachmentPreview extends StatelessWidget {
     required this.kind,
     required this.fileName,
     required this.url,
+    this.onOpenImage,
   });
 
   final String kind;
   final String fileName;
   final String url;
+  final VoidCallback? onOpenImage;
 
   @override
   Widget build(BuildContext context) {
@@ -1520,16 +1600,19 @@ class _AttachmentPreview extends StatelessWidget {
     }
 
     if (kind == 'image') {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.network(
-          url,
-          width: 220,
-          height: 160,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) => _FileChip(
-            fileName: fileName,
-            icon: Icons.broken_image_outlined,
+      return GestureDetector(
+        onTap: onOpenImage,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            url,
+            width: 220,
+            height: 160,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) => _FileChip(
+              fileName: fileName,
+              icon: Icons.broken_image_outlined,
+            ),
           ),
         ),
       );

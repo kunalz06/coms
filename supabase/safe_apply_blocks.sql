@@ -262,3 +262,12 @@ $clr$;
 
 grant execute on function clear_group_messages_for_everyone(uuid, timestamptz, timestamptz) to anon, authenticated;
 
+-- =========================================================
+-- Block 5: One Google account -> one COMMS account backup link
+-- =========================================================
+drop index if exists backup_preferences_google_drive_email_unique;
+
+create unique index backup_preferences_google_drive_email_unique
+on backup_preferences (lower(google_drive_email))
+where google_drive_email is not null
+  and provider = 'google_drive';

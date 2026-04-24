@@ -24,18 +24,45 @@ class ApiClient {
 
   Future<Response<T>> get<T>(String path,
       {Map<String, dynamic>? queryParameters}) async {
-    return _dio.get<T>(path,
-        queryParameters: queryParameters, options: await _authOptions());
+    try {
+      return await _dio.get<T>(path,
+          queryParameters: queryParameters, options: await _authOptions());
+    } on DioException catch (error) {
+      throw FormatException(_readableError(error));
+    }
   }
 
   Future<Response<T>> post<T>(String path, {Object? data}) async {
-    return _dio.post<T>(path,
-        data: data ?? const {}, options: await _authOptions());
+    try {
+      return await _dio.post<T>(path,
+          data: data ?? const {}, options: await _authOptions());
+    } on DioException catch (error) {
+      throw FormatException(_readableError(error));
+    }
   }
 
   Future<Options> _authOptions() async {
     final token = await _auth.currentUser?.getIdToken();
     return Options(
         headers: token == null ? null : {'authorization': 'Bearer $token'});
+  }
+
+  String _readableError(DioException error) {
+    final data = error.response?.data;
+    if (data is Map<String, dynamic>) {
+      final message = data['message']?.toString().trim();
+      if (message != null && message.isNotEmpty) return message;
+      final nested = data['error'];
+      if (nested is Map<String, dynamic>) {
+        final nestedMessage = nested['message']?.toString().trim();
+        if (nestedMessage != null && nestedMessage.isNotEmpty) {
+          return nestedMessage;
+        }
+      }
+    }
+    final fallback = error.message?.trim();
+    return (fallback == null || fallback.isEmpty)
+        ? 'Request failed. Please try again.'
+        : fallback;
   }
 }

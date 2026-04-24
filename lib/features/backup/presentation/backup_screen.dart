@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../shared/models/backup_models.dart';
+import '../../../shared/widgets/magnify_button_wrapper.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../data/backup_repository.dart';
 
@@ -101,10 +102,12 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       appBar: AppBar(
         title: const Text('Backup'),
         actions: [
-          IconButton(
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
+          MagnifyButtonWrapper(
+            child: IconButton(
+              onPressed: _refresh,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh',
+            ),
           ),
         ],
       ),
@@ -160,29 +163,35 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          FilledButton.icon(
-                            onPressed: _runBackupNow,
-                            icon: const Icon(Icons.backup_outlined),
-                            label: const Text('Backup now'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _connectDrive,
-                            icon: Icon(
-                              preference?.reconnectRequired == true
-                                  ? Icons.link_off
-                                  : Icons.link,
+                          MagnifyButtonWrapper(
+                            child: FilledButton.icon(
+                              onPressed: _runBackupNow,
+                              icon: const Icon(Icons.backup_outlined),
+                              label: const Text('Backup now'),
                             ),
-                            label: Text(
-                              preference?.reconnectRequired == true
-                                  ? 'Reconnect Drive'
-                                  : 'Connect Drive',
+                          ),
+                          MagnifyButtonWrapper(
+                            child: OutlinedButton.icon(
+                              onPressed: _connectDrive,
+                              icon: Icon(
+                                preference?.reconnectRequired == true
+                                    ? Icons.link_off
+                                    : Icons.link,
+                              ),
+                              label: Text(
+                                preference?.reconnectRequired == true
+                                    ? 'Reconnect Drive'
+                                    : 'Connect Drive',
+                              ),
                             ),
                           ),
                           if (preference?.enabled == true)
-                            OutlinedButton.icon(
-                              onPressed: _disableBackup,
-                              icon: const Icon(Icons.block),
-                              label: const Text('Disable backup'),
+                            MagnifyButtonWrapper(
+                              child: OutlinedButton.icon(
+                                onPressed: _disableBackup,
+                                icon: const Icon(Icons.block),
+                                label: const Text('Disable backup'),
+                              ),
                             ),
                         ],
                       ),

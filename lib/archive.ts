@@ -119,6 +119,33 @@ async function patchPreference(supabase: any, userId: string, patch: Record<stri
   if (error) throw new Error(error.message);
 }
 
+async function userConversationIds(supabase: any, userId: string) {
+  const ids = new Set<string>();
+
+  const { data: memberRows, error: memberError } = await supabase
+    .from("conversation_members")
+    .select("conversation_id")
+    .eq("user_id", userId);
+  if (memberError) throw new Error(memberError.message);
+  for (const row of memberRows ?? []) {
+    const id = row.conversation_id as string | null;
+    if (id) ids.add(id);
+  }
+
+  const { data: directRows, error: directError } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("type", "direct")
+    .or(`user_one_id.eq.${userId},user_two_id.eq.${userId}`);
+  if (directError) throw new Error(directError.message);
+  for (const row of directRows ?? []) {
+    const id = row.id as string | null;
+    if (id) ids.add(id);
+  }
+
+  return [...ids];
+}
+
 async function validAccessToken(supabase: any, userId: string) {
   const preference = await getPreference(supabase, userId);
   if (!preference || !preference.enabled || !preference.provider) {
@@ -279,11 +306,27 @@ export async function getBackupStatus(supabase: any, userId: string) {
 }
 
 export async function saveGoogleDriveConnection(supabase: any, userId: string, connection: GoogleDriveConnection) {
+  const normalizedEmail = connection.email?.trim().toLowerCase() ?? null;
+  if (normalizedEmail) {
+    const { data: existing, error } = await supabase
+      .from("backup_preferences")
+      .select("user_id")
+      .eq("provider", "google_drive")
+      .ilike("google_drive_email", normalizedEmail)
+      .neq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (existing?.user_id) {
+      throw new Error("This Google account is already connected to another COMMS account.");
+    }
+  }
+
   await patchPreference(supabase, userId, {
     provider: "google_drive",
     enabled: true,
     status: "enabled",
-    google_drive_email: connection.email,
+    google_drive_email: normalizedEmail,
     drive_scope: connection.scope,
     drive_access_token_enc: encryptToken(connection.accessToken),
     drive_refresh_token_enc: encryptToken(connection.refreshToken),
@@ -306,9 +349,19 @@ export async function runBackupForUser(supabase: any, userId: string) {
   await patchPreference(supabase, userId, { status: "syncing", last_backup_error: null });
   try {
     const { accessToken } = await validAccessToken(supabase, userId);
+    const conversationIds = await userConversationIds(supabase, userId);
+    if (!conversationIds.length) {
+      await patchPreference(supabase, userId, {
+        status: "success",
+        last_successful_backup_at: new Date().toISOString()
+      });
+      return { archivedMessages: 0, batches: 0 };
+    }
+
     const { data: messageRows, error: messageError } = await supabase
       .from("messages")
       .select("*")
+      .in("conversation_id", conversationIds)
       .eq("archive_status", "pending")
       .is("content_redacted_at", null)
       .order("created_at", { ascending: true })
