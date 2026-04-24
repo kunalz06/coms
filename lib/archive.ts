@@ -307,18 +307,79 @@ async function archiveBatchesForConversation(supabase: any, userId: string, conv
   return data ?? [];
 }
 
-async function upsertArchiveBatch(supabase: any, batch: Record<string, unknown>) {
+async function existingArchiveBatchId(
+  supabase: any,
+  userId: string,
+  conversationId: string,
+  provider: string,
+  batchKey: string
+) {
   const { data, error } = await supabase
     .from("archive_batches")
-    .upsert(batch, { onConflict: "user_id,conversation_id,provider,batch_key" })
     .select("id")
-    .single();
+    .eq("user_id", userId)
+    .eq("conversation_id", conversationId)
+    .eq("provider", provider)
+    .eq("batch_key", batchKey)
+    .maybeSingle();
   if (error) throw new Error(error.message);
-  const id = data?.id;
-  if (typeof id !== "string" || !id) {
-    throw new Error("Archive batch could not be prepared.");
+  const id = data?.id as unknown;
+  return typeof id === "string" && id ? id : null;
+}
+
+async function prepareArchiveBatch(
+  supabase: any,
+  batch: Record<string, unknown> & {
+    id: string;
+    user_id: string;
+    conversation_id: string;
+    provider: string;
+    batch_key: string;
   }
-  return id;
+) {
+  const existingId = await existingArchiveBatchId(
+    supabase,
+    batch.user_id,
+    batch.conversation_id,
+    batch.provider,
+    batch.batch_key
+  );
+
+  if (existingId) {
+    const { error } = await supabase
+      .from("archive_batches")
+      .update({
+        archive_version: batch.archive_version,
+        status: batch.status,
+        message_count: batch.message_count,
+        started_at: batch.started_at,
+        completed_at: null,
+        error_message: null
+      })
+      .eq("id", existingId);
+    if (error) throw new Error(error.message);
+    return existingId;
+  }
+
+  const { data, error } = await supabase.from("archive_batches").insert(batch).select("id").single();
+  if (!error) {
+    const id = data?.id as unknown;
+    if (typeof id === "string" && id) return id;
+  }
+
+  const message = error?.message ?? "";
+  if (message.toLowerCase().includes("duplicate key")) {
+    const duplicateId = await existingArchiveBatchId(
+      supabase,
+      batch.user_id,
+      batch.conversation_id,
+      batch.provider,
+      batch.batch_key
+    );
+    if (duplicateId) return duplicateId;
+  }
+
+  throw new Error(error?.message ?? "Archive batch could not be prepared.");
 }
 
 export async function getBackupStatus(supabase: any, userId: string) {
@@ -447,7 +508,7 @@ export async function runBackupForUser(supabase: any, userId: string) {
         message_count: payload.messages.length,
         started_at: nowIso
       };
-      const archiveBatchId = await upsertArchiveBatch(supabase, provisionalBatch);
+      const archiveBatchId = await prepareArchiveBatch(supabase, provisionalBatch);
       payload.batchId = archiveBatchId;
 
       const fileName = `comms-${conversationId}-${payload.batchKey}.json`;
