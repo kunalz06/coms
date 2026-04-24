@@ -20,6 +20,7 @@ class SignalingClient {
   DateTime? _retryAfter;
   String? _registeredUserId;
   final _messages = StreamController<CallSignal>.broadcast();
+  static const _syncRetryDelay = Duration(seconds: 2);
 
   Stream<CallSignal> get messages => _messages.stream;
 
@@ -74,19 +75,19 @@ class SignalingClient {
           if (_channel == channel) {
             _channel = null;
             _registeredUserId = null;
-            _retryAfter = DateTime.now().add(const Duration(seconds: 5));
+            _retryAfter = DateTime.now().add(_syncRetryDelay);
           }
         },
         onError: (_) {
           if (_channel == channel) {
             _channel = null;
             _registeredUserId = null;
-            _retryAfter = DateTime.now().add(const Duration(seconds: 5));
+            _retryAfter = DateTime.now().add(_syncRetryDelay);
           }
         },
       );
 
-      await channel.ready.timeout(const Duration(seconds: 6));
+      await channel.ready.timeout(_syncRetryDelay);
       if (_channel != channel) return;
       channel.sink.add(jsonEncode({'type': 'register', 'userId': userId}));
       _registeredUserId = userId;
@@ -96,7 +97,7 @@ class SignalingClient {
         _channel = null;
         _registeredUserId = null;
       }
-      _retryAfter = DateTime.now().add(const Duration(seconds: 5));
+      _retryAfter = DateTime.now().add(_syncRetryDelay);
       await channel?.sink.close().catchError((_) {});
     }
   }

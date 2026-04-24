@@ -1,57 +1,35 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../shared/models/conversation.dart';
 import '../../../shared/models/user_profile.dart';
 
 final contactRepositoryProvider = Provider<ContactRepository>((ref) {
-  return ContactRepository(Supabase.instance.client);
+  return ContactRepository(
+    Supabase.instance.client,
+    ref.watch(apiClientProvider),
+  );
 });
 
 class ContactRepository {
-  ContactRepository(this._supabase);
+  ContactRepository(this._supabase, this._api);
 
   final SupabaseClient _supabase;
+  final ApiClient _api;
 
   Future<UserProfile?> searchByEmail(String email) async {
-    final data = await _supabase
-        .from('user_profiles')
-        .select()
-        .ilike('email', email.trim())
-        .maybeSingle();
-    if (data == null) return null;
-    return UserProfile.fromJson(Map<String, dynamic>.from(data));
+    final response = await _api.get<Map<String, dynamic>>(
+      '/api/contacts/search',
+      queryParameters: {'email': email.trim()},
+    );
+    final profile = response.data?['profile'];
+    if (profile is! Map<String, dynamic>) return null;
+    return UserProfile.fromJson(profile);
   }
 
-  Future<void> addFriend({
-    required String requesterId,
-    required String addresseeId,
-  }) async {
-    if (requesterId == addresseeId) {
-      throw const FormatException('Choose another COMMS user.');
-    }
-
-    final existing = await _supabase
-        .from('friendships')
-        .select('id')
-        .or(
-          'and(requester_id.eq.$requesterId,addressee_id.eq.$addresseeId),'
-          'and(requester_id.eq.$addresseeId,addressee_id.eq.$requesterId)',
-        )
-        .maybeSingle();
-
-    if (existing != null) {
-      await _supabase
-          .from('friendships')
-          .update({'status': 'accepted'}).eq('id', existing['id'] as String);
-      return;
-    }
-
-    await _supabase.from('friendships').insert({
-      'requester_id': requesterId,
-      'addressee_id': addresseeId,
-      'status': 'accepted',
-    });
+  Future<void> addFriend({required String addresseeId}) async {
+    await _api.post('/api/contacts/add', data: {'addresseeId': addresseeId});
   }
 
   Future<Conversation> getOrCreateDirectConversation(String otherUserId) async {

@@ -20,6 +20,7 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
   UserProfile? _result;
   String? _error;
   var _loading = false;
+  var _adding = false;
 
   @override
   void dispose() {
@@ -52,14 +53,24 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
   Future<void> _addAndOpen(UserProfile profile) async {
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) return;
+    setState(() {
+      _adding = true;
+      _error = null;
+    });
     final repository = ref.read(contactRepositoryProvider);
-    await repository.addFriend(requesterId: me.uid, addresseeId: profile.id);
-    final conversation =
-        await repository.getOrCreateDirectConversation(profile.id);
-    if (!mounted) return;
-    Navigator.of(context).pop();
-    context.go(AppRoutes.conversation
-        .replaceFirst(':conversationId', conversation.id));
+    try {
+      await repository.addFriend(addresseeId: profile.id);
+      final conversation =
+          await repository.getOrCreateDirectConversation(profile.id);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      context.go(AppRoutes.conversation
+          .replaceFirst(':conversationId', conversation.id));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
   }
 
   @override
@@ -105,8 +116,8 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
                   title: Text(_result!.fullName),
                   subtitle: Text(_result!.email),
                   trailing: FilledButton(
-                    onPressed: () => _addAndOpen(_result!),
-                    child: const Text('Add'),
+                    onPressed: _adding ? null : () => _addAndOpen(_result!),
+                    child: Text(_adding ? 'Adding...' : 'Add'),
                   ),
                 ),
               ),
