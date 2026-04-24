@@ -110,7 +110,7 @@ class CloudinaryUploadService {
     }
 
     final signed = await _signature(kind);
-    final resource = _resourceType(kind, mimeType, fileName);
+    final resource = _resourceType(kind);
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(
         uploadBytesData,
@@ -122,13 +122,34 @@ class CloudinaryUploadService {
       'folder': signed.folder,
     });
 
-    final response = await _dio.post<Map<String, dynamic>>(
-      'https://api.cloudinary.com/v1_1/${_config.cloudinaryCloudName}/$resource/upload',
-      data: form,
-      onSendProgress: (sent, total) {
-        if (total > 0) onProgress(((sent / total) * 100).round());
-      },
-    );
+    Response<Map<String, dynamic>> response;
+    try {
+      response = await _dio.post<Map<String, dynamic>>(
+        'https://api.cloudinary.com/v1_1/${_config.cloudinaryCloudName}/$resource/upload',
+        data: form,
+        onSendProgress: (sent, total) {
+          if (total > 0) onProgress(((sent / total) * 100).round());
+        },
+      );
+    } on DioException catch (error) {
+      // If Cloudinary rejects a specific resource endpoint, retry once using
+      // auto detection to keep uploads working across browser/device variants.
+      if (error.response?.statusCode == 400 && resource != 'auto') {
+        try {
+          response = await _dio.post<Map<String, dynamic>>(
+            'https://api.cloudinary.com/v1_1/${_config.cloudinaryCloudName}/auto/upload',
+            data: form,
+            onSendProgress: (sent, total) {
+              if (total > 0) onProgress(((sent / total) * 100).round());
+            },
+          );
+        } on DioException catch (retryError) {
+          throw FormatException(_cloudinaryErrorMessage(retryError));
+        }
+      } else {
+        throw FormatException(_cloudinaryErrorMessage(error));
+      }
+    }
 
     final data = response.data;
     if (data == null || data['secure_url'] == null) {
@@ -232,10 +253,8 @@ class _CloudinarySignature {
   final String folder;
 }
 
-String _resourceType(String kind, String mimeType, String fileName) {
-  final isPdf =
-      mimeType == 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
-  if (kind == 'document') return isPdf ? 'image' : 'raw';
+String _resourceType(String kind) {
+  if (kind == 'document') return 'raw';
   if (kind == 'voice') return 'video';
   return 'image';
 }
@@ -272,4 +291,26 @@ String _mimeTypeFor(String fileName, String kind) {
   if (lower.endsWith('.m4a')) return 'audio/mp4';
   if (lower.endsWith('.webm')) return 'audio/webm';
   return kind == 'image' ? 'image/jpeg' : 'application/octet-stream';
+}
+
+String _cloudinaryErrorMessage(DioException error) {
+  final data = error.response?.data;
+  if (data is Map<String, dynamic>) {
+    final nested = data['error'];
+    if (nested is Map<String, dynamic>) {
+      final message = nested['message']?.toString().trim();
+      if (message != null && message.isNotEmpty) {
+        return 'Upload failed: $message';
+      }
+    }
+    final message = data['message']?.toString().trim();
+    if (message != null && message.isNotEmpty) {
+      return 'Upload failed: $message';
+    }
+  }
+  final plain = error.message?.trim();
+  if (plain != null && plain.isNotEmpty) {
+    return 'Upload failed: $plain';
+  }
+  return 'Upload failed due to a network or server issue.';
 }

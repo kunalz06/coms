@@ -1,5 +1,5 @@
 name: comms_flutter
-description: COMMS Flutter client for web, Android, and iOS.
+description: COMMS Flutter client for web.
 publish_to: "none"
 version: 0.1.0+1
 
@@ -24,7 +24,7 @@ dependencies:
   permission_handler: ^11.4.0
   image_picker: ^1.1.2
   file_picker: ^9.2.1
-  record: ^5.2.1
+  record: ^6.0.0
   just_audio: ^0.9.46
   hive: ^2.2.3
   hive_flutter: ^1.1.0

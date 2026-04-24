@@ -1,4 +1,0 @@
-storePassword=REPLACE_WITH_STORE_PASSWORD
-keyPassword=REPLACE_WITH_KEY_PASSWORD
-keyAlias=comms
-storeFile=../comms-release-key.jks

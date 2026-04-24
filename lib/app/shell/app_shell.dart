@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/responsive/breakpoints.dart';
 import '../../features/calls/data/call_controller.dart';
 import '../../features/calls/domain/call_state.dart';
+import '../../shared/widgets/comms_page_background.dart';
 import '../../shared/widgets/comms_logo.dart';
 import '../router/app_routes.dart';
 
@@ -121,7 +122,9 @@ class AppShell extends ConsumerWidget {
         final windowClass = windowClassForWidth(constraints.maxWidth);
         if (windowClass == WindowClass.compact) {
           return Scaffold(
-            body: SafeArea(child: withMiniOverlay(content)),
+            body: CommsPageBackground(
+              child: SafeArea(child: withMiniOverlay(content)),
+            ),
             bottomNavigationBar: NavigationBar(
               selectedIndex: _index,
               onDestinationSelected: (index) => _go(context, index),
@@ -144,37 +147,39 @@ class AppShell extends ConsumerWidget {
         }
 
         return Scaffold(
-          body: SafeArea(
-            child: Row(
-              children: [
-                NavigationRail(
-                  selectedIndex: _index,
-                  onDestinationSelected: (index) => _go(context, index),
-                  labelType: NavigationRailLabelType.all,
-                  leading: const Padding(
-                    padding: EdgeInsets.only(bottom: 18),
-                    child: CommsLogo(size: 34),
+          body: CommsPageBackground(
+            child: SafeArea(
+              child: Row(
+                children: [
+                  NavigationRail(
+                    selectedIndex: _index,
+                    onDestinationSelected: (index) => _go(context, index),
+                    labelType: NavigationRailLabelType.all,
+                    leading: const Padding(
+                      padding: EdgeInsets.only(bottom: 18),
+                      child: CommsLogo(size: 34),
+                    ),
+                    destinations: const [
+                      NavigationRailDestination(
+                          icon: Icon(Icons.chat_bubble_outline),
+                          selectedIcon: Icon(Icons.chat_bubble),
+                          label: Text('Chats')),
+                      NavigationRailDestination(
+                          icon: Icon(Icons.call_outlined),
+                          selectedIcon: Icon(Icons.call),
+                          label: Text('Calls')),
+                      NavigationRailDestination(
+                          icon: Icon(Icons.settings_outlined),
+                          selectedIcon: Icon(Icons.settings),
+                          label: Text('Settings')),
+                    ],
                   ),
-                  destinations: const [
-                    NavigationRailDestination(
-                        icon: Icon(Icons.chat_bubble_outline),
-                        selectedIcon: Icon(Icons.chat_bubble),
-                        label: Text('Chats')),
-                    NavigationRailDestination(
-                        icon: Icon(Icons.call_outlined),
-                        selectedIcon: Icon(Icons.call),
-                        label: Text('Calls')),
-                    NavigationRailDestination(
-                        icon: Icon(Icons.settings_outlined),
-                        selectedIcon: Icon(Icons.settings),
-                        label: Text('Settings')),
-                  ],
-                ),
-                VerticalDivider(
-                    width: 1,
-                    color: Theme.of(context).colorScheme.outlineVariant),
-                Expanded(child: withMiniOverlay(content)),
-              ],
+                  VerticalDivider(
+                      width: 1,
+                      color: Theme.of(context).colorScheme.outlineVariant),
+                  Expanded(child: withMiniOverlay(content)),
+                ],
+              ),
             ),
           ),
         );
