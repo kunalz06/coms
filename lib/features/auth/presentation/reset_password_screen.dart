@@ -17,6 +17,7 @@ class ResetPasswordScreen extends ConsumerStatefulWidget {
 
 class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   final _email = TextEditingController();
+  final _otp = TextEditingController();
   final _password = TextEditingController();
   final _confirmPassword = TextEditingController();
   var _sent = false;
@@ -26,6 +27,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   @override
   void dispose() {
     _email.dispose();
+    _otp.dispose();
     _password.dispose();
     _confirmPassword.dispose();
     super.dispose();
@@ -38,39 +40,36 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       if (mounted) setState(() => _sent = true);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
+      await _showError(context, error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _apply(String token) async {
+  Future<void> _apply() async {
+    if (_otp.text.trim().length != 6) {
+      await _showError(context, 'Enter the 6 character OTP from your email.');
+      return;
+    }
     if (_password.text.length < 8) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password must be at least 8 characters.')),
-      );
+      await _showError(context, 'Password must be at least 8 characters.');
       return;
     }
     if (_password.text != _confirmPassword.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Passwords do not match.')),
-      );
+      await _showError(context, 'Passwords do not match.');
       return;
     }
     setState(() => _busy = true);
     try {
       await ref.read(authRepositoryProvider).applyPasswordReset(
-            token: token,
+            email: _email.text,
+            otp: _otp.text,
             password: _password.text,
           );
       if (mounted) setState(() => _done = true);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
+      await _showError(context, error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -78,8 +77,6 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final token = GoRouterState.of(context).uri.queryParameters['token'];
-    final isResetLink = token != null && token.isNotEmpty;
     return Scaffold(
       appBar: AppBar(title: const Text('Reset password')),
       body: CommsPageBackground(
@@ -98,62 +95,75 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                       const Center(
                         child: AuthHero(
                           title: 'Reset Password',
-                          subtitle: 'We will send a secure reset link',
+                          subtitle: 'We will send a 6 character OTP',
                           logoSize: 64,
                         ),
                       ),
                       const SizedBox(height: 24),
-                      Text(isResetLink
-                          ? (_done
-                              ? 'Password reset complete.'
-                              : 'Enter a new password.')
+                      Text(_done
+                          ? 'Password reset complete.'
                           : (_sent
-                              ? 'Check your inbox. The reset link expires in 10 minutes.'
+                              ? 'Enter the OTP sent to your account email. It expires in 5 minutes.'
                               : 'Enter your account email.')),
                       const SizedBox(height: 12),
-                      if (isResetLink && !_done) ...[
-                        TextField(
-                          controller: _password,
-                          obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: 'New password',
-                            prefixIcon: Icon(Icons.lock_outline),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _confirmPassword,
-                          obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Confirm password',
-                            prefixIcon: Icon(Icons.lock_reset),
-                          ),
-                        ),
-                      ] else if (!isResetLink) ...[
+                      if (!_done) ...[
                         TextField(
                           controller: _email,
+                          enabled: !_sent,
                           keyboardType: TextInputType.emailAddress,
                           decoration: const InputDecoration(
                             labelText: 'Email',
                             prefixIcon: Icon(Icons.alternate_email_outlined),
                           ),
                         ),
+                        if (_sent) ...[
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _otp,
+                            textCapitalization: TextCapitalization.characters,
+                            decoration: const InputDecoration(
+                              labelText: 'OTP',
+                              prefixIcon: Icon(Icons.password_outlined),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _password,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: 'New password',
+                              prefixIcon: Icon(Icons.lock_outline),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _confirmPassword,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Confirm password',
+                              prefixIcon: Icon(Icons.lock_reset),
+                            ),
+                          ),
+                        ],
                       ],
                       const SizedBox(height: 20),
                       if (!_done)
                         FilledButton.icon(
-                          onPressed: _busy
-                              ? null
-                              : (isResetLink ? () => _apply(token) : _send),
+                          onPressed: _busy ? null : (_sent ? _apply : _send),
                           icon: Icon(
-                            isResetLink
+                            _sent
                                 ? Icons.lock_reset
                                 : Icons.mark_email_read_outlined,
                             size: 18,
                           ),
                           label: Text(
-                            isResetLink ? 'Update password' : 'Send reset link',
+                            _sent ? 'Update password' : 'Send OTP',
                           ),
+                        ),
+                      if (_sent && !_done)
+                        TextButton(
+                          onPressed: _busy ? null : _send,
+                          child: const Text('Send another OTP'),
                         ),
                       TextButton.icon(
                           onPressed: () => context.go(AppRoutes.login),
@@ -169,4 +179,21 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       ),
     );
   }
+}
+
+Future<void> _showError(BuildContext context, String message) {
+  if (!context.mounted) return Future.value();
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Something went wrong'),
+      content: Text(message.replaceFirst('FormatException: ', '')),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
 }

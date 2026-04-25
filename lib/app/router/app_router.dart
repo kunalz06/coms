@@ -32,17 +32,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: AppRoutes.chats,
     refreshListenable: _AuthRefreshListenable(FirebaseAuth.instance),
     redirect: (context, state) {
-      final user = authState.valueOrNull;
+      final user = authState.valueOrNull ?? FirebaseAuth.instance.currentUser;
       final authPath = state.matchedLocation == AppRoutes.login ||
           state.matchedLocation == AppRoutes.register ||
           state.matchedLocation == AppRoutes.resetPassword;
-      final resetPasswordWithToken =
-          state.matchedLocation == AppRoutes.resetPassword &&
-              (state.uri.queryParameters['token']?.isNotEmpty ?? false);
 
       if (authState.isLoading) return null;
       if (user == null && !authPath) return AppRoutes.login;
-      if (user != null && authPath && !resetPasswordWithToken) {
+      if (user != null && authPath) {
         return AppRoutes.chats;
       }
       return null;

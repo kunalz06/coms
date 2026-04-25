@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase
       .from("user_profiles")
       .select("id,email,full_name,avatar_url,status,last_seen,created_at,updated_at")
-      .ilike("email", email)
+      .eq("email", email)
       .neq("id", decoded.uid)
       .maybeSingle();
     if (error) throw new Error(error.message);

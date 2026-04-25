@@ -15,32 +15,11 @@ class PrivacyScreen extends ConsumerStatefulWidget {
 }
 
 class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
-  String? _handledResetToken;
-
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final privacy = ref.watch(privacyControllerProvider);
     if (user == null || privacy.loading) return const LoadingState();
-
-    final uri = GoRouterState.of(context).uri;
-    final resetType = uri.queryParameters['privacyReset'];
-    final resetToken = uri.queryParameters['token'];
-    if ((resetType == 'lock' || resetType == 'hidden') &&
-        resetToken != null &&
-        resetToken.isNotEmpty &&
-        resetToken != _handledResetToken) {
-      _handledResetToken = resetToken;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _showApplyResetLink(
-          context: context,
-          ref: ref,
-          type: resetType!,
-          token: resetToken,
-        );
-      });
-    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Privacy')),
@@ -139,8 +118,8 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
                 ListTile(
                   leading: const Icon(Icons.password_outlined),
                   title: const Text('Reset chat lock password'),
-                  subtitle: const Text('Email link valid for 10 minutes'),
-                  onTap: () => _sendResetEmail(
+                  subtitle: const Text('Email OTP valid for 5 minutes'),
+                  onTap: () => _sendResetOtp(
                     context: context,
                     ref: ref,
                     type: 'lock',
@@ -149,8 +128,8 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
                 ListTile(
                   leading: const Icon(Icons.restart_alt_outlined),
                   title: const Text('Reset hidden chats password'),
-                  subtitle: const Text('Email link valid for 10 minutes'),
-                  onTap: () => _sendResetEmail(
+                  subtitle: const Text('Email OTP valid for 5 minutes'),
+                  onTap: () => _sendResetOtp(
                     context: context,
                     ref: ref,
                     type: 'hidden',
@@ -188,7 +167,6 @@ Future<void> _showPasswordDialog({
   required bool oldPasswordRequired,
   required PrivacyPasswordSubmit onSubmit,
 }) async {
-  final messenger = ScaffoldMessenger.of(context);
   final oldController = TextEditingController();
   final newController = TextEditingController();
   final confirmController = TextEditingController();
@@ -245,15 +223,15 @@ Future<void> _showPasswordDialog({
   final newPassword = newController.text.trim();
   final confirmPassword = confirmController.text.trim();
   if (oldPasswordRequired && oldPassword.isEmpty) {
-    _showSnack(messenger, 'Enter your old password.');
+    await _showPopup(context, 'Enter your old password.');
     return;
   }
   if (newPassword.length < 4) {
-    _showSnack(messenger, 'Use a password with at least 4 characters.');
+    await _showPopup(context, 'Use a password with at least 4 characters.');
     return;
   }
   if (newPassword != confirmPassword) {
-    _showSnack(messenger, 'Passwords do not match.');
+    await _showPopup(context, 'Passwords do not match.');
     return;
   }
 
@@ -263,44 +241,54 @@ Future<void> _showPasswordDialog({
       newPassword: newPassword,
     );
     if (!context.mounted) return;
-    _showSnack(
-      messenger,
+    await _showPopup(
+      context,
       ok
           ? 'Privacy password updated.'
           : 'Old password did not match. Use reset password to recover it.',
     );
   } catch (error) {
     if (!context.mounted) return;
-    _showSnack(messenger, error.toString());
+    await _showPopup(context, error.toString());
   }
 }
 
-Future<void> _sendResetEmail({
+Future<void> _sendResetOtp({
   required BuildContext context,
   required WidgetRef ref,
   required String type,
 }) async {
-  final messenger = ScaffoldMessenger.of(context);
+  final privacy = ref.read(privacyControllerProvider);
+  if (type == 'lock' && !privacy.chatLockConfigured) {
+    await _showPopup(context, 'Set a chat lock password before resetting it.');
+    return;
+  }
+  if (type == 'hidden' && !privacy.hiddenPasswordConfigured) {
+    await _showPopup(context, 'Set a hidden chats password before resetting it.');
+    return;
+  }
   try {
-    await ref.read(privacyControllerProvider.notifier).sendResetEmail(
+    await ref.read(privacyControllerProvider.notifier).sendResetOtp(
           type: type,
         );
     if (!context.mounted) return;
-    _showSnack(messenger, 'Reset link sent to your COMMS account email.');
+    await _showApplyResetOtp(
+      context: context,
+      ref: ref,
+      type: type,
+    );
   } catch (error) {
     if (!context.mounted) return;
-    _showSnack(messenger, error.toString());
+    await _showPopup(context, error.toString());
   }
 }
 
-Future<void> _showApplyResetLink({
+Future<void> _showApplyResetOtp({
   required BuildContext context,
   required WidgetRef ref,
   required String type,
-  required String token,
 }) async {
-  final messenger = ScaffoldMessenger.of(context);
-  final router = GoRouter.of(context);
+  final otpController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmController = TextEditingController();
   final submitted = await showDialog<bool>(
@@ -314,6 +302,16 @@ Future<void> _showApplyResetLink({
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          const Text('Enter the OTP sent to your COMMS account email.'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: otpController,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              hintText: '6 character OTP',
+            ),
+          ),
+          const SizedBox(height: 8),
           TextField(
             controller: passwordController,
             obscureText: true,
@@ -346,37 +344,52 @@ Future<void> _showApplyResetLink({
   if (submitted != true) return;
   if (!context.mounted) return;
 
+  final otp = otpController.text.trim();
   final password = passwordController.text.trim();
   final confirmPassword = confirmController.text.trim();
+  if (otp.length != 6) {
+    await _showPopup(context, 'Enter the 6 character OTP from your email.');
+    return;
+  }
   if (password.length < 4) {
-    _showSnack(messenger, 'Use a password with at least 4 characters.');
+    await _showPopup(context, 'Use a password with at least 4 characters.');
     return;
   }
   if (password != confirmPassword) {
-    _showSnack(messenger, 'Passwords do not match.');
+    await _showPopup(context, 'Passwords do not match.');
     return;
   }
 
   try {
-    final ok = await ref.read(privacyControllerProvider.notifier).applyResetLink(
+    final ok = await ref.read(privacyControllerProvider.notifier).applyResetOtp(
           type: type,
-          token: token,
+          otp: otp,
           newPassword: password,
         );
     if (!context.mounted) return;
-    _showSnack(
-      messenger,
-      ok ? 'Privacy password reset complete.' : 'Invalid or expired reset link.',
+    await _showPopup(
+      context,
+      ok ? 'Privacy password reset complete.' : 'Invalid or expired OTP.',
     );
-    router.go(AppRoutes.privacy);
   } catch (error) {
     if (!context.mounted) return;
-    _showSnack(messenger, error.toString());
+    await _showPopup(context, error.toString());
   }
 }
 
-void _showSnack(ScaffoldMessengerState messenger, String message) {
-  messenger.showSnackBar(
-    SnackBar(content: Text(message)),
+Future<void> _showPopup(BuildContext context, String message) {
+  if (!context.mounted) return Future.value();
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('COMMS'),
+      content: Text(message.replaceFirst('FormatException: ', '')),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
   );
 }

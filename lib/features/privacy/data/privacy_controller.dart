@@ -156,6 +156,9 @@ class PrivacyController extends StateNotifier<PrivacyState> {
     required String conversationId,
     required bool locked,
   }) async {
+    if (locked && !state.chatLockConfigured) {
+      throw StateError('Set a chat lock password before locking chats.');
+    }
     await _repository.setConversationLocked(conversationId, locked);
     final next = Set<String>.from(state.lockedConversationIds);
     if (locked) {
@@ -170,6 +173,9 @@ class PrivacyController extends StateNotifier<PrivacyState> {
     required String conversationId,
     required bool hidden,
   }) async {
+    if (hidden && !state.hiddenPasswordConfigured) {
+      throw StateError('Set a hidden chats password before hiding chats.');
+    }
     await _repository.setConversationHidden(conversationId, hidden);
     final next = Set<String>.from(state.hiddenConversationIds);
     if (hidden) {
@@ -180,20 +186,26 @@ class PrivacyController extends StateNotifier<PrivacyState> {
     state = state.copyWith(hiddenConversationIds: next);
   }
 
-  Future<void> sendResetEmail({
+  Future<void> sendResetOtp({
     required String type,
   }) async {
-    await _repository.sendResetEmail(type: type);
+    if (type == 'lock' && !state.chatLockConfigured) {
+      throw StateError('Set a chat lock password before resetting it.');
+    }
+    if (type == 'hidden' && !state.hiddenPasswordConfigured) {
+      throw StateError('Set a hidden chats password before resetting it.');
+    }
+    await _repository.sendResetOtp(type: type);
   }
 
-  Future<bool> applyResetLink({
+  Future<bool> applyResetOtp({
     required String type,
-    required String token,
+    required String otp,
     required String newPassword,
   }) async {
-    final ok = await _repository.applyResetLink(
+    final ok = await _repository.applyResetOtp(
       type: type,
-      token: token,
+      otp: otp,
       newPassword: newPassword,
     );
     if (ok) await refresh();

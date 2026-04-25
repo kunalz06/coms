@@ -53,11 +53,13 @@ class AuthRepository {
   }
 
   Future<void> applyPasswordReset({
-    required String token,
+    required String email,
+    required String otp,
     required String password,
   }) {
     return _api.post('/api/auth/password-reset',
-        data: {'token': token, 'password': password}).then((_) {});
+        data: {'email': email.trim(), 'otp': otp.trim(), 'password': password})
+        .then((_) {});
   }
 
   Future<void> changeEmail(String email) async {

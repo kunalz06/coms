@@ -5,16 +5,20 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
       email?: string;
-      token?: string;
+      otp?: string;
       password?: string;
     };
 
-    if (body.token) {
-      await applyAccountPasswordReset(body.token, body.password ?? "");
+    if (body.otp || body.password) {
+      await applyAccountPasswordReset({
+        email: body.email ?? "",
+        otp: body.otp ?? "",
+        password: body.password ?? ""
+      });
       return NextResponse.json({ ok: true });
     }
 
-    await sendAccountPasswordReset(request, body.email ?? "");
+    await sendAccountPasswordReset(body.email ?? "");
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

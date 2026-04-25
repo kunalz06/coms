@@ -1,93 +1,21 @@
 import crypto from "node:crypto";
 import nodemailer from "nodemailer";
 import { firebaseAdminAuth } from "@/lib/firebase-admin";
+import { createServiceSupabase } from "@/lib/supabase";
 
-type ResetTokenPayload = {
-  uid: string;
-  email: string;
-  iat: number;
-  exp: number;
-  purpose: "account_password_reset" | "privacy_password_reset";
-  privacyType?: "lock" | "hidden";
-};
+type ResetPurpose = "account" | "privacy_lock" | "privacy_hidden";
+type PrivacyType = "lock" | "hidden";
 
-const RESET_TTL_SECONDS = 10 * 60;
+const OTP_TTL_MS = 5 * 60 * 1000;
+const OTP_WINDOW_MS = 20 * 60 * 1000;
+const OTP_COOLDOWN_MS = 20 * 60 * 1000;
+const OTP_MAX_IN_WINDOW = 5;
+const OTP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function required(name: string) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not configured.`);
   return value;
-}
-
-function base64Url(input: string) {
-  return Buffer.from(input, "utf8").toString("base64url");
-}
-
-function fromBase64Url(input: string) {
-  return Buffer.from(input, "base64url").toString("utf8");
-}
-
-function resetSecret() {
-  return (
-    process.env.PASSWORD_RESET_TOKEN_SECRET ??
-    required("BACKUP_OAUTH_STATE_SECRET")
-  );
-}
-
-function signPayload(payload: ResetTokenPayload) {
-  const body = base64Url(JSON.stringify(payload));
-  const sig = crypto
-    .createHmac("sha256", resetSecret())
-    .update(body)
-    .digest("base64url");
-  return `${body}.${sig}`;
-}
-
-function verifySignedToken(token: string): ResetTokenPayload {
-  const [body, sig] = token.split(".");
-  if (!body || !sig) throw new Error("Invalid reset link.");
-  const expected = crypto
-    .createHmac("sha256", resetSecret())
-    .update(body)
-    .digest("base64url");
-  if (Buffer.byteLength(sig) !== Buffer.byteLength(expected)) {
-    throw new Error("Invalid reset link.");
-  }
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
-    throw new Error("Invalid reset link.");
-  }
-  const payload = JSON.parse(fromBase64Url(body)) as ResetTokenPayload;
-  if (!payload.uid || !payload.email || !payload.exp) {
-    throw new Error("Invalid reset link.");
-  }
-  if (payload.exp < Math.floor(Date.now() / 1000)) {
-    throw new Error("Reset link expired. Request a new link.");
-  }
-  return payload;
-}
-
-function verifyAccountResetToken(token: string) {
-  const payload = verifySignedToken(token);
-  if (payload.purpose !== "account_password_reset") {
-    throw new Error("Invalid reset link.");
-  }
-  return payload;
-}
-
-function verifyPrivacyResetToken(token: string) {
-  const payload = verifySignedToken(token);
-  if (
-    payload.purpose !== "privacy_password_reset" ||
-    (payload.privacyType !== "lock" && payload.privacyType !== "hidden")
-  ) {
-    throw new Error("Invalid reset link.");
-  }
-  return payload;
-}
-
-function appUrl(request: Request) {
-  return (process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin)
-    .replace(/\/$/, "");
 }
 
 function gmailTransport() {
@@ -100,11 +28,168 @@ function gmailTransport() {
   });
 }
 
-export async function sendAccountPasswordReset(request: Request, email: string) {
+function normalizeEmail(email: string) {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail || !normalizedEmail.includes("@")) {
     throw new Error("Enter a valid account email.");
   }
+  return normalizedEmail;
+}
+
+function privacyPurpose(type: PrivacyType): ResetPurpose {
+  return type === "lock" ? "privacy_lock" : "privacy_hidden";
+}
+
+function generateOtp() {
+  let value = "";
+  for (let i = 0; i < 6; i += 1) {
+    value += OTP_ALPHABET[crypto.randomInt(OTP_ALPHABET.length)];
+  }
+  return value;
+}
+
+function hashOtp(otp: string, salt: string) {
+  return crypto
+    .createHash("sha256")
+    .update(`${salt}:${otp.trim().toUpperCase()}`)
+    .digest("hex");
+}
+
+function publicCooldownMessage(until: Date) {
+  const minutes = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60000));
+  return `Too many OTP requests. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
+async function assertCanIssueOtp(email: string, purpose: ResetPurpose) {
+  const supabase = createServiceSupabase();
+  const windowStart = new Date(Date.now() - OTP_WINDOW_MS).toISOString();
+  const { data, error } = await supabase
+    .from("password_reset_otp_events")
+    .select("created_at")
+    .eq("email", email)
+    .eq("purpose", purpose)
+    .gte("created_at", windowStart)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  if ((data?.length ?? 0) < OTP_MAX_IN_WINDOW) return;
+
+  const latest = new Date(data![0].created_at as string);
+  const cooldownUntil = new Date(latest.getTime() + OTP_COOLDOWN_MS);
+  if (Date.now() < cooldownUntil.getTime()) {
+    throw new Error(publicCooldownMessage(cooldownUntil));
+  }
+}
+
+async function storeOtp({
+  userId,
+  email,
+  purpose,
+  otp
+}: {
+  userId: string;
+  email: string;
+  purpose: ResetPurpose;
+  otp: string;
+}) {
+  const supabase = createServiceSupabase();
+  const salt = crypto.randomBytes(16).toString("base64url");
+  const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
+
+  await assertCanIssueOtp(email, purpose);
+
+  const { error: deleteError } = await supabase
+    .from("password_reset_otps")
+    .delete()
+    .eq("email", email)
+    .eq("purpose", purpose);
+  if (deleteError) throw new Error(deleteError.message);
+
+  const { error: insertError } = await supabase
+    .from("password_reset_otps")
+    .insert({
+      user_id: userId,
+      email,
+      purpose,
+      otp_hash: hashOtp(otp, salt),
+      salt,
+      expires_at: expiresAt
+    });
+  if (insertError) throw new Error(insertError.message);
+
+  const { error: eventError } = await supabase
+    .from("password_reset_otp_events")
+    .insert({ user_id: userId, email, purpose });
+  if (eventError) throw new Error(eventError.message);
+}
+
+async function verifyAndDeleteOtp({
+  userId,
+  email,
+  purpose,
+  otp
+}: {
+  userId: string;
+  email: string;
+  purpose: ResetPurpose;
+  otp: string;
+}) {
+  const normalizedOtp = otp.trim().toUpperCase();
+  if (!/^[A-Z0-9]{6}$/.test(normalizedOtp)) {
+    throw new Error("Enter the 6 character OTP sent to your email.");
+  }
+
+  const supabase = createServiceSupabase();
+  const { data, error } = await supabase
+    .from("password_reset_otps")
+    .select("id,user_id,email,purpose,otp_hash,salt,expires_at")
+    .eq("email", email)
+    .eq("purpose", purpose)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data || data.user_id !== userId) {
+    throw new Error("Invalid or expired OTP.");
+  }
+  if (new Date(data.expires_at as string).getTime() < Date.now()) {
+    await supabase.from("password_reset_otps").delete().eq("id", data.id);
+    throw new Error("OTP expired. Request a new OTP.");
+  }
+  const expected = data.otp_hash as string;
+  const actual = hashOtp(normalizedOtp, data.salt as string);
+  if (
+    Buffer.byteLength(expected) !== Buffer.byteLength(actual) ||
+    !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual))
+  ) {
+    throw new Error("Invalid or expired OTP.");
+  }
+
+  const { error: deleteError } = await supabase
+    .from("password_reset_otps")
+    .delete()
+    .eq("id", data.id);
+  if (deleteError) throw new Error(deleteError.message);
+}
+
+async function sendOtpEmail(email: string, subject: string, label: string, otp: string) {
+  const from = process.env.GMAIL_FROM ?? process.env.GMAIL_USER;
+  await gmailTransport().sendMail({
+    from,
+    to: email,
+    subject,
+    text:
+      `Your COMMS ${label} OTP is ${otp}.\n\n` +
+      "It expires in 5 minutes. If you did not request this, you can ignore this email.",
+    html:
+      `<p>Your COMMS ${label} OTP is <strong>${otp}</strong>.</p>` +
+      "<p>It expires in 5 minutes. If you did not request this, you can ignore this email.</p>"
+  });
+}
+
+export async function sendAccountPasswordReset(email: string) {
+  const normalizedEmail = normalizeEmail(email);
 
   const auth = firebaseAdminAuth();
   let user;
@@ -114,92 +199,79 @@ export async function sendAccountPasswordReset(request: Request, email: string) 
     return;
   }
 
-  const now = Math.floor(Date.now() / 1000);
-  const token = signPayload({
-    uid: user.uid,
+  const otp = generateOtp();
+  await storeOtp({
+    userId: user.uid,
     email: normalizedEmail,
-    iat: now,
-    exp: now + RESET_TTL_SECONDS,
-    purpose: "account_password_reset"
+    purpose: "account",
+    otp
   });
-  const resetLink = `${appUrl(request)}/reset-password?token=${encodeURIComponent(token)}`;
-  const from = process.env.GMAIL_FROM ?? process.env.GMAIL_USER;
-
-  await gmailTransport().sendMail({
-    from,
-    to: normalizedEmail,
-    subject: "Reset your COMMS password",
-    text: `Use this link to reset your COMMS password. It expires in 10 minutes:\n\n${resetLink}\n\nIf you did not request this, you can ignore this email.`,
-    html: `<p>Use this link to reset your COMMS password. It expires in 10 minutes:</p><p><a href="${resetLink}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`
-  });
+  await sendOtpEmail(normalizedEmail, "Reset your COMMS password", "account password reset", otp);
 }
 
-export async function applyAccountPasswordReset(token: string, password: string) {
+export async function applyAccountPasswordReset({
+  email,
+  otp,
+  password
+}: {
+  email: string;
+  otp: string;
+  password: string;
+}) {
   if (password.length < 8) {
     throw new Error("Password must be at least 8 characters.");
   }
-  const payload = verifyAccountResetToken(token);
+  const normalizedEmail = normalizeEmail(email);
   const auth = firebaseAdminAuth();
-  const user = await auth.getUser(payload.uid);
-  if (user.email?.toLowerCase() !== payload.email.toLowerCase()) {
-    throw new Error("Reset link no longer matches this account.");
-  }
-  await auth.updateUser(payload.uid, { password });
+  const user = await auth.getUserByEmail(normalizedEmail);
+  await verifyAndDeleteOtp({
+    userId: user.uid,
+    email: normalizedEmail,
+    purpose: "account",
+    otp
+  });
+  await auth.updateUser(user.uid, { password });
 }
 
 export async function sendPrivacyPasswordReset(
-  request: Request,
   userId: string,
   email: string,
-  privacyType: "lock" | "hidden"
+  privacyType: PrivacyType
 ) {
-  const normalizedEmail = email.trim().toLowerCase();
-  if (!normalizedEmail || !normalizedEmail.includes("@")) {
-    throw new Error("No registered account email is available.");
-  }
-
+  const normalizedEmail = normalizeEmail(email);
   const auth = firebaseAdminAuth();
   const user = await auth.getUser(userId);
   if (user.email?.toLowerCase() !== normalizedEmail) {
     throw new Error("Reset email must match the signed-in account.");
   }
 
-  const now = Math.floor(Date.now() / 1000);
-  const token = signPayload({
-    uid: user.uid,
+  const label = privacyType === "lock" ? "chat lock password reset" : "hidden chats password reset";
+  const otp = generateOtp();
+  await storeOtp({
+    userId: user.uid,
     email: normalizedEmail,
-    iat: now,
-    exp: now + RESET_TTL_SECONDS,
-    purpose: "privacy_password_reset",
-    privacyType
+    purpose: privacyPurpose(privacyType),
+    otp
   });
-  const resetLink =
-    `${appUrl(request)}/settings/privacy?privacyReset=${privacyType}` +
-    `&token=${encodeURIComponent(token)}`;
-  const from = process.env.GMAIL_FROM ?? process.env.GMAIL_USER;
-  const label = privacyType === "lock" ? "chat lock" : "hidden chats";
-
-  await gmailTransport().sendMail({
-    from,
-    to: normalizedEmail,
-    subject: `Reset your COMMS ${label} password`,
-    text: `Use this link to reset your COMMS ${label} password. It expires in 10 minutes:\n\n${resetLink}\n\nIf you did not request this, you can ignore this email.`,
-    html: `<p>Use this link to reset your COMMS ${label} password. It expires in 10 minutes:</p><p><a href="${resetLink}">Reset ${label} password</a></p><p>If you did not request this, you can ignore this email.</p>`
-  });
+  await sendOtpEmail(normalizedEmail, `Reset your COMMS ${label}`, label, otp);
 }
 
 export async function verifyPrivacyPasswordReset(
   userId: string,
   email: string,
-  token: string,
-  privacyType: "lock" | "hidden"
+  otp: string,
+  privacyType: PrivacyType
 ) {
-  const payload = verifyPrivacyResetToken(token);
-  if (
-    payload.uid !== userId ||
-    payload.email.toLowerCase() !== email.trim().toLowerCase() ||
-    payload.privacyType !== privacyType
-  ) {
-    throw new Error("Reset link does not match this account.");
+  const normalizedEmail = normalizeEmail(email);
+  const auth = firebaseAdminAuth();
+  const user = await auth.getUser(userId);
+  if (user.email?.toLowerCase() !== normalizedEmail) {
+    throw new Error("Reset email must match the signed-in account.");
   }
+  await verifyAndDeleteOtp({
+    userId,
+    email: normalizedEmail,
+    purpose: privacyPurpose(privacyType),
+    otp
+  });
 }

@@ -162,11 +162,25 @@ class ChatsScreen extends ConsumerWidget {
                                   final controller = ref
                                       .read(privacyControllerProvider.notifier);
                                   if (value == 'hide') {
+                                    final ready =
+                                        await _ensurePrivacyPasswordConfigured(
+                                      context: context,
+                                      ref: ref,
+                                      type: _PrivacyPasswordType.hidden,
+                                    );
+                                    if (!ready) return;
                                     await controller.setConversationHidden(
                                       conversationId: conversation.id,
                                       hidden: true,
                                     );
                                   } else if (value == 'lock') {
+                                    final ready =
+                                        await _ensurePrivacyPasswordConfigured(
+                                      context: context,
+                                      ref: ref,
+                                      type: _PrivacyPasswordType.lock,
+                                    );
+                                    if (!ready) return;
                                     await controller.setConversationLocked(
                                       conversationId: conversation.id,
                                       locked: true,
@@ -507,6 +521,96 @@ Future<void> _openGlobalSearch(BuildContext context, WidgetRef ref) async {
         },
       );
     },
+  );
+}
+
+enum _PrivacyPasswordType { lock, hidden }
+
+Future<bool> _ensurePrivacyPasswordConfigured({
+  required BuildContext context,
+  required WidgetRef ref,
+  required _PrivacyPasswordType type,
+}) async {
+  final privacy = ref.read(privacyControllerProvider);
+  final configured = type == _PrivacyPasswordType.lock
+      ? privacy.chatLockConfigured
+      : privacy.hiddenPasswordConfigured;
+  if (configured) return true;
+
+  final label =
+      type == _PrivacyPasswordType.lock ? 'chat lock' : 'hidden chats';
+  final passwordController = TextEditingController();
+  final confirmController = TextEditingController();
+  final submitted = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Set $label password'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Set a $label password before continuing.'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: passwordController,
+            obscureText: true,
+            decoration: const InputDecoration(hintText: 'Password'),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: confirmController,
+            obscureText: true,
+            decoration: const InputDecoration(hintText: 'Confirm password'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+  if (submitted != true || !context.mounted) return false;
+
+  final password = passwordController.text.trim();
+  final confirm = confirmController.text.trim();
+  if (password.length < 4) {
+    await _showErrorPopup(context, 'Use a password with at least 4 characters.');
+    return false;
+  }
+  if (password != confirm) {
+    await _showErrorPopup(context, 'Passwords do not match.');
+    return false;
+  }
+
+  final controller = ref.read(privacyControllerProvider.notifier);
+  if (type == _PrivacyPasswordType.lock) {
+    await controller.setChatLockPassword(password);
+  } else {
+    await controller.setHiddenPassword(password);
+  }
+  return true;
+}
+
+Future<void> _showErrorPopup(BuildContext context, String message) {
+  if (!context.mounted) return Future.value();
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('COMMS'),
+      content: Text(message.replaceFirst('FormatException: ', '')),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
   );
 }
 

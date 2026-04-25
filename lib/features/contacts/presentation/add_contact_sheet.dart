@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,16 +21,26 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
   final _email = TextEditingController();
   UserProfile? _result;
   String? _error;
+  Timer? _debounce;
   var _loading = false;
   var _adding = false;
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _email.dispose();
     super.dispose();
   }
 
   Future<void> _search() async {
+    final query = _email.text.trim();
+    if (!query.contains('@')) {
+      setState(() {
+        _result = null;
+        _error = null;
+      });
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
@@ -44,7 +56,7 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
         });
       }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) await _showError(error.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -67,7 +79,7 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
       context.go(AppRoutes.conversation
           .replaceFirst(':conversationId', conversation.id));
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) await _showError(error.toString());
     } finally {
       if (mounted) setState(() => _adding = false);
     }
@@ -93,6 +105,13 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
               controller: _email,
               keyboardType: TextInputType.emailAddress,
               decoration: const InputDecoration(labelText: 'Email address'),
+              onChanged: (_) {
+                _debounce?.cancel();
+                _debounce = Timer(
+                  const Duration(milliseconds: 350),
+                  _search,
+                );
+              },
               onSubmitted: (_) => _search(),
             ),
             const SizedBox(height: 12),
@@ -124,6 +143,23 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _showError(String message) {
+    setState(() => _error = message);
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('COMMS'),
+        content: Text(message.replaceFirst('FormatException: ', '')),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }

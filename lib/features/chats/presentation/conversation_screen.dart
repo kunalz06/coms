@@ -931,6 +931,92 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
   }
 
+  Future<bool> _ensurePrivacyPasswordConfigured({
+    required _PrivacyPasswordType type,
+  }) async {
+    final privacy = ref.read(privacyControllerProvider);
+    final configured = type == _PrivacyPasswordType.lock
+        ? privacy.chatLockConfigured
+        : privacy.hiddenPasswordConfigured;
+    if (configured) return true;
+
+    final label =
+        type == _PrivacyPasswordType.lock ? 'chat lock' : 'hidden chats';
+    final passwordController = TextEditingController();
+    final confirmController = TextEditingController();
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Set $label password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Set a $label password before continuing.'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(hintText: 'Password'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: confirmController,
+              obscureText: true,
+              decoration: const InputDecoration(hintText: 'Confirm password'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (submitted != true || !mounted) return false;
+
+    final password = passwordController.text.trim();
+    final confirm = confirmController.text.trim();
+    if (password.length < 4) {
+      await _showPopup('Use a password with at least 4 characters.');
+      return false;
+    }
+    if (password != confirm) {
+      await _showPopup('Passwords do not match.');
+      return false;
+    }
+
+    final controller = ref.read(privacyControllerProvider.notifier);
+    if (type == _PrivacyPasswordType.lock) {
+      await controller.setChatLockPassword(password);
+    } else {
+      await controller.setHiddenPassword(password);
+    }
+    return true;
+  }
+
+  Future<void> _showPopup(String message) {
+    if (!mounted) return Future.value();
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('COMMS'),
+        content: Text(message.replaceFirst('FormatException: ', '')),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _blockUser(String otherUserId) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _contactActionRunning) return;
@@ -1116,6 +1202,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   _blockUser(otherUserId);
                   break;
                 case 'lock':
+                  if (!await _ensurePrivacyPasswordConfigured(
+                    type: _PrivacyPasswordType.lock,
+                  )) {
+                    break;
+                  }
                   await controller.setConversationLocked(
                     conversationId: widget.conversationId,
                     locked: true,
@@ -1128,6 +1219,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   );
                   break;
                 case 'hide':
+                  if (!await _ensurePrivacyPasswordConfigured(
+                    type: _PrivacyPasswordType.hidden,
+                  )) {
+                    break;
+                  }
                   await controller.setConversationHidden(
                     conversationId: widget.conversationId,
                     hidden: true,
@@ -1641,6 +1737,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     return others.length == 1 ? 'Read' : 'Read by ${others.length}';
   }
 }
+
+enum _PrivacyPasswordType { lock, hidden }
 
 class _AttachmentPreview extends StatelessWidget {
   const _AttachmentPreview({

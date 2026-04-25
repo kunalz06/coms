@@ -96,7 +96,7 @@ class PrivacyRepository {
     await _saveStringSet(_hiddenConversationsKey, values);
   }
 
-  Future<void> sendResetEmail({
+  Future<void> sendResetOtp({
     required String type,
   }) async {
     await _api.post('/api/privacy/password-reset', data: {
@@ -104,14 +104,14 @@ class PrivacyRepository {
     });
   }
 
-  Future<bool> applyResetLink({
+  Future<bool> applyResetOtp({
     required String type,
-    required String token,
+    required String otp,
     required String newPassword,
   }) async {
     await _api.post('/api/privacy/password-reset', data: {
       'type': type,
-      'token': token,
+      'otp': otp,
     });
 
     if (type == 'lock') {
