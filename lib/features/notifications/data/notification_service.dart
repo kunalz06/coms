@@ -109,11 +109,11 @@ class NotificationService {
   }
 
   Future<html.ServiceWorkerRegistration> _registerPushWorker() async {
-    if (!_notificationsSupported) {
+    final container = html.window.navigator.serviceWorker;
+    if (!html.Notification.supported || container == null) {
       throw const FormatException(
           'Browser push notifications are not supported.');
     }
-    final container = html.window.navigator.serviceWorker;
     _pushWorker ??= await container.register('/comms-push-sw.js');
     return _pushWorker!;
   }
