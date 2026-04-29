@@ -57,7 +57,10 @@ class AppConfig {
       firebaseMessagingSenderId:
           const String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
       firebaseAppId: const String.fromEnvironment('FIREBASE_APP_ID'),
-      vapidPublicKey: const String.fromEnvironment('VAPID_PUBLIC_KEY'),
+      vapidPublicKey: _firstNonEmpty([
+        const String.fromEnvironment('VAPID_PUBLIC_KEY'),
+        const String.fromEnvironment('NEXT_PUBLIC_VAPID_PUBLIC_KEY'),
+      ]),
       cloudinaryCloudName:
           const String.fromEnvironment('CLOUDINARY_CLOUD_NAME'),
       stunUrls: _split(const String.fromEnvironment('STUN_URLS')),
@@ -79,5 +82,13 @@ class AppConfig {
   static String? _nullable(String value) {
     final trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
+  }
+
+  static String _firstNonEmpty(List<String> values) {
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed.isNotEmpty) return trimmed;
+    }
+    return '';
   }
 }
