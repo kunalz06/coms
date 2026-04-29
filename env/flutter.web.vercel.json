@@ -4,7 +4,7 @@
   "SUPABASE_URL": "https://tdvhiarzoqzvuavwrxfz.supabase.co",
   "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkdmhpYXJ6b3F6dnVhdndyeGZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU5MzU3NDAsImV4cCI6MjA5MTUxMTc0MH0.9HAeyOOzqWpfkISJwHE3Nz-b0rNDTGUHmuhvb5iOJQk",
   "CLOUDINARY_CLOUD_NAME": "dvdobvlm4",
-  "VAPID_PUBLIC_KEY": "BI5ggWgqZomCEwlptlIm9Xw_fJMf4y3CPOpBni_3Wxvt4TSaN0sftMcTjC016KTG8Of95FhU1XgnTPTrBkgX3G8",
+  "VAPID_PUBLIC_KEY": "BO7dapWmNpZkmbgvOGfNDI5whdFLTJa85MDyiBcmdolPuY4NLlS6f_4tzqRNWF7OjlEG1zoJkr2NHNOuY8mJolg",
   "STUN_URLS": "stun:stun.l.google.com:19302",
   "TURN_URLS": "",
   "TURN_USERNAME": "",
