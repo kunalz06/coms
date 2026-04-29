@@ -70,6 +70,7 @@ class NotificationService {
     if (publicKey.isEmpty) {
       throw const FormatException('VAPID public key is not configured.');
     }
+    _validateVapidPublicKey(publicKey);
 
     final registration = await _registerPushWorker();
     final pushManager = registration.pushManager;
@@ -80,7 +81,7 @@ class NotificationService {
     final subscription = existing ??
         await pushManager.subscribe({
           'userVisibleOnly': true,
-          'applicationServerKey': _urlBase64ToUint8List(publicKey),
+          'applicationServerKey': publicKey,
         });
 
     final p256dh = subscription.getKey('p256dh');
@@ -118,13 +119,24 @@ class NotificationService {
     return _pushWorker!;
   }
 
-  Uint8List _urlBase64ToUint8List(String value) {
+  void _validateVapidPublicKey(String value) {
+    final isBase64Url = RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(value);
+    if (!isBase64Url || value.contains('=')) {
+      throw const FormatException(
+        'VAPID public key must be base64url without padding.',
+      );
+    }
     final normalized = value.replaceAll('-', '+').replaceAll('_', '/');
     final padded = normalized.padRight(
       normalized.length + ((4 - normalized.length % 4) % 4),
       '=',
     );
-    return base64Decode(padded);
+    final decoded = base64Decode(padded);
+    if (decoded.length != 65 || decoded.first != 4) {
+      throw const FormatException(
+        'VAPID public key is not a valid uncompressed P-256 public key.',
+      );
+    }
   }
 
   String _base64UrlEncodeBuffer(ByteBuffer buffer) {
