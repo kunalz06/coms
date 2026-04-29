@@ -16,6 +16,7 @@ class AppConfig {
     required this.firebaseStorageBucket,
     required this.firebaseMessagingSenderId,
     required this.firebaseAppId,
+    required this.vapidPublicKey,
     required this.cloudinaryCloudName,
     required this.stunUrls,
     required this.turnUrls,
@@ -33,6 +34,7 @@ class AppConfig {
   final String firebaseStorageBucket;
   final String firebaseMessagingSenderId;
   final String firebaseAppId;
+  final String vapidPublicKey;
   final String cloudinaryCloudName;
   final List<String> stunUrls;
   final List<String> turnUrls;
@@ -55,6 +57,7 @@ class AppConfig {
       firebaseMessagingSenderId:
           const String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
       firebaseAppId: const String.fromEnvironment('FIREBASE_APP_ID'),
+      vapidPublicKey: const String.fromEnvironment('VAPID_PUBLIC_KEY'),
       cloudinaryCloudName:
           const String.fromEnvironment('CLOUDINARY_CLOUD_NAME'),
       stunUrls: _split(const String.fromEnvironment('STUN_URLS')),

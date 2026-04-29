@@ -1,7 +1,7 @@
 import { createServer, type ServerResponse } from "node:http";
-import { createPrivateKey, sign } from "node:crypto";
 import next from "next";
 import { createClient } from "@supabase/supabase-js";
+import webpush from "web-push";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { GroupCallInviteManager, isGroupCallMessage } from "./group-call-invites";
 
@@ -46,6 +46,14 @@ type PushSubscriptionRow = {
   endpoint: string;
   p256dh: string;
   auth: string;
+};
+type PushPayload = {
+  type: string;
+  title: string;
+  body: string;
+  tag?: string;
+  url?: string;
+  conversationId?: string;
 };
 
 type ClientSocket = WebSocket & {
@@ -414,60 +422,62 @@ function expirePendingDirectCalls() {
   }
 }
 
-function base64Url(input: Buffer | string) {
-  return Buffer.from(input).toString("base64url");
-}
+let vapidConfigured = false;
 
-function vapidPrivateKey() {
-  try {
-    const privateKey = process.env.VAPID_PRIVATE_KEY?.trim();
-    const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
-    if (!privateKey || !publicKey) return null;
-    const publicBytes = Buffer.from(publicKey, "base64url");
-    if (publicBytes.length !== 65 || publicBytes[0] !== 4) return null;
-    return createPrivateKey({
-      key: {
-        kty: "EC",
-        crv: "P-256",
-        d: privateKey,
-        x: publicBytes.subarray(1, 33).toString("base64url"),
-        y: publicBytes.subarray(33, 65).toString("base64url")
-      },
-      format: "jwk"
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function sendPushToUser(userId: string) {
-  const supabase = serviceSupabase();
-  const key = vapidPrivateKey();
+function configureVapid() {
+  if (vapidConfigured) return true;
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
-  if (!supabase || !key || !publicKey) return false;
+  const privateKey = process.env.VAPID_PRIVATE_KEY?.trim();
+  if (!publicKey || !privateKey) return false;
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT ?? "mailto:admin@comms.local", publicKey, privateKey);
+  vapidConfigured = true;
+  return true;
+}
+
+async function sendPushToUser(userId: string, payload?: PushPayload) {
+  const supabase = serviceSupabase();
+  if (!supabase || !configureVapid()) return false;
+
+  const { data: setting, error: settingError } = await supabase
+    .from("notification_settings")
+    .select("browser_notifications_enabled")
+    .eq("user_id", userId)
+    .maybeSingle<{ browser_notifications_enabled: boolean }>();
+  if (settingError || setting?.browser_notifications_enabled !== true) return false;
 
   const { data, error } = await supabase.from("push_subscriptions").select("endpoint,p256dh,auth").eq("user_id", userId).returns<PushSubscriptionRow[]>();
   if (error || !data?.length) return false;
 
-  const subject = process.env.VAPID_SUBJECT ?? "mailto:admin@comms.local";
+  const body = JSON.stringify(
+    payload ?? {
+      type: "call",
+      title: "Incoming COMMS call",
+      body: "Open COMMS to answer.",
+      tag: `call:${userId}`,
+      url: "/calls"
+    }
+  );
   const results = await Promise.all(
     data.map(async (subscription) => {
-      const endpoint = new URL(subscription.endpoint);
-      const jwtHeader = base64Url(JSON.stringify({ typ: "JWT", alg: "ES256" }));
-      const jwtPayload = base64Url(JSON.stringify({ aud: endpoint.origin, exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60, sub: subject }));
-      const signature = sign("sha256", Buffer.from(`${jwtHeader}.${jwtPayload}`), { key, dsaEncoding: "ieee-p1363" }).toString("base64url");
-      const response = await fetch(subscription.endpoint, {
-        method: "POST",
-        headers: {
-          authorization: `vapid t=${jwtHeader}.${jwtPayload}.${signature}, k=${publicKey}`,
-          ttl: "60",
-          urgency: "high"
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: subscription.endpoint,
+            keys: {
+              p256dh: subscription.p256dh,
+              auth: subscription.auth
+            }
+          },
+          body,
+          { TTL: 60, urgency: "high" }
+        );
+        return true;
+      } catch (error: any) {
+        if (error?.statusCode === 404 || error?.statusCode === 410) {
+          await supabase.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
         }
-      });
-      if (response.status === 404 || response.status === 410) {
-        await supabase.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
+        return false;
       }
-      return response.ok || response.status === 201 || response.status === 202;
     })
   );
 
@@ -614,7 +624,14 @@ void app.prepare().then(() => {
             mode: directMessage.mode
           });
           if (!hasClient(directMessage.to)) {
-            const pushSent = await sendPushToUser(directMessage.to);
+            const pushSent = await sendPushToUser(directMessage.to, {
+              type: "call",
+              title: directMessage.mode === "video" ? "Incoming video call" : "Incoming audio call",
+              body: "Open COMMS to answer.",
+              tag: `call:${directMessage.callId}`,
+              url: "/calls",
+              conversationId: directMessage.conversationId
+            });
             if (!pushSent) {
               console.log("Direct call unavailable", { callId: directMessage.callId, from: directMessage.from, to: directMessage.to, reason: "offline" });
               await updateDirectCallSession(directMessage.callId, "missed", "offline");

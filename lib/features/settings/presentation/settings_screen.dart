@@ -1,11 +1,11 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../app/theme/theme_mode_controller.dart';
+import '../../../core/config/app_config.dart';
 import '../../../features/auth/data/auth_repository.dart';
 import '../../../features/chats/data/chat_list_preferences_controller.dart';
 import '../../../features/notifications/data/notification_service.dart';
@@ -25,6 +25,7 @@ class SettingsScreen extends ConsumerWidget {
     final notificationSettings =
         ref.watch(_notificationSettingsProvider(userId));
     final unreadFirst = ref.watch(chatUnreadFirstControllerProvider);
+    final config = ref.watch(appConfigProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -116,19 +117,41 @@ class SettingsScreen extends ConsumerWidget {
                         onChanged: (value) async {
                           var next = settings;
                           if (value) {
-                            final permission = await NotificationService
-                                .instance
-                                .requestPermission();
-                            final granted = permission.authorizationStatus ==
-                                    AuthorizationStatus.authorized ||
-                                permission.authorizationStatus ==
-                                    AuthorizationStatus.provisional;
-                            if (!granted) {
+                            try {
+                              final granted = await NotificationService
+                                  .instance
+                                  .requestBrowserPermission();
+                              if (!granted) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Notification permission denied on this device.',
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
+                              final subscription = await NotificationService
+                                  .instance
+                                  .subscribeWebPush(
+                                vapidPublicKey: config.vapidPublicKey,
+                              );
+                              await ref
+                                  .read(settingsRepositoryProvider)
+                                  .savePushSubscription(
+                                    userId: userId,
+                                    subscription: subscription,
+                                  );
+                            } catch (error) {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
+                                  SnackBar(
                                     content: Text(
-                                      'Notification permission denied on this device.',
+                                      error
+                                          .toString()
+                                          .replaceFirst('FormatException: ', ''),
                                     ),
                                   ),
                                 );
@@ -140,6 +163,16 @@ class SettingsScreen extends ConsumerWidget {
                               notificationsPromptedAt: DateTime.now(),
                             );
                           } else {
+                            final subscription =
+                                NotificationService.instance.lastSubscription;
+                            if (subscription != null) {
+                              await ref
+                                  .read(settingsRepositoryProvider)
+                                  .removePushSubscription(
+                                    endpoint: subscription.endpoint,
+                                  );
+                            }
+                            await NotificationService.instance.unsubscribeWebPush();
                             next = next.copyWith(
                               browserNotificationsEnabled: false,
                             );

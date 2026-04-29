@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../shared/models/notification_settings.dart';
 import '../../../shared/models/user_profile.dart';
+import '../../notifications/data/notification_service.dart';
 
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   return SettingsRepository(Supabase.instance.client);
@@ -52,6 +53,31 @@ class SettingsRepository {
           settings.toJson(),
           onConflict: 'user_id',
         );
+  }
+
+  Future<void> savePushSubscription({
+    required String userId,
+    required WebPushSubscriptionDraft subscription,
+  }) async {
+    await _supabase.from('push_subscriptions').upsert(
+      {
+        'user_id': userId,
+        'endpoint': subscription.endpoint,
+        'p256dh': subscription.p256dh,
+        'auth': subscription.auth,
+        'user_agent': subscription.userAgent,
+      },
+      onConflict: 'endpoint',
+    );
+  }
+
+  Future<void> removePushSubscription({
+    required String endpoint,
+  }) async {
+    await _supabase
+        .from('push_subscriptions')
+        .delete()
+        .eq('endpoint', endpoint);
   }
 
   Future<List<BlockedContact>> blockedContacts(String blockerId) async {

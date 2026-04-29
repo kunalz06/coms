@@ -101,7 +101,7 @@ export async function POST(request: Request) {
       title,
       body,
       tag: `message:${conversation.id}`,
-      url: "/app",
+      url: `/chats/${conversation.id}`,
       conversationId: conversation.id
     });
 

@@ -3,19 +3,24 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../shared/models/conversation_member.dart';
 import '../../../shared/models/conversation.dart';
 import '../../../shared/models/message.dart';
 import '../../../shared/models/user_profile.dart';
 
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
-  return ChatRepository(Supabase.instance.client);
+  return ChatRepository(
+    Supabase.instance.client,
+    ref.watch(apiClientProvider),
+  );
 });
 
 class ChatRepository {
-  ChatRepository(this._supabase);
+  ChatRepository(this._supabase, this._api);
 
   final SupabaseClient _supabase;
+  final ApiClient _api;
   static const _pollInterval = Duration(seconds: 2);
   static const _maxPollInterval = Duration(seconds: 2);
   static const _messageWindowSize = 150;
@@ -187,13 +192,18 @@ class ChatRepository {
   }) async {
     final trimmed = content.trim();
     if (trimmed.isEmpty) return;
-    await _supabase.from('messages').insert({
-      'conversation_id': conversationId,
-      'sender_id': senderId,
-      'kind': 'text',
-      'content': trimmed,
-      'status': 'sent',
-    });
+    final message = await _supabase
+        .from('messages')
+        .insert({
+          'conversation_id': conversationId,
+          'sender_id': senderId,
+          'kind': 'text',
+          'content': trimmed,
+          'status': 'sent',
+        })
+        .select('id')
+        .single();
+    unawaited(_notifyMessage(message['id'] as String));
   }
 
   Future<void> editMessage({
@@ -397,6 +407,16 @@ class ChatRepository {
       'mime_type': attachment.mimeType,
       'size_bytes': attachment.sizeBytes,
     });
+    unawaited(_notifyMessage(message['id'] as String));
+  }
+
+  Future<void> _notifyMessage(String messageId) async {
+    try {
+      await _api.post('/api/notifications/message-push',
+          data: {'messageId': messageId});
+    } catch (_) {
+      // Message delivery should not fail because push notification delivery did.
+    }
   }
 
   Future<void> reactToMessage({

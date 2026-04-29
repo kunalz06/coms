@@ -14,7 +14,14 @@ class BackupRepository {
   final ApiClient _api;
 
   Future<BackupPreference?> status() async {
-    final response = await _api.get<Map<String, dynamic>>('/api/backup/status');
+    final response = await _api
+        .get<Map<String, dynamic>>('/api/backup/status')
+        .timeout(
+          const Duration(seconds: 8),
+          onTimeout: () => throw const FormatException(
+            'Backup status is taking too long to load. Please try again.',
+          ),
+        );
     final preference = response.data?['preference'];
     if (preference is! Map<String, dynamic>) return null;
     return BackupPreference.fromJson(preference);

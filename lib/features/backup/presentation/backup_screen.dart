@@ -15,9 +15,17 @@ class BackupScreen extends ConsumerStatefulWidget {
 }
 
 class _BackupScreenState extends ConsumerState<BackupScreen> {
+  bool _refreshing = false;
+
   Future<void> _refresh() async {
-    ref.invalidate(_backupStatusProvider);
-    await ref.read(_backupStatusProvider.future);
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      ref.invalidate(_backupStatusProvider);
+      await ref.read(_backupStatusProvider.future);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   Future<void> _connectDrive() async {
@@ -143,7 +151,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
         actions: [
           MagnifyButtonWrapper(
             child: IconButton(
-              onPressed: _refresh,
+              onPressed: _refreshing ? null : _refresh,
               icon: const Icon(Icons.refresh),
               tooltip: 'Refresh',
             ),
@@ -268,7 +276,7 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
             ],
           ),
         ),
-        loading: () => const LoadingState(),
+        loading: () => const _BackupLoadingState(),
         error: (error, _) =>
             EmptyState(title: 'Backup unavailable', message: error.toString()),
       ),
@@ -288,6 +296,27 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       'reconnect_required' => 'Reconnect required',
       _ => preference.status,
     };
+  }
+}
+
+class _BackupLoadingState extends StatelessWidget {
+  const _BackupLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        LinearProgressIndicator(),
+        SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Loading backup status...'),
+          ),
+        ),
+      ],
+    );
   }
 }
 
