@@ -163,16 +163,27 @@ class SettingsScreen extends ConsumerWidget {
                               notificationsPromptedAt: DateTime.now(),
                             );
                           } else {
-                            final subscription =
+                            final cachedSubscription =
                                 NotificationService.instance.lastSubscription;
-                            if (subscription != null) {
+                            if (cachedSubscription != null) {
                               await ref
                                   .read(settingsRepositoryProvider)
                                   .removePushSubscription(
-                                    endpoint: subscription.endpoint,
+                                    endpoint: cachedSubscription.endpoint,
                                   );
                             }
-                            await NotificationService.instance.unsubscribeWebPush();
+                            final activeEndpoint = await NotificationService
+                                .instance
+                                .unsubscribeWebPush();
+                            if (activeEndpoint != null &&
+                                activeEndpoint !=
+                                    cachedSubscription?.endpoint) {
+                              await ref
+                                  .read(settingsRepositoryProvider)
+                                  .removePushSubscription(
+                                    endpoint: activeEndpoint,
+                                  );
+                            }
                             next = next.copyWith(
                               browserNotificationsEnabled: false,
                             );

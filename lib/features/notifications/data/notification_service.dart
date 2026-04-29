@@ -37,10 +37,15 @@ class NotificationService {
       ),
     );
     _permission = html.Notification.permission;
-    unawaited(_registerPushWorker());
+    unawaited(() async {
+      try {
+        await _registerPushWorker();
+      } catch (_) {}
+    }());
   }
 
   Future<bool> requestBrowserPermission() async {
+    if (!_notificationsSupported) return false;
     _permission = await html.Notification.requestPermission();
     return permissionGranted;
   }
@@ -53,6 +58,10 @@ class NotificationService {
   bool get permissionGranted => _permission == 'granted';
 
   WebPushSubscriptionDraft? get lastSubscription => _lastSubscription;
+
+  bool get _notificationsSupported =>
+      html.Notification.supported &&
+      html.window.navigator.serviceWorker != null;
 
   Future<WebPushSubscriptionDraft> subscribeWebPush({
     required String vapidPublicKey,
@@ -90,18 +99,21 @@ class NotificationService {
     return _lastSubscription!;
   }
 
-  Future<void> unsubscribeWebPush() async {
+  Future<String?> unsubscribeWebPush() async {
     final registration = _pushWorker ?? await _registerPushWorker();
     final subscription = await registration.pushManager?.getSubscription();
+    final endpoint = subscription?.endpoint;
     await subscription?.unsubscribe();
     _lastSubscription = null;
+    return endpoint;
   }
 
   Future<html.ServiceWorkerRegistration> _registerPushWorker() async {
-    final container = html.window.navigator.serviceWorker;
-    if (container == null) {
-      throw const FormatException('Browser push notifications are not supported.');
+    if (!_notificationsSupported) {
+      throw const FormatException(
+          'Browser push notifications are not supported.');
     }
+    final container = html.window.navigator.serviceWorker;
     _pushWorker ??= await container.register('/comms-push-sw.js');
     return _pushWorker!;
   }
