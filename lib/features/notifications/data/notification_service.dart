@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+// ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 import 'dart:typed_data';
 
@@ -77,7 +78,7 @@ class NotificationService {
     if (pushManager == null) {
       throw const FormatException('Browser push notifications are not supported.');
     }
-    final html.PushSubscription? existing = await pushManager.getSubscription();
+    final existing = await pushManager.getSubscription();
     final subscription = existing ??
         await pushManager.subscribe({
           'userVisibleOnly': true,

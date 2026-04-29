@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../shared/models/conversation.dart';
 import '../../../shared/models/conversation_member.dart';
+import '../../../shared/models/attachment.dart';
 import '../../../shared/models/message.dart';
 import '../../../shared/widgets/magnify_button_wrapper.dart';
 import '../../../shared/widgets/state_views.dart';
@@ -23,6 +24,7 @@ import '../../calls/data/call_controller.dart';
 import '../../calls/domain/call_models.dart';
 import '../../contacts/data/contact_repository.dart';
 import '../../privacy/data/privacy_controller.dart';
+import '../../uploads/data/chunked_attachment_download_service.dart';
 import '../../uploads/data/cloudinary_upload_service.dart';
 import '../data/chat_repository.dart';
 
@@ -48,6 +50,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   var _contactActionRunning = false;
   var _uploadProgress = 0;
   String? _uploadingName;
+  String? _uploadChunkStatus;
   var _recording = false;
   String? _lastMarkedReadMessageId;
   var _restoringArchive = false;
@@ -207,7 +210,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             ListTile(
               leading: const Icon(Icons.description_outlined),
               title: const Text('Document'),
-              subtitle: const Text('PDF, Word, or text files up to 10 MB'),
+              subtitle:
+                  const Text('Up to 10 MB direct, 100 MB with chunked upload'),
               onTap: () => Navigator.of(context).pop('document'),
             ),
           ],
@@ -250,6 +254,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             onProgress: (progress) {
               if (mounted) setState(() => _uploadProgress = progress);
             },
+            onChunkProgress: (uploaded, total) {
+              if (mounted) {
+                setState(() => _uploadChunkStatus = '$uploaded / $total chunks');
+              }
+            },
           );
       await ref.read(chatRepositoryProvider).sendAttachment(
             conversationId: widget.conversationId,
@@ -272,6 +281,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         setState(() {
           _uploadingName = null;
           _uploadProgress = 0;
+          _uploadChunkStatus = null;
         });
       }
     }
@@ -323,6 +333,28 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
     controller.dispose();
     return result;
+  }
+
+  Future<void> _openDocumentAttachment(Attachment attachment) async {
+    try {
+      if (attachment.isChunked) {
+        await ref.read(chunkedAttachmentDownloadServiceProvider).open(attachment);
+        return;
+      }
+      final uri = Uri.tryParse(attachment.url.trim());
+      if (uri == null) {
+        throw const FormatException('Could not open this document.');
+      }
+      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened) {
+        throw const FormatException('Could not open this document.');
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
   }
 
   Future<void> _toggleRecording() async {
@@ -1509,9 +1541,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   Padding(
                                     padding: const EdgeInsets.only(top: 8),
                                     child: _AttachmentPreview(
+                                      attachment: attachment,
                                       kind: resolved.kind,
                                       fileName: attachment.fileName,
                                       url: attachment.url,
+                                      onOpenDocument: resolved.kind == 'document'
+                                          ? () => _openDocumentAttachment(
+                                                attachment,
+                                              )
+                                          : null,
                                       onOpenImage: resolved.kind == 'image'
                                           ? () => _showMessageImageDialog(
                                                 imageUrl: attachment.url,
@@ -1651,6 +1689,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         Text('$_uploadProgress%'),
                       ],
                     ),
+                    if (_uploadChunkStatus != null) ...[
+                      const SizedBox(height: 4),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _uploadChunkStatus!,
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 6),
                     LinearProgressIndicator(value: _uploadProgress / 100),
                     const SizedBox(height: 8),
@@ -1742,15 +1790,19 @@ enum _PrivacyPasswordType { lock, hidden }
 
 class _AttachmentPreview extends StatelessWidget {
   const _AttachmentPreview({
+    required this.attachment,
     required this.kind,
     required this.fileName,
     required this.url,
+    this.onOpenDocument,
     this.onOpenImage,
   });
 
+  final Attachment attachment;
   final String kind;
   final String fileName;
   final String url;
+  final VoidCallback? onOpenDocument;
   final VoidCallback? onOpenImage;
 
   @override
@@ -1782,6 +1834,8 @@ class _AttachmentPreview extends StatelessWidget {
       fileName: fileName,
       icon: Icons.description_outlined,
       url: url,
+      isChunked: attachment.isChunked,
+      onOpen: onOpenDocument,
     );
   }
 }
@@ -1957,11 +2011,15 @@ class _FileChip extends StatelessWidget {
     required this.fileName,
     required this.icon,
     this.url,
+    this.isChunked = false,
+    this.onOpen,
   });
 
   final String fileName;
   final IconData icon;
   final String? url;
+  final bool isChunked;
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -1980,8 +2038,11 @@ class _FileChip extends StatelessWidget {
 
     return ActionChip(
       avatar: Icon(icon, size: 18),
-      label: Text(fileName, overflow: TextOverflow.ellipsis),
-      onPressed: url == null ? null : openAttachment,
+      label: Text(
+        isChunked ? '$fileName - chunked' : fileName,
+        overflow: TextOverflow.ellipsis,
+      ),
+      onPressed: onOpen ?? (url == null ? null : openAttachment),
     );
   }
 }

@@ -398,7 +398,9 @@ class ChatRepository {
         .select('id')
         .single();
 
-    await _supabase.from('message_attachments').insert({
+    final attachmentRow = await _supabase
+        .from('message_attachments')
+        .insert({
       'message_id': message['id'] as String,
       'url': attachment.url,
       'public_id': attachment.publicId,
@@ -406,7 +408,33 @@ class ChatRepository {
       'file_name': attachment.fileName,
       'mime_type': attachment.mimeType,
       'size_bytes': attachment.sizeBytes,
-    });
+      'upload_mode': attachment.uploadMode,
+      'original_size_bytes': attachment.originalSizeBytes,
+      'chunk_size_bytes': attachment.chunkSizeBytes,
+      'chunk_count': attachment.chunkCount,
+      'file_sha256': attachment.fileSha256,
+      'assembly_status': attachment.assemblyStatus,
+    })
+        .select('id')
+        .single();
+    if (attachment.chunks.isNotEmpty) {
+      final attachmentId = attachmentRow['id'] as String;
+      await _supabase.from('message_attachment_chunks').insert(
+            attachment.chunks
+                .map(
+                  (chunk) => {
+                    'attachment_id': attachmentId,
+                    'chunk_index': chunk.chunkIndex,
+                    'chunk_url': chunk.chunkUrl,
+                    'chunk_public_id': chunk.chunkPublicId,
+                    'chunk_size_bytes': chunk.chunkSizeBytes,
+                    'chunk_sha256': chunk.chunkSha256,
+                  },
+                )
+                .toList(growable: false),
+          );
+    }
+    await _touchMessage(message['id'] as String);
     unawaited(_notifyMessage(message['id'] as String));
   }
 
@@ -495,6 +523,23 @@ class ChatRepository {
           fileName: attachment.fileName,
           mimeType: attachment.mimeType,
           sizeBytes: attachment.sizeBytes,
+          uploadMode: attachment.uploadMode,
+          originalSizeBytes: attachment.originalSizeBytes,
+          chunkSizeBytes: attachment.chunkSizeBytes,
+          chunkCount: attachment.chunkCount,
+          fileSha256: attachment.fileSha256,
+          assemblyStatus: attachment.assemblyStatus,
+          chunks: attachment.chunks
+              .map(
+                (chunk) => AttachmentChunkDraft(
+                  chunkIndex: chunk.chunkIndex,
+                  chunkUrl: chunk.chunkUrl,
+                  chunkPublicId: chunk.chunkPublicId,
+                  chunkSizeBytes: chunk.chunkSizeBytes,
+                  chunkSha256: chunk.chunkSha256,
+                ),
+              )
+              .toList(growable: false),
         ),
         caption: message.content,
       );
@@ -770,11 +815,39 @@ class ChatRepository {
     );
 
     final attachmentsByMessage = <String, List<Map<String, dynamic>>>{};
+    final attachmentIds = <String>[];
     for (final row in attachmentsRows) {
       final data = Map<String, dynamic>.from(row);
       final messageId = data['message_id']?.toString();
       if (messageId == null) continue;
+      final attachmentId = data['id']?.toString();
+      if (attachmentId != null) attachmentIds.add(attachmentId);
       (attachmentsByMessage[messageId] ??= []).add(data);
+    }
+
+    if (attachmentIds.isNotEmpty) {
+      final chunkRows = await _withTransientRetry(
+        () => _supabase
+            .from('message_attachment_chunks')
+            .select()
+            .inFilter('attachment_id', attachmentIds)
+            .order('chunk_index'),
+      );
+      final chunksByAttachment = <String, List<Map<String, dynamic>>>{};
+      for (final row in chunkRows) {
+        final data = Map<String, dynamic>.from(row);
+        final attachmentId = data['attachment_id']?.toString();
+        if (attachmentId == null) continue;
+        (chunksByAttachment[attachmentId] ??= []).add(data);
+      }
+      for (final attachments in attachmentsByMessage.values) {
+        for (final attachment in attachments) {
+          final attachmentId = attachment['id']?.toString();
+          attachment['message_attachment_chunks'] = attachmentId == null
+              ? const []
+              : (chunksByAttachment[attachmentId] ?? const []);
+        }
+      }
     }
 
     final reactionsByMessage = <String, List<Map<String, dynamic>>>{};
@@ -1025,6 +1098,13 @@ class AttachmentDraft {
     required this.fileName,
     required this.mimeType,
     required this.sizeBytes,
+    this.uploadMode = 'direct',
+    this.originalSizeBytes,
+    this.chunkSizeBytes,
+    this.chunkCount,
+    this.fileSha256,
+    this.assemblyStatus = 'ready',
+    this.chunks = const [],
   });
 
   final String url;
@@ -1033,4 +1113,27 @@ class AttachmentDraft {
   final String fileName;
   final String mimeType;
   final int sizeBytes;
+  final String uploadMode;
+  final int? originalSizeBytes;
+  final int? chunkSizeBytes;
+  final int? chunkCount;
+  final String? fileSha256;
+  final String assemblyStatus;
+  final List<AttachmentChunkDraft> chunks;
+}
+
+class AttachmentChunkDraft {
+  const AttachmentChunkDraft({
+    required this.chunkIndex,
+    required this.chunkUrl,
+    required this.chunkSizeBytes,
+    required this.chunkSha256,
+    this.chunkPublicId,
+  });
+
+  final int chunkIndex;
+  final String chunkUrl;
+  final String? chunkPublicId;
+  final int chunkSizeBytes;
+  final String chunkSha256;
 }
