@@ -2,16 +2,22 @@
 importScripts('https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js');
 
-firebase.initializeApp({
+const firebaseConfig = {
   apiKey: '__FIREBASE_API_KEY__',
   authDomain: '__FIREBASE_AUTH_DOMAIN__',
   projectId: '__FIREBASE_PROJECT_ID__',
   storageBucket: '__FIREBASE_STORAGE_BUCKET__',
   messagingSenderId: '__FIREBASE_MESSAGING_SENDER_ID__',
   appId: '__FIREBASE_APP_ID__',
-});
+};
 
-const messaging = firebase.messaging();
+const firebaseMessagingEnabled = Object.values(firebaseConfig).every(Boolean);
+
+if (firebaseMessagingEnabled) {
+  firebase.initializeApp(firebaseConfig);
+} else {
+  console.warn('COMMS push worker disabled: missing Firebase web config.');
+}
 
 function notificationOptions(data) {
   const type = data.type || 'message';
@@ -36,11 +42,14 @@ function notificationOptions(data) {
   };
 }
 
-messaging.onBackgroundMessage((payload) => {
-  const data = payload.data || {};
-  const built = notificationOptions(data);
-  return self.registration.showNotification(built.title, built.options);
-});
+if (firebaseMessagingEnabled) {
+  const messaging = firebase.messaging();
+  messaging.onBackgroundMessage((payload) => {
+    const data = payload.data || {};
+    const built = notificationOptions(data);
+    return self.registration.showNotification(built.title, built.options);
+  });
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
