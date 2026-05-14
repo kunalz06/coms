@@ -75,6 +75,9 @@ class WebFcmNotificationService {
   final RingtoneService _ringtone;
   StreamSubscription<String>? _tokenRefreshSub;
   StreamSubscription<RemoteMessage>? _foregroundSub;
+  final _foregroundMessages = StreamController<RemoteMessage>.broadcast();
+
+  Stream<RemoteMessage> get foregroundMessages => _foregroundMessages.stream;
 
   Future<NotificationSettings> permissionStatus() {
     return _messaging.getNotificationSettings();
@@ -129,6 +132,7 @@ class WebFcmNotificationService {
   Future<void> dispose() async {
     await _tokenRefreshSub?.cancel();
     await _foregroundSub?.cancel();
+    await _foregroundMessages.close();
   }
 
   Future<void> _registerToken(String token) async {
@@ -159,11 +163,8 @@ class WebFcmNotificationService {
     if (type == 'call_missed' || type == 'call_ended') {
       _ringtone.stopRingtone();
     }
-    final title = data['title'] ?? 'COMMS';
-    final body = data['body'] ?? 'You have a new notification.';
-    html.Notification(title, {
-      'body': body,
-      if (data['tag'] != null) 'tag': data['tag'],
-    });
+    if (!_foregroundMessages.isClosed) {
+      _foregroundMessages.add(message);
+    }
   }
 }
