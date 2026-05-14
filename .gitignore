@@ -10,6 +10,7 @@ dist-server
 .env.*.local
 .env.example
 env/local.json
+.vercel.flutter.env.json
 build/
 .dart_tool/
 .flutter-plugins

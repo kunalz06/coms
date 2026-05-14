@@ -19,6 +19,7 @@ import '../../features/privacy/presentation/privacy_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/settings/presentation/account_settings_screen.dart';
 import '../../features/settings/presentation/blocked_contacts_screen.dart';
+import '../../features/settings/presentation/notification_settings_screen.dart';
 import '../shell/app_shell.dart';
 import 'app_routes.dart';
 
@@ -94,8 +95,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               path: AppRoutes.calls,
               builder: (context, state) => const CallsScreen()),
           GoRoute(
+              path: AppRoutes.callHistory,
+              builder: (context, state) => const CallsScreen()),
+          GoRoute(
+              path: AppRoutes.callDetails,
+              builder: (context, state) => const CallsScreen()),
+          GoRoute(
               path: AppRoutes.settings,
               builder: (context, state) => const SettingsScreen()),
+          GoRoute(
+              path: AppRoutes.notificationSettings,
+              builder: (context, state) => const NotificationSettingsScreen()),
           GoRoute(
               path: AppRoutes.accountSettings,
               builder: (context, state) => const AccountSettingsScreen()),

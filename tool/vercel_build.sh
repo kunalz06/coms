@@ -36,6 +36,58 @@ flutter pub get
 if [ ! -f "env/flutter.web.vercel.json" ]; then
   echo "Missing env/flutter.web.vercel.json"
   exit 1
-fi
+fi 
+BUILD_ENV_FILE="$ROOT_DIR/.vercel.flutter.env.json"
 
-flutter build web --release --pwa-strategy=none --dart-define-from-file=env/flutter.web.vercel.json
+node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const envPath = path.join(process.cwd(), 'env', 'flutter.web.vercel.json');
+const buildEnvPath = path.join(process.cwd(), '.vercel.flutter.env.json');
+const swPath = path.join(process.cwd(), 'web', 'firebase-messaging-sw.js');
+const templatePath = path.join(process.cwd(), 'web', 'firebase-messaging-sw.template.js');
+const env = JSON.parse(fs.readFileSync(envPath, 'utf8'));
+for (const key of [
+  'API_BASE_URL',
+  'WS_BASE_URL',
+  'COMMS_API_BASE_URL',
+  'COMMS_SIGNALING_URL',
+  'SUPABASE_URL',
+  'SUPABASE_ANON_KEY',
+  'CLOUDINARY_CLOUD_NAME',
+  'VAPID_PUBLIC_KEY',
+  'FCM_WEB_VAPID_KEY',
+  'STUN_URLS',
+  'TURN_URLS',
+  'TURN_USERNAME',
+  'TURN_CREDENTIAL',
+  'FIREBASE_API_KEY',
+  'FIREBASE_AUTH_DOMAIN',
+  'FIREBASE_PROJECT_ID',
+  'FIREBASE_STORAGE_BUCKET',
+  'FIREBASE_MESSAGING_SENDER_ID',
+  'FIREBASE_APP_ID',
+]) {
+  if (process.env[key]) env[key] = process.env[key];
+}
+env.API_BASE_URL ||= env.COMMS_API_BASE_URL;
+env.WS_BASE_URL ||= env.COMMS_SIGNALING_URL;
+env.COMMS_API_BASE_URL ||= env.API_BASE_URL;
+env.COMMS_SIGNALING_URL ||= env.WS_BASE_URL;
+fs.writeFileSync(buildEnvPath, JSON.stringify(env, null, 2));
+const replacements = {
+  __FIREBASE_API_KEY__: env.FIREBASE_API_KEY || '',
+  __FIREBASE_AUTH_DOMAIN__: env.FIREBASE_AUTH_DOMAIN || '',
+  __FIREBASE_PROJECT_ID__: env.FIREBASE_PROJECT_ID || '',
+  __FIREBASE_STORAGE_BUCKET__: env.FIREBASE_STORAGE_BUCKET || '',
+  __FIREBASE_MESSAGING_SENDER_ID__: env.FIREBASE_MESSAGING_SENDER_ID || '',
+  __FIREBASE_APP_ID__: env.FIREBASE_APP_ID || '',
+};
+let sw = fs.readFileSync(fs.existsSync(templatePath) ? templatePath : swPath, 'utf8');
+for (const [key, value] of Object.entries(replacements)) {
+  sw = sw.replaceAll(key, String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+fs.writeFileSync(swPath, sw);
+NODE
+
+flutter build web --release --pwa-strategy=none --dart-define-from-file="$BUILD_ENV_FILE"

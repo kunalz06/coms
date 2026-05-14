@@ -4,8 +4,6 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:typed_data';
 
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-
 class WebPushSubscriptionDraft {
   const WebPushSubscriptionDraft({
     required this.endpoint,
@@ -25,18 +23,11 @@ class NotificationService {
 
   static final instance = NotificationService._();
 
-  final _local = FlutterLocalNotificationsPlugin();
   String? _permission;
   html.ServiceWorkerRegistration? _pushWorker;
   WebPushSubscriptionDraft? _lastSubscription;
 
   Future<void> initialize() async {
-    await _local.initialize(
-      const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        iOS: DarwinInitializationSettings(),
-      ),
-    );
     _permission = html.Notification.permission;
     unawaited(() async {
       try {

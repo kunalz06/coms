@@ -17,6 +17,7 @@ class AppConfig {
     required this.firebaseMessagingSenderId,
     required this.firebaseAppId,
     required this.vapidPublicKey,
+    required this.fcmWebVapidKey,
     required this.cloudinaryCloudName,
     required this.stunUrls,
     required this.turnUrls,
@@ -35,6 +36,7 @@ class AppConfig {
   final String firebaseMessagingSenderId;
   final String firebaseAppId;
   final String vapidPublicKey;
+  final String fcmWebVapidKey;
   final String cloudinaryCloudName;
   final List<String> stunUrls;
   final List<String> turnUrls;
@@ -43,10 +45,16 @@ class AppConfig {
 
   factory AppConfig.fromEnvironment() {
     return AppConfig(
-      apiBaseUrl: const String.fromEnvironment('COMMS_API_BASE_URL',
-          defaultValue: 'http://localhost:3000'),
-      signalingUrl: const String.fromEnvironment('COMMS_SIGNALING_URL',
-          defaultValue: 'ws://localhost:3000/ws'),
+      apiBaseUrl: _firstNonEmpty([
+        const String.fromEnvironment('API_BASE_URL'),
+        const String.fromEnvironment('COMMS_API_BASE_URL'),
+        'http://localhost:3000',
+      ]),
+      signalingUrl: _firstNonEmpty([
+        const String.fromEnvironment('WS_BASE_URL'),
+        const String.fromEnvironment('COMMS_SIGNALING_URL'),
+        'ws://localhost:3000/ws',
+      ]),
       supabaseUrl: const String.fromEnvironment('SUPABASE_URL'),
       supabaseAnonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
       firebaseApiKey: const String.fromEnvironment('FIREBASE_API_KEY'),
@@ -58,6 +66,11 @@ class AppConfig {
           const String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
       firebaseAppId: const String.fromEnvironment('FIREBASE_APP_ID'),
       vapidPublicKey: _firstNonEmpty([
+        const String.fromEnvironment('VAPID_PUBLIC_KEY'),
+        const String.fromEnvironment('NEXT_PUBLIC_VAPID_PUBLIC_KEY'),
+      ]),
+      fcmWebVapidKey: _firstNonEmpty([
+        const String.fromEnvironment('FCM_WEB_VAPID_KEY'),
         const String.fromEnvironment('VAPID_PUBLIC_KEY'),
         const String.fromEnvironment('NEXT_PUBLIC_VAPID_PUBLIC_KEY'),
       ]),

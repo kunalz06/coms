@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/notifications/web_fcm_notification_service.dart';
 import '../../../shared/models/user_profile.dart';
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
@@ -10,6 +11,7 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
     firebase_auth.FirebaseAuth.instance,
     Supabase.instance.client,
     ref.watch(apiClientProvider),
+    beforeSignOut: ref.watch(webFcmNotificationServiceProvider).unregisterCurrentToken,
   );
 });
 
@@ -18,11 +20,14 @@ final authStateProvider = StreamProvider<firebase_auth.User?>((ref) {
 });
 
 class AuthRepository {
-  AuthRepository(this._firebaseAuth, this._supabase, this._api);
+  AuthRepository(this._firebaseAuth, this._supabase, this._api,
+      {Future<void> Function()? beforeSignOut})
+      : _beforeSignOut = beforeSignOut;
 
   final firebase_auth.FirebaseAuth _firebaseAuth;
   final SupabaseClient _supabase;
   final ApiClient _api;
+  final Future<void> Function()? _beforeSignOut;
 
   Stream<firebase_auth.User?> authStateChanges() =>
       _firebaseAuth.authStateChanges();
@@ -83,7 +88,12 @@ class AuthRepository {
     await syncProfile(avatarUrl: avatarUrl);
   }
 
-  Future<void> signOut() => _firebaseAuth.signOut();
+  Future<void> signOut() async {
+    try {
+      await _beforeSignOut?.call();
+    } catch (_) {}
+    await _firebaseAuth.signOut();
+  }
 
   Future<UserProfile?> loadProfile() async {
     final user = currentUser;

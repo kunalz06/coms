@@ -41,6 +41,15 @@ class ApiClient {
     }
   }
 
+  Future<Response<T>> patch<T>(String path, {Object? data}) async {
+    try {
+      return await _dio.patch<T>(path,
+          data: data ?? const {}, options: await _authOptions());
+    } on DioException catch (error) {
+      throw FormatException(_readableError(error));
+    }
+  }
+
   Future<Options> _authOptions() async {
     final token = await _auth.currentUser?.getIdToken();
     return Options(

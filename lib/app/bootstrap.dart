@@ -9,7 +9,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/config/app_config.dart';
 import '../core/logging/app_logger.dart';
-import '../features/notifications/data/notification_service.dart';
 import '../firebase_options.dart';
 import 'app.dart';
 
@@ -29,7 +28,6 @@ Future<void> bootstrap() async {
 
   await Hive.initFlutter('comms_cache');
   await Hive.openBox('app_settings');
-  await NotificationService.instance.initialize();
 
   FlutterError.onError = (details) {
     AppLogger.instance.error(
