@@ -197,16 +197,21 @@ async function sendOtpEmail(email: string, subject: string, label: string, otp: 
   });
 }
 
-function queueOtpEmail(email: string, subject: string, label: string, otp: string) {
-  setTimeout(() => {
-    sendOtpEmail(email, subject, label, otp).catch((error) => {
-      console.error("OTP email delivery failed", {
-        email,
-        label,
-        message: error instanceof Error ? error.message : String(error)
-      });
+async function queueOtpEmail(email: string, subject: string, label: string, otp: string) {
+  const delivery = sendOtpEmail(email, subject, label, otp).catch((error) => {
+    console.error("OTP email delivery failed", {
+      email,
+      label,
+      message: error instanceof Error ? error.message : String(error)
     });
-  }, 0);
+  });
+
+  await Promise.race([
+    delivery,
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, 450);
+    })
+  ]);
 }
 
 export async function sendAccountPasswordReset(email: string) {
@@ -227,7 +232,7 @@ export async function sendAccountPasswordReset(email: string) {
     purpose: "account",
     otp
   });
-  queueOtpEmail(normalizedEmail, "Reset your COMMS password", "account password reset", otp);
+  await queueOtpEmail(normalizedEmail, "Reset your COMMS password", "account password reset", otp);
 }
 
 export async function applyAccountPasswordReset({
@@ -269,7 +274,7 @@ export async function sendPrivacyPasswordReset(
     purpose: privacyPurpose(privacyType),
     otp
   });
-  queueOtpEmail(normalizedEmail, `Reset your COMMS ${label}`, label, otp);
+  await queueOtpEmail(normalizedEmail, `Reset your COMMS ${label}`, label, otp);
 }
 
 export async function verifyPrivacyPasswordReset(
