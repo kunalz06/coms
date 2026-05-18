@@ -16,12 +16,10 @@ const OTP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 type OtpMailer = {
   sendMail: (mail: Parameters<ReturnType<typeof nodemailer.createTransport>["sendMail"]>[0]) => Promise<unknown>;
 };
+type SmtpMode = "ssl465" | "starttls587";
 
-let cachedTransport: OtpMailer | null = null;
 const pendingOtpDeliveries = new Set<Promise<void>>();
-let smtpMode: "ssl465" | "starttls587" = "ssl465";
-let cachedTransportKey: string | null = null;
-let cachedGmailIpv4: string | null = null;
+let gmailIpv4Cursor = 0;
 
 function required(name: string) {
   const value = process.env[name];
@@ -30,36 +28,34 @@ function required(name: string) {
 }
 
 async function gmailIpv4Host() {
-  if (cachedGmailIpv4) return cachedGmailIpv4;
   const addresses = await dns.resolve4("smtp.gmail.com");
-  const address = addresses[0];
+  const address = addresses[gmailIpv4Cursor % addresses.length];
+  gmailIpv4Cursor += 1;
   if (!address) throw new Error("Could not resolve Gmail SMTP IPv4 address.");
-  cachedGmailIpv4 = address;
   return address;
 }
 
-async function gmailTransport() {
+async function gmailTransport(mode: SmtpMode) {
   const auth = {
     user: required("GMAIL_USER"),
     pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
   };
   const host = await gmailIpv4Host();
-  const key = `${smtpMode}:${host}:${auth.user}`;
-  if (cachedTransport && cachedTransportKey === key) return cachedTransport;
 
   const baseOptions = {
     host,
+    name: "comms",
     family: 4,
-    connectionTimeout: 7_000,
-    greetingTimeout: 7_000,
-    socketTimeout: 12_000,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
     tls: {
       servername: "smtp.gmail.com"
     },
     auth
   };
   let options: SMTPTransport.Options;
-  if (smtpMode === "ssl465") {
+  if (mode === "ssl465") {
     options = {
       ...baseOptions,
       port: 465,
@@ -73,9 +69,7 @@ async function gmailTransport() {
       requireTLS: true
     } as SMTPTransport.Options;
   }
-  cachedTransport = nodemailer.createTransport(options) as OtpMailer;
-  cachedTransportKey = key;
-  return cachedTransport;
+  return nodemailer.createTransport(options) as OtpMailer;
 }
 
 function normalizeEmail(email: string) {
@@ -223,20 +217,28 @@ async function verifyAndDeleteOtp({
   if (deleteError) throw new Error(deleteError.message);
 }
 
-async function sendOtpEmail(email: string, subject: string, label: string, otp: string) {
+async function sendOtpEmail(email: string, subject: string, label: string, otp: string, mode: SmtpMode) {
   const from = process.env.GMAIL_FROM ?? required("GMAIL_USER");
-  const transport = await gmailTransport();
+  const transport = await gmailTransport(mode);
+  const content = otpEmailContent(label, otp);
   await transport.sendMail({
     from,
     to: email,
     subject,
+    text: content.text,
+    html: content.html
+  });
+}
+
+function otpEmailContent(label: string, otp: string) {
+  return {
     text:
       `Your COMMS ${label} OTP is ${otp}.\n\n` +
       "It expires in 5 minutes. If you did not request this, you can ignore this email.",
     html:
       `<p>Your COMMS ${label} OTP is <strong>${otp}</strong>.</p>` +
       "<p>It expires in 5 minutes. If you did not request this, you can ignore this email.</p>"
-  });
+  };
 }
 
 async function queueOtpEmail(email: string, subject: string, label: string, otp: string) {
@@ -253,25 +255,29 @@ async function queueOtpEmail(email: string, subject: string, label: string, otp:
 }
 
 async function deliverOtpEmailWithRetry(email: string, subject: string, label: string, otp: string) {
-  const attempts = 3;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  const modes: SmtpMode[] = ["ssl465", "starttls587", "ssl465"];
+  for (let attempt = 1; attempt <= modes.length; attempt += 1) {
+    const mode = modes[attempt - 1];
     try {
-      await sendOtpEmail(email, subject, label, otp);
-      console.log("OTP email sent", { email, label, attempt });
+      await sendOtpEmail(email, subject, label, otp, mode);
+      console.log("OTP email sent", {
+        email,
+        label,
+        attempt,
+        provider: "gmail-smtp",
+        smtpMode: mode
+      });
       return;
     } catch (error) {
-      cachedTransport = null;
-      cachedTransportKey = null;
-      if (attempt === 1) smtpMode = "starttls587";
       const message = error instanceof Error ? error.message : String(error);
       console.error("OTP email delivery failed", {
         email,
         label,
         attempt,
-        smtpMode,
+        smtpMode: mode,
         message
       });
-      if (attempt >= attempts) return;
+      if (attempt >= modes.length) return;
       await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
     }
   }
