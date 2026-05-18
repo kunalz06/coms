@@ -16,6 +16,7 @@ type OtpMailer = {
 };
 
 let cachedTransport: OtpMailer | null = null;
+const pendingOtpDeliveries = new Set<Promise<void>>();
 
 function required(name: string) {
   const value = process.env[name];
@@ -25,13 +26,15 @@ function required(name: string) {
 
 function gmailTransport() {
   cachedTransport ??= nodemailer.createTransport({
-    service: "gmail",
-    pool: true,
-    maxConnections: 1,
-    maxMessages: 100,
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    connectionTimeout: 7_000,
+    greetingTimeout: 7_000,
+    socketTimeout: 12_000,
     auth: {
       user: required("GMAIL_USER"),
-      pass: required("GMAIL_APP_PASSWORD")
+      pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
     }
   });
   return cachedTransport;
@@ -183,7 +186,7 @@ async function verifyAndDeleteOtp({
 }
 
 async function sendOtpEmail(email: string, subject: string, label: string, otp: string) {
-  const from = process.env.GMAIL_FROM ?? process.env.GMAIL_USER;
+  const from = process.env.GMAIL_FROM ?? required("GMAIL_USER");
   await gmailTransport().sendMail({
     from,
     to: email,
@@ -198,13 +201,9 @@ async function sendOtpEmail(email: string, subject: string, label: string, otp: 
 }
 
 async function queueOtpEmail(email: string, subject: string, label: string, otp: string) {
-  const delivery = sendOtpEmail(email, subject, label, otp).catch((error) => {
-    console.error("OTP email delivery failed", {
-      email,
-      label,
-      message: error instanceof Error ? error.message : String(error)
-    });
-  });
+  const delivery = deliverOtpEmailWithRetry(email, subject, label, otp);
+  pendingOtpDeliveries.add(delivery);
+  delivery.finally(() => pendingOtpDeliveries.delete(delivery));
 
   await Promise.race([
     delivery,
@@ -212,6 +211,28 @@ async function queueOtpEmail(email: string, subject: string, label: string, otp:
       setTimeout(resolve, 450);
     })
   ]);
+}
+
+async function deliverOtpEmailWithRetry(email: string, subject: string, label: string, otp: string) {
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await sendOtpEmail(email, subject, label, otp);
+      console.log("OTP email sent", { email, label, attempt });
+      return;
+    } catch (error) {
+      cachedTransport = null;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("OTP email delivery failed", {
+        email,
+        label,
+        attempt,
+        message
+      });
+      if (attempt >= attempts) return;
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
 }
 
 export async function sendAccountPasswordReset(email: string) {
