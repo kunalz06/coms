@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import nodemailer from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { firebaseAdminAuth } from "@/lib/firebase-admin";
 import { createServiceSupabase } from "@/lib/supabase";
 
@@ -30,8 +31,9 @@ function gmailTransport() {
     user: required("GMAIL_USER"),
     pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
   };
-  cachedTransport ??= smtpMode === "ssl465"
-    ? nodemailer.createTransport({
+  const options: SMTPTransport.Options =
+    smtpMode === "ssl465"
+      ? {
         host: "smtp.gmail.com",
         port: 465,
         secure: true,
@@ -40,8 +42,8 @@ function gmailTransport() {
         greetingTimeout: 7_000,
         socketTimeout: 12_000,
         auth
-      })
-    : nodemailer.createTransport({
+      }
+      : {
         host: "smtp.gmail.com",
         port: 587,
         secure: false,
@@ -51,7 +53,8 @@ function gmailTransport() {
         greetingTimeout: 7_000,
         socketTimeout: 12_000,
         auth
-      });
+      };
+  cachedTransport ??= nodemailer.createTransport(options) as OtpMailer;
   return cachedTransport;
 }
 
