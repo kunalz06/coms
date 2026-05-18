@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,7 +23,9 @@ class ActiveCallPanel extends ConsumerStatefulWidget {
 class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
   final _localRenderer = RTCVideoRenderer();
   final _remoteRenderer = RTCVideoRenderer();
+  final _remoteRenderers = <String, RTCVideoRenderer>{};
   var _ready = false;
+  String? _pinnedPeerId;
 
   @override
   void initState() {
@@ -39,6 +43,9 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
   void dispose() {
     _localRenderer.dispose();
     _remoteRenderer.dispose();
+    for (final renderer in _remoteRenderers.values) {
+      renderer.dispose();
+    }
     super.dispose();
   }
 
@@ -53,9 +60,11 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
             const <ConversationMember>[]);
 
     _localRenderer.srcObject = call.localStream;
-    final primaryRemoteStream = call.isGroupCall
-        ? (call.remoteStreams.isEmpty ? null : call.remoteStreams.values.first)
-        : call.remoteStream;
+    _syncGroupRenderers(call.remoteStreams);
+    final primaryRemoteEntry =
+        call.isGroupCall ? _primaryRemoteEntry(call.remoteStreams) : null;
+    final primaryRemoteStream =
+        call.isGroupCall ? primaryRemoteEntry?.value : call.remoteStream;
     _remoteRenderer.srcObject = primaryRemoteStream;
 
     final hasVideo = call.mode == CallMode.video;
@@ -91,9 +100,10 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
         myRole == 'admin' ||
         call.callStarterUserId == user.uid;
     final pendingShareRequester = call.pendingScreenShareFromUserId;
+    final scheme = Theme.of(context).colorScheme;
 
     return Material(
-      color: Theme.of(context).colorScheme.surface,
+      color: scheme.surface,
       child: Column(
         children: [
           if (pendingShareRequester != null)
@@ -101,8 +111,8 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(12),
+                  color: scheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(10),
@@ -140,18 +150,31 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                 ? Stack(
                     children: [
                       Positioned.fill(
-                        child: primaryRemoteStream == null
-                            ? _AvatarFallback(
-                                title: _statusText(call.status),
-                                subtitle: call.isGroupCall
-                                    ? '$participantCount participant online'
-                                    : peerLabel,
-                              )
-                            : RTCVideoView(
-                                _remoteRenderer,
-                                objectFit: RTCVideoViewObjectFit
-                                    .RTCVideoViewObjectFitCover,
-                              ),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                scheme.surface,
+                                scheme.surfaceContainerHighest,
+                                scheme.primaryContainer.withValues(alpha: 0.28),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                          ),
+                          child: primaryRemoteStream == null
+                              ? _AvatarFallback(
+                                  title: _statusText(call.status),
+                                  subtitle: call.isGroupCall
+                                      ? '$participantCount participant online'
+                                      : peerLabel,
+                                )
+                              : RTCVideoView(
+                                  _remoteRenderer,
+                                  objectFit: RTCVideoViewObjectFit
+                                      .RTCVideoViewObjectFitContain,
+                                ),
+                        ),
                       ),
                       if (call.isGroupCall)
                         Positioned(
@@ -169,12 +192,13 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                         height:
                             MediaQuery.sizeOf(context).width < 600 ? 132 : 178,
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(8),
                           child: DecoratedBox(
                             decoration: BoxDecoration(
                               color: Theme.of(context)
                                   .colorScheme
-                                  .surfaceContainerHighest,
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.9),
                             ),
                             child: call.localStream == null ||
                                     (!call.cameraEnabled &&
@@ -189,6 +213,20 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                           ),
                         ),
                       ),
+                      if (call.isGroupCall && call.remoteStreams.isNotEmpty)
+                        Positioned(
+                          left: 12,
+                          right: 12,
+                          bottom: 12,
+                          child: _ParticipantStrip(
+                            renderers: _remoteRenderers,
+                            streams: call.remoteStreams,
+                            pinnedPeerId: primaryRemoteEntry?.key,
+                            onPin: (peerId) {
+                              setState(() => _pinnedPeerId = peerId);
+                            },
+                          ),
+                        ),
                     ],
                   )
                 : _AvatarFallback(
@@ -199,6 +237,17 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                             : peerLabel
                         : 'Preparing audio call',
                   ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Align(
+              alignment: Alignment.center,
+              child: _CallBadge(
+                label:
+                    '${call.videoQuality.label} adaptive - ${call.packetStats.compactLabel}',
+                icon: Icons.data_usage_outlined,
+              ),
+            ),
           ),
           SafeArea(
             top: false,
@@ -225,6 +274,20 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
                       onPressed: () => ref
                           .read(callControllerProvider.notifier)
                           .toggleCamera(),
+                    ),
+                  if (hasVideo)
+                    _RoundCallButton(
+                      icon: call.adaptiveQualityEnabled
+                          ? Icons.auto_awesome_motion_outlined
+                          : Icons.high_quality_outlined,
+                      label: call.adaptiveQualityEnabled
+                          ? 'Adaptive ${call.videoQuality.label}'
+                          : 'Fixed ${call.videoQuality.label}',
+                      onPressed: () => ref
+                          .read(callControllerProvider.notifier)
+                          .setAdaptiveQualityEnabled(
+                            !call.adaptiveQualityEnabled,
+                          ),
                     ),
                   if (call.status == CommsCallStatus.incomingRinging ||
                       call.status == CommsCallStatus.reconnecting)
@@ -314,6 +377,38 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
     );
   }
 
+  void _syncGroupRenderers(Map<String, MediaStream> streams) {
+    final staleIds =
+        _remoteRenderers.keys.where((peerId) => !streams.containsKey(peerId));
+    for (final peerId in staleIds.toList()) {
+      _remoteRenderers.remove(peerId)?.dispose();
+    }
+    for (final entry in streams.entries) {
+      final renderer = _remoteRenderers.putIfAbsent(entry.key, () {
+        final created = RTCVideoRenderer();
+        unawaited(created.initialize().then((_) {
+          if (mounted) setState(() {});
+        }));
+        return created;
+      });
+      renderer.srcObject = entry.value;
+    }
+    if (_pinnedPeerId != null && !streams.containsKey(_pinnedPeerId)) {
+      _pinnedPeerId = null;
+    }
+  }
+
+  MapEntry<String, MediaStream>? _primaryRemoteEntry(
+    Map<String, MediaStream> streams,
+  ) {
+    if (streams.isEmpty) return null;
+    final pinnedPeerId = _pinnedPeerId;
+    if (pinnedPeerId != null && streams.containsKey(pinnedPeerId)) {
+      return MapEntry(pinnedPeerId, streams[pinnedPeerId]!);
+    }
+    return streams.entries.first;
+  }
+
   String _statusText(CommsCallStatus status) {
     return switch (status) {
       CommsCallStatus.incomingRinging => 'Incoming call',
@@ -329,9 +424,10 @@ class _ActiveCallPanelState extends ConsumerState<ActiveCallPanel> {
 }
 
 class _CallBadge extends StatelessWidget {
-  const _CallBadge({required this.label});
+  const _CallBadge({required this.label, this.icon});
 
   final String label;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -343,7 +439,105 @@ class _CallBadge extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Text(label, style: Theme.of(context).textTheme.labelMedium),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 16),
+              const SizedBox(width: 6),
+            ],
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 280),
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ParticipantStrip extends StatelessWidget {
+  const _ParticipantStrip({
+    required this.renderers,
+    required this.streams,
+    required this.pinnedPeerId,
+    required this.onPin,
+  });
+
+  final Map<String, RTCVideoRenderer> renderers;
+  final Map<String, MediaStream> streams;
+  final String? pinnedPeerId;
+  final ValueChanged<String> onPin;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final entries = streams.entries.toList(growable: false);
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).width < 600 ? 76 : 96,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: entries.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final entry = entries[index];
+          final renderer = renderers[entry.key];
+          final pinned = pinnedPeerId == entry.key;
+          return InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => onPin(entry.key),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: MediaQuery.sizeOf(context).width < 600 ? 112 : 148,
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.86),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: pinned ? scheme.primary : scheme.outlineVariant,
+                  width: pinned ? 2 : 1,
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (renderer == null)
+                    const Center(child: Icon(Icons.person_outline))
+                  else
+                    RTCVideoView(
+                      renderer,
+                      objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    ),
+                  Align(
+                    alignment: Alignment.bottomLeft,
+                    child: ColoredBox(
+                      color: scheme.scrim.withValues(alpha: 0.42),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        child: Text(
+                          pinned ? 'Pinned' : 'Tap to pin',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -400,8 +594,10 @@ class _RoundCallButton extends StatelessWidget {
       children: [
         FilledButton(
           style: FilledButton.styleFrom(
-            shape: const CircleBorder(),
-            padding: const EdgeInsets.all(18),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             backgroundColor: background,
             foregroundColor: foreground,
           ),

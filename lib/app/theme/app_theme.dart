@@ -3,54 +3,54 @@ import 'package:flutter/material.dart';
 class AppTheme {
   static ThemeData light() {
     final base = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF0B5FFF),
+      seedColor: const Color(0xFF006A60),
       brightness: Brightness.light,
     );
     final scheme = base.copyWith(
-      primary: const Color(0xFF0B5FFF),
+      primary: const Color(0xFF006A60),
       onPrimary: Colors.white,
-      primaryContainer: const Color(0xFFDDE7FF),
-      onPrimaryContainer: const Color(0xFF0D1B4A),
-      secondary: const Color(0xFF00796B),
+      primaryContainer: const Color(0xFF8FF2E3),
+      onPrimaryContainer: const Color(0xFF00201C),
+      secondary: const Color(0xFF6D5E00),
       onSecondary: Colors.white,
-      secondaryContainer: const Color(0xFFD3F1EC),
-      onSecondaryContainer: const Color(0xFF042D26),
-      tertiary: const Color(0xFFD97706),
+      secondaryContainer: const Color(0xFFFFE45E),
+      onSecondaryContainer: const Color(0xFF211B00),
+      tertiary: const Color(0xFFA83F6A),
       onTertiary: Colors.white,
-      tertiaryContainer: const Color(0xFFFFE7C7),
-      onTertiaryContainer: const Color(0xFF3C2500),
-      surface: const Color(0xFFF8FAFD),
-      onSurface: const Color(0xFF111827),
-      onSurfaceVariant: const Color(0xFF4B5563),
-      outline: const Color(0xFF8A96A8),
-      outlineVariant: const Color(0xFFC6D0DF),
+      tertiaryContainer: const Color(0xFFFFD8E8),
+      onTertiaryContainer: const Color(0xFF3F001D),
+      surface: const Color(0xFFFBFCF7),
+      onSurface: const Color(0xFF181C1B),
+      onSurfaceVariant: const Color(0xFF444947),
+      outline: const Color(0xFF747977),
+      outlineVariant: const Color(0xFFC4C9C6),
     );
     return _base(scheme, false);
   }
 
   static ThemeData dark() {
     final base = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF7EA3FF),
+      seedColor: const Color(0xFF6FDBCC),
       brightness: Brightness.dark,
     );
     final scheme = base.copyWith(
-      primary: const Color(0xFF7EA3FF),
-      onPrimary: const Color(0xFF001A52),
-      primaryContainer: const Color(0xFF10347A),
-      onPrimaryContainer: const Color(0xFFDDE7FF),
-      secondary: const Color(0xFF69D5C5),
-      onSecondary: const Color(0xFF003830),
-      secondaryContainer: const Color(0xFF0E4F44),
-      onSecondaryContainer: const Color(0xFFD3F1EC),
-      tertiary: const Color(0xFFFFB357),
-      onTertiary: const Color(0xFF452700),
-      tertiaryContainer: const Color(0xFF6A3F00),
-      onTertiaryContainer: const Color(0xFFFFE7C7),
-      surface: const Color(0xFF0E121B),
-      onSurface: const Color(0xFFE8ECF5),
-      onSurfaceVariant: const Color(0xFFC4CCDA),
-      outline: const Color(0xFF8D99AB),
-      outlineVariant: const Color(0xFF3A4353),
+      primary: const Color(0xFF6FDBCC),
+      onPrimary: const Color(0xFF003731),
+      primaryContainer: const Color(0xFF005048),
+      onPrimaryContainer: const Color(0xFF8FF2E3),
+      secondary: const Color(0xFFE5CA35),
+      onSecondary: const Color(0xFF393000),
+      secondaryContainer: const Color(0xFF534600),
+      onSecondaryContainer: const Color(0xFFFFE45E),
+      tertiary: const Color(0xFFFFB0CC),
+      onTertiary: const Color(0xFF650034),
+      tertiaryContainer: const Color(0xFF862650),
+      onTertiaryContainer: const Color(0xFFFFD8E8),
+      surface: const Color(0xFF111411),
+      onSurface: const Color(0xFFE1E4DF),
+      onSurfaceVariant: const Color(0xFFC3C8C4),
+      outline: const Color(0xFF8D938F),
+      outlineVariant: const Color(0xFF424844),
     );
     return _base(scheme, true);
   }
@@ -60,10 +60,11 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       scaffoldBackgroundColor: scheme.surface,
+      visualDensity: VisualDensity.standard,
       appBarTheme: AppBarTheme(
         backgroundColor: scheme.surface.withValues(alpha: 0.86),
         foregroundColor: scheme.onSurface,
-        surfaceTintColor: Colors.transparent,
+        surfaceTintColor: scheme.primary,
       ),
       cardTheme: CardThemeData(
         elevation: isDark ? 0 : 1,
@@ -93,8 +94,42 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(48, 44),
+          foregroundColor: scheme.primary,
+          side: BorderSide(color: scheme.outline),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          foregroundColor: scheme.onSurfaceVariant,
+          hoverColor: scheme.primaryContainer.withValues(alpha: 0.34),
+          focusColor: scheme.primaryContainer.withValues(alpha: 0.42),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      ),
+      tabBarTheme: TabBarThemeData(
+        indicatorColor: scheme.primary,
+        labelColor: scheme.primary,
+        unselectedLabelColor: scheme.onSurfaceVariant,
+        dividerColor: scheme.outlineVariant,
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? scheme.onPrimary
+              : scheme.outline,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? scheme.primary
+              : scheme.surfaceContainerHighest,
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: scheme.inverseSurface,
+        contentTextStyle: TextStyle(color: scheme.onInverseSurface),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: scheme.surface.withValues(alpha: 0.94),

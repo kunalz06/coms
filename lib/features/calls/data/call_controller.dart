@@ -39,6 +39,9 @@ class CallControllerState {
     this.screenShareRequestPending = false,
     this.pendingScreenShareFromUserId,
     this.callStarterUserId,
+    this.packetStats = const CallPacketStats.empty(),
+    this.videoQuality = CallVideoQuality.p720,
+    this.adaptiveQualityEnabled = true,
     this.error,
   });
 
@@ -58,6 +61,9 @@ class CallControllerState {
   final bool screenShareRequestPending;
   final String? pendingScreenShareFromUserId;
   final String? callStarterUserId;
+  final CallPacketStats packetStats;
+  final CallVideoQuality videoQuality;
+  final bool adaptiveQualityEnabled;
   final String? error;
 
   CallControllerState copyWith({
@@ -78,6 +84,9 @@ class CallControllerState {
     String? pendingScreenShareFromUserId,
     bool clearPendingScreenShareRequester = false,
     String? callStarterUserId,
+    CallPacketStats? packetStats,
+    CallVideoQuality? videoQuality,
+    bool? adaptiveQualityEnabled,
     String? error,
     bool clearCall = false,
   }) {
@@ -107,6 +116,13 @@ class CallControllerState {
                   this.pendingScreenShareFromUserId,
       callStarterUserId:
           clearCall ? null : callStarterUserId ?? this.callStarterUserId,
+      packetStats: clearCall
+          ? const CallPacketStats.empty()
+          : packetStats ?? this.packetStats,
+      videoQuality:
+          clearCall ? CallVideoQuality.p720 : videoQuality ?? this.videoQuality,
+      adaptiveQualityEnabled:
+          adaptiveQualityEnabled ?? this.adaptiveQualityEnabled,
       error: error,
     );
   }
@@ -133,7 +149,10 @@ class CallController extends StateNotifier<CallControllerState> {
   final _pendingGroupCandidates = <String, List<Object>>{};
   Timer? _ringTimer;
   Timer? _connectionTimer;
+  Timer? _packetStatsTimer;
   String? _currentUserId;
+  CallPacketStats _lastPacketStats = const CallPacketStats.empty();
+  var _healthyStatsTicks = 0;
 
   Future<void> connect(String userId) {
     _currentUserId = userId;
@@ -377,6 +396,10 @@ class CallController extends StateNotifier<CallControllerState> {
 
   void setMinimized(bool minimized) {
     state = state.copyWith(isMinimized: minimized);
+  }
+
+  void setAdaptiveQualityEnabled(bool enabled) {
+    state = state.copyWith(adaptiveQualityEnabled: enabled);
   }
 
   Future<void> toggleScreenShare({
@@ -1120,6 +1143,16 @@ class CallController extends StateNotifier<CallControllerState> {
         nextIsGroupCall) {
       _connectionTimer?.cancel();
     }
+    if (status == CommsCallStatus.connecting ||
+        status == CommsCallStatus.connected ||
+        status == CommsCallStatus.reconnecting) {
+      _startPacketStatsPolling();
+    }
+    if (status == CommsCallStatus.ended ||
+        status == CommsCallStatus.failed ||
+        clearCall) {
+      _stopPacketStatsPolling();
+    }
     state = state.copyWith(
       status: status,
       activeCallId: activeCallId,
@@ -1188,6 +1221,93 @@ class CallController extends StateNotifier<CallControllerState> {
     });
   }
 
+  void _startPacketStatsPolling() {
+    _packetStatsTimer?.cancel();
+    _packetStatsTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_refreshPacketStats());
+    });
+    unawaited(_refreshPacketStats());
+  }
+
+  Future<void> _refreshPacketStats() async {
+    if (!mounted) return;
+    final active = state.status == CommsCallStatus.connecting ||
+        state.status == CommsCallStatus.connected ||
+        state.status == CommsCallStatus.reconnecting;
+    if (!active) return;
+    try {
+      final stats = state.isGroupCall
+          ? await _groupWebRtc.packetStats()
+          : await _webRtc.packetStats();
+      if (!mounted) return;
+      state = state.copyWith(packetStats: stats);
+      await _adaptVideoQuality(stats);
+    } catch (_) {
+      // Packet stats are best-effort and must never interrupt a call.
+    }
+  }
+
+  Future<void> _adaptVideoQuality(CallPacketStats stats) async {
+    if (!state.adaptiveQualityEnabled ||
+        state.mode != CallMode.video ||
+        state.isScreenSharing ||
+        state.localStream == null ||
+        state.localStream!.getVideoTracks().isEmpty) {
+      _lastPacketStats = stats;
+      return;
+    }
+
+    final previous = _lastPacketStats;
+    _lastPacketStats = stats;
+    if (!previous.hasTraffic || !stats.hasTraffic) return;
+
+    final receivedDelta = stats.packetsReceived - previous.packetsReceived;
+    final lostDelta = stats.packetsLost - previous.packetsLost;
+    final sentDelta = stats.packetsSent - previous.packetsSent;
+    final totalInboundDelta = receivedDelta + lostDelta;
+    final lossRatio =
+        totalInboundDelta <= 0 ? 0 : lostDelta / totalInboundDelta;
+    final weakFlow = receivedDelta < 8 && sentDelta > 20;
+    final unstable = lossRatio >= 0.08 || weakFlow;
+
+    if (unstable) {
+      _healthyStatsTicks = 0;
+      await _setVideoQuality(state.videoQuality.lower());
+      return;
+    }
+
+    _healthyStatsTicks += 1;
+    if (_healthyStatsTicks >= 6 && lossRatio <= 0.02 && receivedDelta > 20) {
+      _healthyStatsTicks = 0;
+      await _setVideoQuality(state.videoQuality.higher());
+    }
+  }
+
+  Future<void> _setVideoQuality(CallVideoQuality quality) async {
+    if (quality == state.videoQuality) return;
+    try {
+      final stream = state.isGroupCall
+          ? await _groupWebRtc.setVideoQuality(quality)
+          : await _webRtc.setVideoQuality(quality);
+      if (!mounted) return;
+      state = state.copyWith(
+        localStream: stream,
+        videoQuality: quality,
+        cameraEnabled: stream?.getVideoTracks().isNotEmpty == true,
+        error: 'Video quality adjusted to ${quality.label}.',
+      );
+    } catch (_) {
+      // Keep the existing track if adaptive replacement fails.
+    }
+  }
+
+  void _stopPacketStatsPolling() {
+    _packetStatsTimer?.cancel();
+    _packetStatsTimer = null;
+    _lastPacketStats = const CallPacketStats.empty();
+    _healthyStatsTicks = 0;
+  }
+
   void _resetIfTerminal() {
     if (state.status == CommsCallStatus.ended ||
         state.status == CommsCallStatus.failed) {
@@ -1228,6 +1348,7 @@ class CallController extends StateNotifier<CallControllerState> {
   void dispose() {
     _ringTimer?.cancel();
     _connectionTimer?.cancel();
+    _stopPacketStatsPolling();
     _subscription.cancel();
     unawaited(_webRtc.disposeCall());
     unawaited(_groupWebRtc.disposeCall());

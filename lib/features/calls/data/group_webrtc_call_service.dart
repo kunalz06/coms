@@ -3,6 +3,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../../core/config/app_config.dart';
 import '../domain/call_models.dart';
+import 'webrtc_call_service.dart';
 
 final groupWebRtcCallServiceProvider = Provider<GroupWebRtcCallService>((ref) {
   return GroupWebRtcCallService(ref.watch(appConfigProvider));
@@ -17,12 +18,15 @@ class GroupWebRtcCallService {
   MediaStream? _localStream;
   MediaStream? _screenStream;
   MediaStream? _previewStream;
+  CallVideoQuality _videoQuality = CallVideoQuality.p720;
 
   MediaStream? get localStream => _localStream;
   MediaStream? get previewStream =>
       _previewStream ?? _screenStream ?? _localStream;
   Map<String, MediaStream> get remoteStreams =>
       Map.unmodifiable(_remoteStreams);
+  bool get hasActivePeers => _peers.isNotEmpty;
+  CallVideoQuality get videoQuality => _videoQuality;
 
   Future<MediaStream> acquireMedia(CallMode mode) async {
     final existing = _localStream;
@@ -36,16 +40,9 @@ class GroupWebRtcCallService {
       _previewStream = null;
     }
     try {
-      _localStream = await navigator.mediaDevices.getUserMedia({
-        'audio': true,
-        'video': mode == CallMode.video
-            ? {
-                'facingMode': 'user',
-                'width': {'ideal': 960},
-                'height': {'ideal': 540},
-              }
-            : false,
-      });
+      _localStream = await navigator.mediaDevices.getUserMedia(
+        _mediaConstraints(mode, _videoQuality),
+      );
       _previewStream = _localStream;
       return _localStream!;
     } catch (_) {
@@ -176,6 +173,49 @@ class GroupWebRtcCallService {
     _remoteStreams.remove(peerId);
   }
 
+  Future<MediaStream?> setVideoQuality(CallVideoQuality quality) async {
+    _videoQuality = quality;
+    if (_localStream == null || _localStream!.getVideoTracks().isEmpty) {
+      return _previewStream;
+    }
+    if (_screenStream != null) return _previewStream;
+
+    final replacement = await navigator.mediaDevices.getUserMedia(
+      _mediaConstraints(CallMode.video, quality, audio: false),
+    );
+    final videoTrack = replacement.getVideoTracks().isNotEmpty
+        ? replacement.getVideoTracks().first
+        : null;
+    if (videoTrack == null) {
+      replacement.getTracks().forEach((track) => track.stop());
+      return _previewStream;
+    }
+
+    final previousVideoTracks = _localStream!.getVideoTracks();
+    _localStream!.addTrack(videoTrack);
+    for (final peer in _peers.values) {
+      for (final sender in await peer.getSenders()) {
+        if (sender.track?.kind == 'video') {
+          await sender.replaceTrack(videoTrack);
+        }
+      }
+    }
+    for (final track in previousVideoTracks) {
+      _localStream!.removeTrack(track);
+      track.stop();
+    }
+    _previewStream = _localStream;
+    return _previewStream;
+  }
+
+  Future<CallPacketStats> packetStats() async {
+    var total = const CallPacketStats.empty();
+    for (final peer in _peers.values) {
+      total += _packetStatsFromReports(await peer.getStats());
+    }
+    return total;
+  }
+
   Future<void> disposeCall() async {
     for (final peer in _peers.values) {
       await peer.close();
@@ -230,4 +270,70 @@ class GroupWebRtcCallService {
     }
     return {'iceServers': iceServers, 'iceCandidatePoolSize': 4};
   }
+
+  Map<String, dynamic> _mediaConstraints(
+    CallMode mode,
+    CallVideoQuality quality, {
+    bool audio = true,
+  }) {
+    return {
+      'audio': audio,
+      'video': mode == CallMode.video
+          ? {
+              'facingMode': 'user',
+              'width': {'ideal': quality.width},
+              'height': {'ideal': quality.height},
+              'frameRate': {'ideal': quality.frameRate, 'max': 30},
+            }
+          : false,
+    };
+  }
+}
+
+CallPacketStats _packetStatsFromReports(List<dynamic> reports) {
+  var packetsSent = 0;
+  var packetsReceived = 0;
+  var bytesSent = 0;
+  var bytesReceived = 0;
+  var packetsLost = 0;
+
+  for (final report in reports) {
+    final type = _reportType(report);
+    final values = _reportValues(report);
+    if (type == 'outbound-rtp') {
+      packetsSent += _intValue(values, 'packetsSent');
+      bytesSent += _intValue(values, 'bytesSent');
+    } else if (type == 'inbound-rtp') {
+      packetsReceived += _intValue(values, 'packetsReceived');
+      bytesReceived += _intValue(values, 'bytesReceived');
+      packetsLost += _intValue(values, 'packetsLost');
+    }
+  }
+
+  return CallPacketStats(
+    packetsSent: packetsSent,
+    packetsReceived: packetsReceived,
+    bytesSent: bytesSent,
+    bytesReceived: bytesReceived,
+    packetsLost: packetsLost,
+  );
+}
+
+String _reportType(dynamic report) {
+  final type = report.type;
+  return type is String ? type : '';
+}
+
+Map<dynamic, dynamic> _reportValues(dynamic report) {
+  final values = report.values;
+  return values is Map ? values : const {};
+}
+
+int _intValue(Map<dynamic, dynamic> values, String key) {
+  final value = values[key];
+  if (value is int) return value;
+  if (value is double) return value.round();
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
 }
