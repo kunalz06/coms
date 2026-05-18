@@ -18,6 +18,7 @@ class ContactRepository {
   final SupabaseClient _supabase;
   final ApiClient _api;
   final _searchCache = <String, UserProfile?>{};
+  final _inFlightSearches = <String, Future<UserProfile?>>{};
 
   Future<UserProfile?> searchByEmail(String email) async {
     final normalizedEmail = email.trim().toLowerCase();
@@ -25,15 +26,25 @@ class ContactRepository {
     if (_searchCache.containsKey(normalizedEmail)) {
       return _searchCache[normalizedEmail];
     }
-    final response = await _api.get<Map<String, dynamic>>(
+    final existing = _inFlightSearches[normalizedEmail];
+    if (existing != null) return existing;
+
+    final search = _api.get<Map<String, dynamic>>(
       '/api/contacts/search',
       queryParameters: {'email': normalizedEmail},
-    );
-    final profile = response.data?['profile'];
-    final result =
-        profile is Map<String, dynamic> ? UserProfile.fromJson(profile) : null;
-    _searchCache[normalizedEmail] = result;
-    return result;
+    ).then((response) {
+      final profile = response.data?['profile'];
+      final result = profile is Map<String, dynamic>
+          ? UserProfile.fromJson(profile)
+          : null;
+      _searchCache[normalizedEmail] = result;
+      return result;
+    }).whenComplete(() {
+      _inFlightSearches.remove(normalizedEmail);
+    });
+
+    _inFlightSearches[normalizedEmail] = search;
+    return search;
   }
 
   Future<void> addFriend({required String addresseeId}) async {

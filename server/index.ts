@@ -75,6 +75,7 @@ const pendingDirectCallsByUser = new Map<string, PendingDirectCall[]>();
 const DIRECT_CALL_RING_MS = 45_000;
 const MAX_PENDING_SIGNALS_PER_CALL = 80;
 const MAX_SIGNALING_BYTES = 96 * 1024;
+const SELF_PING_INTERVAL_MS = 5 * 60 * 1000;
 
 function writeCorsHeaders(response: ServerResponse, origin?: string) {
   const configured = process.env.ALLOWED_ORIGIN?.trim();
@@ -110,6 +111,43 @@ function allowedOrigin(origin: string | undefined) {
 function rejectUpgrade(socket: { write: (chunk: string) => unknown; destroy: () => void }, statusCode: number, reason: string) {
   socket.write(`HTTP/1.1 ${statusCode} ${reason}\r\nConnection: close\r\n\r\n`);
   socket.destroy();
+}
+
+function selfPingUrl() {
+  const explicit = process.env.SELF_PING_URL?.trim();
+  if (explicit) return explicit;
+  const renderHost = process.env.RENDER_EXTERNAL_HOSTNAME?.trim();
+  if (renderHost) return `https://${renderHost}/healthz`;
+  return `http://127.0.0.1:${port}/healthz`;
+}
+
+function startSelfPing() {
+  const url = selfPingUrl();
+  const ping = async () => {
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (!response.ok) {
+        console.warn("Self ping returned a non-OK response", {
+          status: response.status,
+          url
+        });
+      }
+    } catch (error) {
+      console.warn("Self ping failed", {
+        url,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  };
+  const timer = setInterval(() => {
+    void ping();
+  }, SELF_PING_INTERVAL_MS);
+  timer.unref?.();
+  void ping();
+  return timer;
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -739,8 +777,12 @@ void app.prepare().then(() => {
       socket.ping();
     });
   }, 30_000);
+  const selfPing = startSelfPing();
 
-  wss.on("close", () => clearInterval(heartbeat));
+  wss.on("close", () => {
+    clearInterval(heartbeat);
+    clearInterval(selfPing);
+  });
 
   server.listen(port, hostname, () => {
     console.log(`COMMS ready on http://${hostname}:${port}`);

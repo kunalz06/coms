@@ -2,13 +2,17 @@ import { NextResponse } from "next/server";
 import { verifyFirebaseRequest } from "@/lib/firebase-admin";
 import { createServiceSupabase } from "@/lib/supabase";
 
+const responseHeaders = {
+  "Cache-Control": "private, max-age=30"
+};
+
 export async function GET(request: Request) {
   try {
     const decoded = await verifyFirebaseRequest(request);
     const url = new URL(request.url);
     const email = (url.searchParams.get("email") ?? "").trim().toLowerCase();
     if (!email || !email.includes("@")) {
-      return NextResponse.json({ profile: null });
+      return NextResponse.json({ profile: null }, { headers: responseHeaders });
     }
 
     const supabase = createServiceSupabase();
@@ -20,7 +24,7 @@ export async function GET(request: Request) {
       .maybeSingle();
     if (error) throw new Error(error.message);
 
-    return NextResponse.json({ profile: data ?? null });
+    return NextResponse.json({ profile: data ?? null }, { headers: responseHeaders });
   } catch (error) {
     return NextResponse.json(
       { message: error instanceof Error ? error.message : "Could not search contacts." },

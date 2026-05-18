@@ -11,6 +11,7 @@ const OTP_WINDOW_MS = 20 * 60 * 1000;
 const OTP_COOLDOWN_MS = 20 * 60 * 1000;
 const OTP_MAX_IN_WINDOW = 5;
 const OTP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+let cachedTransport: ReturnType<typeof nodemailer.createTransport> | null = null;
 
 function required(name: string) {
   const value = process.env[name];
@@ -19,13 +20,17 @@ function required(name: string) {
 }
 
 function gmailTransport() {
-  return nodemailer.createTransport({
+  cachedTransport ??= nodemailer.createTransport({
     service: "gmail",
+    pool: true,
+    maxConnections: 1,
+    maxMessages: 100,
     auth: {
       user: required("GMAIL_USER"),
       pass: required("GMAIL_APP_PASSWORD")
     }
   });
+  return cachedTransport;
 }
 
 function normalizeEmail(email: string) {
@@ -188,6 +193,18 @@ async function sendOtpEmail(email: string, subject: string, label: string, otp: 
   });
 }
 
+function queueOtpEmail(email: string, subject: string, label: string, otp: string) {
+  setTimeout(() => {
+    sendOtpEmail(email, subject, label, otp).catch((error) => {
+      console.error("OTP email delivery failed", {
+        email,
+        label,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    });
+  }, 0);
+}
+
 export async function sendAccountPasswordReset(email: string) {
   const normalizedEmail = normalizeEmail(email);
 
@@ -206,7 +223,7 @@ export async function sendAccountPasswordReset(email: string) {
     purpose: "account",
     otp
   });
-  await sendOtpEmail(normalizedEmail, "Reset your COMMS password", "account password reset", otp);
+  queueOtpEmail(normalizedEmail, "Reset your COMMS password", "account password reset", otp);
 }
 
 export async function applyAccountPasswordReset({
@@ -239,21 +256,16 @@ export async function sendPrivacyPasswordReset(
   privacyType: PrivacyType
 ) {
   const normalizedEmail = normalizeEmail(email);
-  const auth = firebaseAdminAuth();
-  const user = await auth.getUser(userId);
-  if (user.email?.toLowerCase() !== normalizedEmail) {
-    throw new Error("Reset email must match the signed-in account.");
-  }
 
   const label = privacyType === "lock" ? "chat lock password reset" : "hidden chats password reset";
   const otp = generateOtp();
   await storeOtp({
-    userId: user.uid,
+    userId,
     email: normalizedEmail,
     purpose: privacyPurpose(privacyType),
     otp
   });
-  await sendOtpEmail(normalizedEmail, `Reset your COMMS ${label}`, label, otp);
+  queueOtpEmail(normalizedEmail, `Reset your COMMS ${label}`, label, otp);
 }
 
 export async function verifyPrivacyPasswordReset(

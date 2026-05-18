@@ -22,18 +22,24 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
   UserProfile? _result;
   String? _error;
   Timer? _debounce;
+  Timer? _searchCooldownTimer;
   var _loading = false;
   var _adding = false;
+  var _searchCooldown = false;
+  var _searchSerial = 0;
+  String? _lastSearchQuery;
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _searchCooldownTimer?.cancel();
     _email.dispose();
     super.dispose();
   }
 
   Future<void> _search() async {
     final query = _email.text.trim();
+    final normalizedQuery = query.toLowerCase();
     if (!query.contains('@')) {
       setState(() {
         _result = null;
@@ -41,14 +47,18 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
       });
       return;
     }
+    if (_searchCooldown && normalizedQuery == _lastSearchQuery) return;
+    final serial = ++_searchSerial;
+    _lastSearchQuery = normalizedQuery;
+    _startSearchCooldown();
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final result =
-          await ref.read(contactRepositoryProvider).searchByEmail(_email.text);
-      if (mounted) {
+          await ref.read(contactRepositoryProvider).searchByEmail(query);
+      if (mounted && serial == _searchSerial) {
         setState(() {
           _result = result;
           _error =
@@ -56,10 +66,20 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
         });
       }
     } catch (error) {
-      if (mounted) await _showError(error.toString());
+      if (mounted && serial == _searchSerial) await _showError(error.toString());
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && serial == _searchSerial) {
+        setState(() => _loading = false);
+      }
     }
+  }
+
+  void _startSearchCooldown() {
+    _searchCooldownTimer?.cancel();
+    setState(() => _searchCooldown = true);
+    _searchCooldownTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() => _searchCooldown = false);
+    });
   }
 
   Future<void> _addAndOpen(UserProfile profile) async {
@@ -116,8 +136,14 @@ class _AddContactSheetState extends ConsumerState<AddContactSheet> {
             ),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: _loading ? null : _search,
-              child: Text(_loading ? 'Searching...' : 'Search'),
+              onPressed: _loading || _searchCooldown ? null : _search,
+              child: Text(
+                _loading
+                    ? 'Searching...'
+                    : _searchCooldown
+                        ? 'Please wait...'
+                        : 'Search',
+              ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
