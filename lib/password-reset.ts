@@ -11,7 +11,11 @@ const OTP_WINDOW_MS = 20 * 60 * 1000;
 const OTP_COOLDOWN_MS = 20 * 60 * 1000;
 const OTP_MAX_IN_WINDOW = 5;
 const OTP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-let cachedTransport: ReturnType<typeof nodemailer.createTransport> | null = null;
+type OtpMailer = {
+  sendMail: (mail: Parameters<ReturnType<typeof nodemailer.createTransport>["sendMail"]>[0]) => Promise<unknown>;
+};
+
+let cachedTransport: OtpMailer | null = null;
 
 function required(name: string) {
   const value = process.env[name];
