@@ -44,6 +44,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   final _controller = TextEditingController();
   final _reactionController = TextEditingController();
+  final _scrollController = ScrollController();
   final _recorder = AudioRecorder();
   BytesBuilder? _recordingBytes;
   StreamSubscription<Uint8List>? _recordingSubscription;
@@ -56,10 +57,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   var _restoringArchive = false;
   String? _archiveRestoreError;
   final _restoredById = <String, Message>{};
+  var _showLatestButton = false;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_updateLatestButtonVisibility);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _validatePrivacyAccess();
     });
@@ -69,9 +72,29 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   void dispose() {
     _controller.dispose();
     _reactionController.dispose();
+    _scrollController.dispose();
     _recordingSubscription?.cancel();
     _recorder.dispose();
     super.dispose();
+  }
+
+  void _updateLatestButtonVisibility() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final distanceFromBottom = position.maxScrollExtent - position.pixels;
+    final shouldShow = distanceFromBottom > 360;
+    if (shouldShow == _showLatestButton) return;
+    setState(() => _showLatestButton = shouldShow);
+  }
+
+  Future<void> _scrollToLatestMessage() async {
+    if (!_scrollController.hasClients) return;
+    await _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+    if (mounted) setState(() => _showLatestButton = false);
   }
 
   Future<void> _validatePrivacyAccess() async {
@@ -1426,31 +1449,43 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       body: Column(
         children: [
           Expanded(
-            child: messages.when(
-              data: (items) {
-                final latestMessageId = items.isEmpty ? null : items.last.id;
-                if (userId != null &&
-                    latestMessageId != null &&
-                    _lastMarkedReadMessageId != latestMessageId) {
-                  _lastMarkedReadMessageId = latestMessageId;
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    ref.read(chatRepositoryProvider).markRead(
-                          conversationId: widget.conversationId,
-                          userId: userId,
-                        );
-                  });
-                }
-                if (items.isEmpty) {
-                  return const EmptyState(
-                      title: 'No messages', message: 'Send the first message.');
-                }
-                final redacted = items.where((item) => item.isRedacted).length;
-                final isCompact = MediaQuery.sizeOf(context).width < 700;
-                return ListView.builder(
-                  padding: EdgeInsets.all(isCompact ? 10 : 16),
-                  reverse: false,
-                  itemCount: items.length + 1,
-                  itemBuilder: (context, index) {
+            child: Stack(
+              children: [
+                messages.when(
+                  data: (items) {
+                    final latestMessageId =
+                        items.isEmpty ? null : items.last.id;
+                    if (userId != null &&
+                        latestMessageId != null &&
+                        _lastMarkedReadMessageId != latestMessageId) {
+                      _lastMarkedReadMessageId = latestMessageId;
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        ref.read(chatRepositoryProvider).markRead(
+                              conversationId: widget.conversationId,
+                              userId: userId,
+                            );
+                      });
+                    }
+                    if (items.isEmpty) {
+                      return const EmptyState(
+                        title: 'No messages',
+                        message: 'Send the first message.',
+                      );
+                    }
+                    final redacted =
+                        items.where((item) => item.isRedacted).length;
+                    final isCompact = MediaQuery.sizeOf(context).width < 700;
+                    return ListView.builder(
+                      controller: _scrollController,
+                      padding: EdgeInsets.fromLTRB(
+                        isCompact ? 10 : 16,
+                        isCompact ? 10 : 16,
+                        isCompact ? 10 : 16,
+                        88,
+                      ),
+                      reverse: false,
+                      itemCount: items.length + 1,
+                      itemBuilder: (context, index) {
                     if (index == 0) {
                       if (redacted == 0 && _archiveRestoreError == null) {
                         return const SizedBox.shrink();
@@ -1661,12 +1696,26 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         ),
                       ),
                     );
+                      },
+                    );
                   },
-                );
-              },
-              loading: () => const LoadingState(),
-              error: (error, _) => EmptyState(
-                  title: 'Could not load messages', message: error.toString()),
+                  loading: () => const LoadingState(),
+                  error: (error, _) => EmptyState(
+                    title: 'Could not load messages',
+                    message: error.toString(),
+                  ),
+                ),
+                if (_showLatestButton)
+                  Positioned(
+                    right: 18,
+                    bottom: 18,
+                    child: FilledButton.tonalIcon(
+                      onPressed: _scrollToLatestMessage,
+                      icon: const Icon(Icons.keyboard_double_arrow_down),
+                      label: const Text('Latest'),
+                    ),
+                  ),
+              ],
             ),
           ),
           SafeArea(

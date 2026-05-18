@@ -15,6 +15,34 @@ class PrivacyScreen extends ConsumerStatefulWidget {
 }
 
 class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
+  final _otpCooldownUntil = <String, DateTime>{};
+
+  bool _otpCoolingDown(String type) {
+    final until = _otpCooldownUntil[type];
+    return until != null && until.isAfter(DateTime.now());
+  }
+
+  Future<void> _sendResetOtpWithCooldown(String type) async {
+    if (_otpCoolingDown(type)) {
+      await _showPopup(context, 'OTP was already sent. Please wait before requesting another one.');
+      return;
+    }
+    await _sendResetOtp(
+      context: context,
+      ref: ref,
+      type: type,
+      onSent: () {
+        setState(() {
+          _otpCooldownUntil[type] =
+              DateTime.now().add(const Duration(seconds: 60));
+        });
+        Future<void>.delayed(const Duration(seconds: 60), () {
+          if (mounted) setState(() {});
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -118,22 +146,22 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
                 ListTile(
                   leading: const Icon(Icons.password_outlined),
                   title: const Text('Reset chat lock password'),
-                  subtitle: const Text('Email OTP valid for 5 minutes'),
-                  onTap: () => _sendResetOtp(
-                    context: context,
-                    ref: ref,
-                    type: 'lock',
-                  ),
+                  subtitle: Text(_otpCoolingDown('lock')
+                      ? 'OTP sent. Wait before requesting again.'
+                      : 'Email OTP valid for 5 minutes'),
+                  onTap: _otpCoolingDown('lock')
+                      ? null
+                      : () => _sendResetOtpWithCooldown('lock'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.restart_alt_outlined),
                   title: const Text('Reset hidden chats password'),
-                  subtitle: const Text('Email OTP valid for 5 minutes'),
-                  onTap: () => _sendResetOtp(
-                    context: context,
-                    ref: ref,
-                    type: 'hidden',
-                  ),
+                  subtitle: Text(_otpCoolingDown('hidden')
+                      ? 'OTP sent. Wait before requesting again.'
+                      : 'Email OTP valid for 5 minutes'),
+                  onTap: _otpCoolingDown('hidden')
+                      ? null
+                      : () => _sendResetOtpWithCooldown('hidden'),
                 ),
               ],
             ),
@@ -257,6 +285,7 @@ Future<void> _sendResetOtp({
   required BuildContext context,
   required WidgetRef ref,
   required String type,
+  VoidCallback? onSent,
 }) async {
   final privacy = ref.read(privacyControllerProvider);
   if (type == 'lock' && !privacy.chatLockConfigured) {
@@ -271,6 +300,12 @@ Future<void> _sendResetOtp({
     await ref.read(privacyControllerProvider.notifier).sendResetOtp(
           type: type,
         );
+    if (!context.mounted) return;
+    onSent?.call();
+    await _showPopup(
+      context,
+      'OTP sent to your COMMS account email. It expires in 5 minutes.',
+    );
     if (!context.mounted) return;
     await _showApplyResetOtp(
       context: context,

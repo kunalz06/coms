@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,6 +25,8 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   var _sent = false;
   var _done = false;
   var _busy = false;
+  var _resendSeconds = 0;
+  Timer? _resendTimer;
 
   @override
   void dispose() {
@@ -30,20 +34,45 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     _otp.dispose();
     _password.dispose();
     _confirmPassword.dispose();
+    _resendTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _send() async {
+    if (_resendSeconds > 0) return;
     setState(() => _busy = true);
     try {
       await ref.read(authRepositoryProvider).sendPasswordReset(_email.text);
-      if (mounted) setState(() => _sent = true);
+      if (!mounted) return;
+      setState(() => _sent = true);
+      _startResendCooldown();
+      await _showInfo(
+        context,
+        'OTP sent. Check your email. You can request another OTP after the cooldown.',
+      );
     } catch (error) {
       if (!mounted) return;
       await _showError(context, error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    setState(() => _resendSeconds = 60);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_resendSeconds <= 1) {
+        timer.cancel();
+        setState(() => _resendSeconds = 0);
+        return;
+      }
+      setState(() => _resendSeconds -= 1);
+    });
   }
 
   Future<void> _apply() async {
@@ -149,7 +178,9 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                       const SizedBox(height: 20),
                       if (!_done)
                         FilledButton.icon(
-                          onPressed: _busy ? null : (_sent ? _apply : _send),
+                          onPressed: _busy || (!_sent && _resendSeconds > 0)
+                              ? null
+                              : (_sent ? _apply : _send),
                           icon: Icon(
                             _sent
                                 ? Icons.lock_reset
@@ -162,8 +193,13 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                         ),
                       if (_sent && !_done)
                         TextButton(
-                          onPressed: _busy ? null : _send,
-                          child: const Text('Send another OTP'),
+                          onPressed:
+                              _busy || _resendSeconds > 0 ? null : _send,
+                          child: Text(
+                            _resendSeconds > 0
+                                ? 'Send another OTP in ${_resendSeconds}s'
+                                : 'Send another OTP',
+                          ),
                         ),
                       TextButton.icon(
                           onPressed: () => context.go(AppRoutes.login),
@@ -179,6 +215,23 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       ),
     );
   }
+}
+
+Future<void> _showInfo(BuildContext context, String message) {
+  if (!context.mounted) return Future.value();
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('OTP sent'),
+      content: Text(message),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
 }
 
 Future<void> _showError(BuildContext context, String message) {

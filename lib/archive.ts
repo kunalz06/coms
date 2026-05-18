@@ -24,7 +24,28 @@ type MessageAttachmentRow = {
   file_name: string;
   mime_type: string;
   size_bytes: number;
+  upload_mode?: string | null;
+  original_size_bytes?: number | null;
+  chunk_size_bytes?: number | null;
+  chunk_count?: number | null;
+  file_sha256?: string | null;
+  assembly_status?: string | null;
   created_at: string;
+};
+
+type MessageAttachmentChunkRow = {
+  id: string;
+  attachment_id: string;
+  chunk_index: number;
+  chunk_url: string;
+  chunk_public_id: string | null;
+  chunk_size_bytes: number;
+  chunk_sha256: string;
+  created_at: string;
+};
+
+type BackedUpAttachmentChunkPayload = MessageAttachmentChunkRow & {
+  inline_data_base64?: string | null;
 };
 
 type RestoreAttachmentQuery = {
@@ -35,6 +56,7 @@ type RestoreAttachmentQuery = {
 
 type BackedUpAttachmentPayload = ArchivedAttachmentPayload & {
   inline_data_base64?: string | null;
+  chunks?: BackedUpAttachmentChunkPayload[];
 };
 
 type BackedUpMessagePayload = ArchivedMessagePayload & {
@@ -48,6 +70,104 @@ type InternalArchivePayload = Omit<ArchiveFilePayload, "messages"> & {
 function inlineAttachmentData(attachment: ArchivedAttachmentPayload | BackedUpAttachmentPayload) {
   const value = (attachment as { inline_data_base64?: unknown }).inline_data_base64;
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function inlineBase64(value: { inline_data_base64?: unknown }) {
+  return typeof value.inline_data_base64 === "string" && value.inline_data_base64.length > 0
+    ? value.inline_data_base64
+    : null;
+}
+
+function cloudinaryConfig() {
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloudName || !apiKey || !apiSecret) return null;
+  return { cloudName, apiKey, apiSecret };
+}
+
+async function destroyCloudinaryResource(publicId: string | null, resourceType: string | null) {
+  if (!publicId) return false;
+  const config = cloudinaryConfig();
+  if (!config) return false;
+  const normalizedResourceType = resourceType === "raw" || resourceType === "video" ? resourceType : "image";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = crypto
+    .createHash("sha1")
+    .update(`public_id=${publicId}&timestamp=${timestamp}${config.apiSecret}`)
+    .digest("hex");
+  const body = new URLSearchParams({
+    public_id: publicId,
+    timestamp: timestamp.toString(),
+    api_key: config.apiKey,
+    signature
+  });
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${config.cloudName}/${normalizedResourceType}/destroy`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    }
+  );
+  if (!response.ok) return false;
+  const result = (await response.json().catch(() => ({}))) as { result?: string };
+  return result.result === "ok" || result.result === "not found";
+}
+
+async function deleteArchivedCloudinaryAttachments(supabase: any, messageIds: string[]) {
+  if (!messageIds.length || !cloudinaryConfig()) return { deleted: 0 };
+
+  const { data: attachments, error: attachmentsError } = await supabase
+    .from("message_attachments")
+    .select("id,public_id,resource_type")
+    .in("message_id", messageIds);
+  if (attachmentsError) throw new Error(attachmentsError.message);
+  const attachmentRows = (attachments as Pick<MessageAttachmentRow, "id" | "public_id" | "resource_type">[] | null) ?? [];
+  const attachmentIds = attachmentRows.map((attachment) => attachment.id);
+
+  const { data: chunks, error: chunksError } = attachmentIds.length
+    ? await supabase
+        .from("message_attachment_chunks")
+        .select("id,chunk_public_id")
+        .in("attachment_id", attachmentIds)
+    : { data: [], error: null };
+  if (chunksError) throw new Error(chunksError.message);
+
+  let deleted = 0;
+  const deletedAttachmentIds: string[] = [];
+  for (const attachment of attachmentRows) {
+    if (await destroyCloudinaryResource(attachment.public_id, attachment.resource_type)) {
+      deleted += 1;
+      deletedAttachmentIds.push(attachment.id);
+    }
+  }
+
+  const deletedChunkIds: string[] = [];
+  for (const chunk of (chunks as Pick<MessageAttachmentChunkRow, "id" | "chunk_public_id">[] | null) ?? []) {
+    if (await destroyCloudinaryResource(chunk.chunk_public_id, "raw")) {
+      deleted += 1;
+      deletedChunkIds.push(chunk.id);
+    }
+  }
+
+  if (deletedAttachmentIds.length) {
+    const { error } = await supabase
+      .from("message_attachments")
+      .update({ public_id: null })
+      .in("id", deletedAttachmentIds);
+    if (error) throw new Error(error.message);
+  }
+  if (deletedChunkIds.length) {
+    const { error } = await supabase
+      .from("message_attachment_chunks")
+      .update({ chunk_public_id: null })
+      .in("id", deletedChunkIds);
+    if (error) throw new Error(error.message);
+  }
+
+  return { deleted };
 }
 
 function encryptionKey() {
@@ -250,11 +370,28 @@ async function buildArchivePayload(
     const archivedAttachments: BackedUpAttachmentPayload[] = [];
     for (const attachment of rawAttachments) {
       const inlineData = await readAttachmentInline(attachment.url);
+      let chunks: BackedUpAttachmentChunkPayload[] = [];
+      if (attachment.upload_mode === "chunked") {
+        const { data: chunkRows, error: chunkError } = await supabase
+          .from("message_attachment_chunks")
+          .select("*")
+          .eq("attachment_id", attachment.id)
+          .order("chunk_index", { ascending: true });
+        if (chunkError) throw new Error(chunkError.message);
+        const rawChunks = (chunkRows as MessageAttachmentChunkRow[] | null) ?? [];
+        for (const chunk of rawChunks) {
+          chunks.push({
+            ...chunk,
+            inline_data_base64: await readAttachmentInline(chunk.chunk_url)
+          });
+        }
+      }
       archivedAttachments.push({
         ...attachment,
         original_url: attachment.url,
         backup: null,
-        inline_data_base64: inlineData
+        inline_data_base64: inlineData,
+        chunks
       });
     }
     payloadMessages.push({
@@ -576,6 +713,8 @@ export async function runRetentionCleanup(supabase: any) {
   const ids = (candidates ?? []).map((row: { id: string }) => row.id);
   if (!ids.length) return { redacted: 0 };
 
+  const cloudinary = await deleteArchivedCloudinaryAttachments(supabase, ids);
+
   const { error: updateError } = await supabase
     .from("messages")
     .update({
@@ -585,7 +724,7 @@ export async function runRetentionCleanup(supabase: any) {
     })
     .in("id", ids);
   if (updateError) throw new Error(updateError.message);
-  return { redacted: ids.length };
+  return { redacted: ids.length, cloudinaryDeleted: cloudinary.deleted };
 }
 
 async function loadArchiveMessages(supabase: any, userId: string, conversationId: string): Promise<BackedUpMessagePayload[]> {
@@ -631,6 +770,19 @@ export async function restoreArchivedAttachment(supabase: any, userId: string, q
   if (inlineData) {
     return {
       body: Buffer.from(inlineData, "base64"),
+      mimeType: attachment.mime_type,
+      fileName: attachment.file_name
+    };
+  }
+
+  const chunks = [...((attachment.chunks ?? []) as BackedUpAttachmentChunkPayload[])].sort(
+    (a, b) => a.chunk_index - b.chunk_index
+  );
+  if (chunks.length > 0 && chunks.every((chunk) => inlineBase64(chunk))) {
+    return {
+      body: Buffer.concat(
+        chunks.map((chunk) => Buffer.from(inlineBase64(chunk) ?? "", "base64"))
+      ),
       mimeType: attachment.mime_type,
       fileName: attachment.file_name
     };
