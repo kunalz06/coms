@@ -17,6 +17,7 @@ type OtpMailer = {
 
 let cachedTransport: OtpMailer | null = null;
 const pendingOtpDeliveries = new Set<Promise<void>>();
+let smtpMode: "ssl465" | "starttls587" = "ssl465";
 
 function required(name: string) {
   const value = process.env[name];
@@ -25,18 +26,32 @@ function required(name: string) {
 }
 
 function gmailTransport() {
-  cachedTransport ??= nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    connectionTimeout: 7_000,
-    greetingTimeout: 7_000,
-    socketTimeout: 12_000,
-    auth: {
-      user: required("GMAIL_USER"),
-      pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
-    }
-  });
+  const auth = {
+    user: required("GMAIL_USER"),
+    pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
+  };
+  cachedTransport ??= smtpMode === "ssl465"
+    ? nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
+        family: 4,
+        connectionTimeout: 7_000,
+        greetingTimeout: 7_000,
+        socketTimeout: 12_000,
+        auth
+      })
+    : nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 587,
+        secure: false,
+        requireTLS: true,
+        family: 4,
+        connectionTimeout: 7_000,
+        greetingTimeout: 7_000,
+        socketTimeout: 12_000,
+        auth
+      });
   return cachedTransport;
 }
 
@@ -222,11 +237,13 @@ async function deliverOtpEmailWithRetry(email: string, subject: string, label: s
       return;
     } catch (error) {
       cachedTransport = null;
+      if (attempt === 1) smtpMode = "starttls587";
       const message = error instanceof Error ? error.message : String(error);
       console.error("OTP email delivery failed", {
         email,
         label,
         attempt,
+        smtpMode,
         message
       });
       if (attempt >= attempts) return;
