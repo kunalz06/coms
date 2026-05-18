@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import dns from "node:dns/promises";
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { firebaseAdminAuth } from "@/lib/firebase-admin";
@@ -19,6 +20,8 @@ type OtpMailer = {
 let cachedTransport: OtpMailer | null = null;
 const pendingOtpDeliveries = new Set<Promise<void>>();
 let smtpMode: "ssl465" | "starttls587" = "ssl465";
+let cachedTransportKey: string | null = null;
+let cachedGmailIpv4: string | null = null;
 
 function required(name: string) {
   const value = process.env[name];
@@ -26,37 +29,52 @@ function required(name: string) {
   return value;
 }
 
-function gmailTransport() {
+async function gmailIpv4Host() {
+  if (cachedGmailIpv4) return cachedGmailIpv4;
+  const addresses = await dns.resolve4("smtp.gmail.com");
+  const address = addresses[0];
+  if (!address) throw new Error("Could not resolve Gmail SMTP IPv4 address.");
+  cachedGmailIpv4 = address;
+  return address;
+}
+
+async function gmailTransport() {
   const auth = {
     user: required("GMAIL_USER"),
     pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
   };
+  const host = await gmailIpv4Host();
+  const key = `${smtpMode}:${host}:${auth.user}`;
+  if (cachedTransport && cachedTransportKey === key) return cachedTransport;
+
+  const baseOptions = {
+    host,
+    family: 4,
+    connectionTimeout: 7_000,
+    greetingTimeout: 7_000,
+    socketTimeout: 12_000,
+    tls: {
+      servername: "smtp.gmail.com"
+    },
+    auth
+  };
   let options: SMTPTransport.Options;
   if (smtpMode === "ssl465") {
     options = {
-      host: "smtp.gmail.com",
+      ...baseOptions,
       port: 465,
-      secure: true,
-      family: 4,
-      connectionTimeout: 7_000,
-      greetingTimeout: 7_000,
-      socketTimeout: 12_000,
-      auth
+      secure: true
     } as SMTPTransport.Options;
   } else {
     options = {
-      host: "smtp.gmail.com",
+      ...baseOptions,
       port: 587,
       secure: false,
-      requireTLS: true,
-      family: 4,
-      connectionTimeout: 7_000,
-      greetingTimeout: 7_000,
-      socketTimeout: 12_000,
-      auth
+      requireTLS: true
     } as SMTPTransport.Options;
   }
-  cachedTransport ??= nodemailer.createTransport(options) as OtpMailer;
+  cachedTransport = nodemailer.createTransport(options) as OtpMailer;
+  cachedTransportKey = key;
   return cachedTransport;
 }
 
@@ -207,7 +225,8 @@ async function verifyAndDeleteOtp({
 
 async function sendOtpEmail(email: string, subject: string, label: string, otp: string) {
   const from = process.env.GMAIL_FROM ?? required("GMAIL_USER");
-  await gmailTransport().sendMail({
+  const transport = await gmailTransport();
+  await transport.sendMail({
     from,
     to: email,
     subject,
@@ -242,6 +261,7 @@ async function deliverOtpEmailWithRetry(email: string, subject: string, label: s
       return;
     } catch (error) {
       cachedTransport = null;
+      cachedTransportKey = null;
       if (attempt === 1) smtpMode = "starttls587";
       const message = error instanceof Error ? error.message : String(error);
       console.error("OTP email delivery failed", {
