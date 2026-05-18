@@ -22,7 +22,7 @@ flutter build web --release --dart-define-from-file=env/local.json
 
 ## Backend support service
 
-The Node service is still kept for production stability:
+The Node service is kept as the backend support service while Flutter/Dart remains the main client:
 
 - Signaling: `WS /ws`
 - Health check: `GET /healthz`
