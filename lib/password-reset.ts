@@ -31,29 +31,31 @@ function gmailTransport() {
     user: required("GMAIL_USER"),
     pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
   };
-  const options: SMTPTransport.Options =
-    smtpMode === "ssl465"
-      ? {
-        host: "smtp.gmail.com",
-        port: 465,
-        secure: true,
-        family: 4,
-        connectionTimeout: 7_000,
-        greetingTimeout: 7_000,
-        socketTimeout: 12_000,
-        auth
-      }
-      : {
-        host: "smtp.gmail.com",
-        port: 587,
-        secure: false,
-        requireTLS: true,
-        family: 4,
-        connectionTimeout: 7_000,
-        greetingTimeout: 7_000,
-        socketTimeout: 12_000,
-        auth
-      };
+  let options: SMTPTransport.Options;
+  if (smtpMode === "ssl465") {
+    options = {
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      family: 4,
+      connectionTimeout: 7_000,
+      greetingTimeout: 7_000,
+      socketTimeout: 12_000,
+      auth
+    } as SMTPTransport.Options;
+  } else {
+    options = {
+      host: "smtp.gmail.com",
+      port: 587,
+      secure: false,
+      requireTLS: true,
+      family: 4,
+      connectionTimeout: 7_000,
+      greetingTimeout: 7_000,
+      socketTimeout: 12_000,
+      auth
+    } as SMTPTransport.Options;
+  }
   cachedTransport ??= nodemailer.createTransport(options) as OtpMailer;
   return cachedTransport;
 }
