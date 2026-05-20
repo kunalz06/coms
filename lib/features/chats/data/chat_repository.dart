@@ -240,12 +240,9 @@ class ChatRepository {
     required String messageId,
     required String userId,
   }) async {
-    await _supabase.from('message_deletions').upsert(
-      {
-        'message_id': messageId,
-        'user_id': userId,
-      },
-      onConflict: 'message_id,user_id',
+    await _supabase.rpc(
+      'delete_message_for_me',
+      params: {'p_message_id': messageId},
     );
     await _touchMessage(messageId);
   }
@@ -254,24 +251,10 @@ class ChatRepository {
     required String conversationId,
     required String userId,
   }) async {
-    final rows = await _supabase
-        .from('messages')
-        .select('id')
-        .eq('conversation_id', conversationId);
-    final ids = rows
-        .map((row) => row['id']?.toString())
-        .whereType<String>()
-        .toList(growable: false);
-    if (ids.isEmpty) return;
-    await _supabase.from('message_deletions').upsert(
-          ids
-              .map((id) => {
-                    'message_id': id,
-                    'user_id': userId,
-                  })
-              .toList(growable: false),
-          onConflict: 'message_id,user_id',
-        );
+    await _supabase.rpc(
+      'clear_conversation_for_me',
+      params: {'p_conversation_id': conversationId},
+    );
   }
 
   Future<void> clearConversationForEveryone({
