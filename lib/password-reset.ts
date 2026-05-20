@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import dns from "node:dns/promises";
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { firebaseAdminAuth } from "@/lib/firebase-admin";
@@ -13,13 +12,8 @@ const OTP_WINDOW_MS = 20 * 60 * 1000;
 const OTP_COOLDOWN_MS = 20 * 60 * 1000;
 const OTP_MAX_IN_WINDOW = 5;
 const OTP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-type OtpMailer = {
-  sendMail: (mail: Parameters<ReturnType<typeof nodemailer.createTransport>["sendMail"]>[0]) => Promise<unknown>;
-};
-type SmtpMode = "ssl465" | "starttls587";
 
-const pendingOtpDeliveries = new Set<Promise<void>>();
-let gmailIpv4Cursor = 0;
+let cachedTransport: nodemailer.Transporter | null = null;
 
 function required(name: string) {
   const value = process.env[name];
@@ -27,49 +21,27 @@ function required(name: string) {
   return value;
 }
 
-async function gmailIpv4Host() {
-  const addresses = await dns.resolve4("smtp.gmail.com");
-  const address = addresses[gmailIpv4Cursor % addresses.length];
-  gmailIpv4Cursor += 1;
-  if (!address) throw new Error("Could not resolve Gmail SMTP IPv4 address.");
-  return address;
-}
-
-async function gmailTransport(mode: SmtpMode) {
-  const auth = {
-    user: required("GMAIL_USER"),
-    pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
-  };
-  const host = await gmailIpv4Host();
-
-  const baseOptions = {
-    host,
+function gmailTransport() {
+  if (cachedTransport) return cachedTransport;
+  const options = {
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
     name: "comms",
     family: 4,
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 15_000,
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 10_000,
     tls: {
       servername: "smtp.gmail.com"
     },
-    auth
-  };
-  let options: SMTPTransport.Options;
-  if (mode === "ssl465") {
-    options = {
-      ...baseOptions,
-      port: 465,
-      secure: true
-    } as SMTPTransport.Options;
-  } else {
-    options = {
-      ...baseOptions,
-      port: 587,
-      secure: false,
-      requireTLS: true
-    } as SMTPTransport.Options;
-  }
-  return nodemailer.createTransport(options) as OtpMailer;
+    auth: {
+      user: required("GMAIL_USER"),
+      pass: required("GMAIL_APP_PASSWORD").replace(/\s+/g, "")
+    }
+  } as SMTPTransport.Options;
+  cachedTransport = nodemailer.createTransport(options);
+  return cachedTransport;
 }
 
 function normalizeEmail(email: string) {
@@ -217,9 +189,14 @@ async function verifyAndDeleteOtp({
   if (deleteError) throw new Error(deleteError.message);
 }
 
-async function sendOtpEmail(email: string, subject: string, label: string, otp: string, mode: SmtpMode) {
+async function sendOtpEmail(email: string, subject: string, label: string, otp: string) {
+  if (process.env.OTP_EMAIL_WEBHOOK_URL && process.env.OTP_EMAIL_WEBHOOK_SECRET) {
+    await sendOtpEmailThroughWebhook(email, subject, label, otp);
+    return;
+  }
+
   const from = process.env.GMAIL_FROM ?? required("GMAIL_USER");
-  const transport = await gmailTransport(mode);
+  const transport = gmailTransport();
   const content = otpEmailContent(label, otp);
   await transport.sendMail({
     from,
@@ -228,6 +205,23 @@ async function sendOtpEmail(email: string, subject: string, label: string, otp: 
     text: content.text,
     html: content.html
   });
+}
+
+async function sendOtpEmailThroughWebhook(email: string, subject: string, label: string, otp: string) {
+  const response = await fetch(required("OTP_EMAIL_WEBHOOK_URL"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-comms-email-secret": required("OTP_EMAIL_WEBHOOK_SECRET")
+    },
+    body: JSON.stringify({ email, subject, label, otp }),
+    signal: AbortSignal.timeout(12_000)
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`OTP email webhook failed with ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
 }
 
 function otpEmailContent(label: string, otp: string) {
@@ -242,44 +236,27 @@ function otpEmailContent(label: string, otp: string) {
 }
 
 async function queueOtpEmail(email: string, subject: string, label: string, otp: string) {
-  const delivery = deliverOtpEmailWithRetry(email, subject, label, otp);
-  pendingOtpDeliveries.add(delivery);
-  delivery.finally(() => pendingOtpDeliveries.delete(delivery));
-
-  await Promise.race([
-    delivery,
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, 450);
-    })
-  ]);
+  await deliverOtpEmail(email, subject, label, otp);
 }
 
-async function deliverOtpEmailWithRetry(email: string, subject: string, label: string, otp: string) {
-  const modes: SmtpMode[] = ["ssl465", "starttls587", "ssl465"];
-  for (let attempt = 1; attempt <= modes.length; attempt += 1) {
-    const mode = modes[attempt - 1];
-    try {
-      await sendOtpEmail(email, subject, label, otp, mode);
-      console.log("OTP email sent", {
-        email,
-        label,
-        attempt,
-        provider: "gmail-smtp",
-        smtpMode: mode
-      });
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("OTP email delivery failed", {
-        email,
-        label,
-        attempt,
-        smtpMode: mode,
-        message
-      });
-      if (attempt >= modes.length) return;
-      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-    }
+async function deliverOtpEmail(email: string, subject: string, label: string, otp: string) {
+  try {
+    await sendOtpEmail(email, subject, label, otp);
+    console.log("OTP email sent", {
+      email,
+      label,
+      provider: process.env.OTP_EMAIL_WEBHOOK_URL ? "vercel-email-webhook" : "gmail-smtp"
+    });
+  } catch (error) {
+    cachedTransport = null;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("OTP email delivery failed", {
+      email,
+      label,
+      provider: process.env.OTP_EMAIL_WEBHOOK_URL ? "vercel-email-webhook" : "gmail-smtp",
+      message
+    });
+    throw new Error("Could not send OTP email. Check the configured OTP email delivery service.");
   }
 }
 

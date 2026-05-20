@@ -67,3 +67,7 @@ services:
         sync: false
       - key: GMAIL_FROM
         sync: false
+      - key: OTP_EMAIL_WEBHOOK_URL
+        sync: false
+      - key: OTP_EMAIL_WEBHOOK_SECRET
+        sync: false
