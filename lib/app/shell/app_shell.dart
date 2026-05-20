@@ -23,7 +23,8 @@ class AppShell extends ConsumerWidget {
 
   int get _index {
     if (location.startsWith('/calls')) return 1;
-    if (location.startsWith('/settings')) return 2;
+    if (location.startsWith('/meetings')) return 2;
+    if (location.startsWith('/settings')) return 3;
     return 0;
   }
 
@@ -36,6 +37,9 @@ class AppShell extends ConsumerWidget {
         context.go(AppRoutes.calls);
         return;
       case 2:
+        context.go(AppRoutes.meetings);
+        return;
+      case 3:
         context.go(AppRoutes.settings);
         return;
     }
@@ -138,6 +142,10 @@ class AppShell extends ConsumerWidget {
                     selectedIcon: Icon(Icons.call),
                     label: 'Calls'),
                 NavigationDestination(
+                    icon: Icon(Icons.video_call_outlined),
+                    selectedIcon: Icon(Icons.video_call),
+                    label: 'Meetings'),
+                NavigationDestination(
                     icon: Icon(Icons.settings_outlined),
                     selectedIcon: Icon(Icons.settings),
                     label: 'Settings'),
@@ -168,6 +176,10 @@ class AppShell extends ConsumerWidget {
                           icon: Icon(Icons.call_outlined),
                           selectedIcon: Icon(Icons.call),
                           label: Text('Calls')),
+                      NavigationRailDestination(
+                          icon: Icon(Icons.video_call_outlined),
+                          selectedIcon: Icon(Icons.video_call),
+                          label: Text('Meetings')),
                       NavigationRailDestination(
                           icon: Icon(Icons.settings_outlined),
                           selectedIcon: Icon(Icons.settings),

@@ -14,6 +14,8 @@ import '../../features/calls/presentation/calls_screen.dart';
 import '../../features/chats/presentation/chats_screen.dart';
 import '../../features/chats/presentation/conversation_screen.dart';
 import '../../features/groups/presentation/group_info_screen.dart';
+import '../../features/meetings/presentation/meeting_room_screen.dart';
+import '../../features/meetings/presentation/meetings_screen.dart';
 import '../../features/privacy/presentation/hidden_chats_screen.dart';
 import '../../features/privacy/presentation/privacy_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
@@ -39,8 +41,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == AppRoutes.resetPassword;
 
       if (authState.isLoading) return null;
-      if (user == null && !authPath) return AppRoutes.login;
+      if (user == null && !authPath) {
+        return Uri(
+          path: AppRoutes.login,
+          queryParameters: {'from': state.uri.toString()},
+        ).toString();
+      }
       if (user != null && authPath) {
+        final from = state.uri.queryParameters['from'];
+        if (from != null && from.startsWith('/')) return from;
         return AppRoutes.chats;
       }
       return null;
@@ -48,10 +57,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
           path: AppRoutes.login,
-          builder: (context, state) => const LoginScreen()),
+          builder: (context, state) =>
+              LoginScreen(from: state.uri.queryParameters['from'])),
       GoRoute(
           path: AppRoutes.register,
-          builder: (context, state) => const RegisterScreen()),
+          builder: (context, state) =>
+              RegisterScreen(from: state.uri.queryParameters['from'])),
       GoRoute(
           path: AppRoutes.resetPassword,
           builder: (context, state) => const ResetPasswordScreen()),
@@ -100,6 +111,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
               path: AppRoutes.callDetails,
               builder: (context, state) => const CallsScreen()),
+          GoRoute(
+              path: AppRoutes.meetings,
+              builder: (context, state) => const MeetingsScreen()),
+          GoRoute(
+            path: AppRoutes.meetingRoom,
+            builder: (context, state) =>
+                MeetingRoomScreen(meetingId: state.pathParameters['meetingId']!),
+          ),
           GoRoute(
               path: AppRoutes.settings,
               builder: (context, state) => const SettingsScreen()),

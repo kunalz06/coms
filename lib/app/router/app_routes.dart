@@ -9,6 +9,8 @@ class AppRoutes {
   static const calls = '/calls';
   static const callDetails = '/calls/:callId';
   static const callHistory = '/calls/history';
+  static const meetings = '/meetings';
+  static const meetingRoom = '/meetings/:meetingId';
   static const settings = '/settings';
   static const notificationSettings = '/settings/notifications';
   static const accountSettings = '/settings/account';

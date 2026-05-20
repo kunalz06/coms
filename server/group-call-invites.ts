@@ -194,7 +194,7 @@ export class GroupCallInviteManager {
   private async joinSession(socket: ClientSocket, session: GroupCallSession, userId: string, requestId?: string) {
     const existingParticipantIds = [...session.participantIds].filter((participantId) => participantId !== userId);
     if (!session.participantIds.has(userId) && session.participantIds.size >= MAX_GROUP_CALL_PARTICIPANTS) {
-      throw new Error("Group calls are limited to 10 people in this MVP.");
+      throw new Error("Calls and meetings are limited to 10 people.");
     }
 
     const wasAlreadyParticipant = session.participantIds.has(userId);

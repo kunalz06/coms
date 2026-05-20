@@ -8,7 +8,9 @@ import '../../../shared/widgets/comms_page_background.dart';
 import '../data/auth_repository.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({this.from, super.key});
+
+  final String? from;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -34,7 +36,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await ref
           .read(authRepositoryProvider)
           .signIn(email: _email.text, password: _password.text);
-      if (mounted) context.go(AppRoutes.chats);
+      if (mounted) context.go(widget.from ?? AppRoutes.chats);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -107,7 +109,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             icon: const Icon(Icons.key_outlined, size: 16),
                             label: const Text('Forgot password?')),
                         TextButton.icon(
-                            onPressed: () => context.go(AppRoutes.register),
+                            onPressed: () {
+                              final from = widget.from;
+                              context.go(Uri(
+                                path: AppRoutes.register,
+                                queryParameters: from == null
+                                    ? null
+                                    : {'from': from},
+                              ).toString());
+                            },
                             icon: const Icon(Icons.person_add_alt_1_outlined,
                                 size: 16),
                             label: const Text('Create account')),

@@ -257,8 +257,15 @@ async function userIsConversationMember(conversationId: string, userId: string) 
     .eq("conversation_id", conversationId)
     .eq("user_id", userId)
     .maybeSingle();
-  if (error) return false;
-  return Boolean(data);
+  if (!error && data) return true;
+  const { data: meetingData, error: meetingError } = await supabase
+    .from("meeting_participants")
+    .select("user_id")
+    .eq("meeting_id", conversationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (meetingError) return false;
+  return Boolean(meetingData);
 }
 
 async function userCanModerateGroupCall(conversationId: string, userId: string) {
@@ -271,7 +278,15 @@ async function userCanModerateGroupCall(conversationId: string, userId: string) 
     .eq("user_id", userId)
     .maybeSingle<{ role: "owner" | "admin" | "member" }>();
   if (error) return false;
-  return data?.role === "owner" || data?.role === "admin";
+  if (data?.role === "owner" || data?.role === "admin") return true;
+  const { data: meetingData, error: meetingError } = await supabase
+    .from("meeting_participants")
+    .select("role")
+    .eq("meeting_id", conversationId)
+    .eq("user_id", userId)
+    .maybeSingle<{ role: "creator" | "co_creator" | "participant" }>();
+  if (meetingError) return false;
+  return meetingData?.role === "creator" || meetingData?.role === "co_creator";
 }
 
 async function conversationMemberIds(conversationId: string) {
@@ -282,14 +297,27 @@ async function conversationMemberIds(conversationId: string) {
     .select("user_id")
     .eq("conversation_id", conversationId)
     .returns<Array<{ user_id: string }>>();
-  if (error) return [];
-  return data.map((member) => member.user_id);
+  if (!error && data.length) return data.map((member) => member.user_id);
+  const { data: meetingData, error: meetingError } = await supabase
+    .from("meeting_participants")
+    .select("user_id")
+    .eq("meeting_id", conversationId)
+    .is("left_at", null)
+    .returns<Array<{ user_id: string }>>();
+  if (meetingError) return [];
+  return meetingData.map((member) => member.user_id);
 }
 
 const groupCallPersistence = {
   async start(session: { id: string; conversationId: string; hostId: string; mode: "audio" | "video" }) {
     const supabase = serviceSupabase();
     if (!supabase) return;
+    const { data: conversation } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("id", session.conversationId)
+      .maybeSingle();
+    if (!conversation) return;
     const { error } = await supabase.from("group_call_sessions").upsert({
       id: session.id,
       conversation_id: session.conversationId,
@@ -305,6 +333,12 @@ const groupCallPersistence = {
   async join(session: { id: string }, userId: string) {
     const supabase = serviceSupabase();
     if (!supabase) return;
+    const { data: existingSession } = await supabase
+      .from("group_call_sessions")
+      .select("id")
+      .eq("id", session.id)
+      .maybeSingle();
+    if (!existingSession) return;
     const { error } = await supabase.from("group_call_participants").upsert(
       {
         session_id: session.id,
@@ -319,6 +353,12 @@ const groupCallPersistence = {
   async leave(session: { id: string }, userId: string) {
     const supabase = serviceSupabase();
     if (!supabase) return;
+    const { data: existingSession } = await supabase
+      .from("group_call_sessions")
+      .select("id")
+      .eq("id", session.id)
+      .maybeSingle();
+    if (!existingSession) return;
     const { error } = await supabase
       .from("group_call_participants")
       .update({ left_at: new Date().toISOString() })
@@ -329,6 +369,12 @@ const groupCallPersistence = {
   async end(session: { id: string }, status: "ended" | "failed", reason?: string) {
     const supabase = serviceSupabase();
     if (!supabase) return;
+    const { data: existingSession } = await supabase
+      .from("group_call_sessions")
+      .select("id")
+      .eq("id", session.id)
+      .maybeSingle();
+    if (!existingSession) return;
     const { error } = await supabase
       .from("group_call_sessions")
       .update({

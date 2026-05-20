@@ -8,7 +8,9 @@ import '../../../shared/widgets/comms_page_background.dart';
 import '../data/auth_repository.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
-  const RegisterScreen({super.key});
+  const RegisterScreen({this.from, super.key});
+
+  final String? from;
 
   @override
   ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
@@ -35,7 +37,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     try {
       await ref.read(authRepositoryProvider).register(
           fullName: _name.text, email: _email.text, password: _password.text);
-      if (mounted) context.go(AppRoutes.chats);
+      if (mounted) context.go(widget.from ?? AppRoutes.chats);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -122,7 +124,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           label: const Text('Create account'),
                         ),
                         TextButton.icon(
-                            onPressed: () => context.go(AppRoutes.login),
+                            onPressed: () {
+                              final from = widget.from;
+                              context.go(Uri(
+                                path: AppRoutes.login,
+                                queryParameters: from == null
+                                    ? null
+                                    : {'from': from},
+                              ).toString());
+                            },
                             icon: const Icon(Icons.login, size: 16),
                             label: const Text('I already have an account')),
                       ],
