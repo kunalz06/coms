@@ -32,6 +32,7 @@ class CallControllerState {
     this.remoteStream,
     this.remoteStreams = const {},
     this.isGroupCall = false,
+    this.isMeeting = false,
     this.microphoneEnabled = true,
     this.cameraEnabled = true,
     this.isMinimized = false,
@@ -54,6 +55,7 @@ class CallControllerState {
   final MediaStream? remoteStream;
   final Map<String, MediaStream> remoteStreams;
   final bool isGroupCall;
+  final bool isMeeting;
   final bool microphoneEnabled;
   final bool cameraEnabled;
   final bool isMinimized;
@@ -76,6 +78,7 @@ class CallControllerState {
     MediaStream? remoteStream,
     Map<String, MediaStream>? remoteStreams,
     bool? isGroupCall,
+    bool? isMeeting,
     bool? microphoneEnabled,
     bool? cameraEnabled,
     bool? isMinimized,
@@ -100,6 +103,7 @@ class CallControllerState {
       remoteStream: clearCall ? null : remoteStream ?? this.remoteStream,
       remoteStreams: clearCall ? const {} : remoteStreams ?? this.remoteStreams,
       isGroupCall: clearCall ? false : isGroupCall ?? this.isGroupCall,
+      isMeeting: clearCall ? false : isMeeting ?? this.isMeeting,
       microphoneEnabled: microphoneEnabled ?? this.microphoneEnabled,
       cameraEnabled: cameraEnabled ?? this.cameraEnabled,
       isMinimized: clearCall ? false : isMinimized ?? this.isMinimized,
@@ -203,6 +207,7 @@ class CallController extends StateNotifier<CallControllerState> {
     required String currentUserId,
     required String conversationId,
     required CallMode mode,
+    bool isMeeting = false,
   }) async {
     try {
       await connect(currentUserId);
@@ -216,6 +221,7 @@ class CallController extends StateNotifier<CallControllerState> {
         peerId: 'Group call',
         mode: mode,
         isGroupCall: true,
+        isMeeting: isMeeting,
         isMinimized: false,
         callStarterUserId: currentUserId,
       );
@@ -229,6 +235,7 @@ class CallController extends StateNotifier<CallControllerState> {
         cameraEnabled: stream.getVideoTracks().isNotEmpty,
         microphoneEnabled: true,
         isGroupCall: true,
+        isMeeting: isMeeting,
         isMinimized: false,
         mode: effectiveMode,
       );

@@ -111,7 +111,7 @@ class _MeetingRoomScreenState extends ConsumerState<MeetingRoomScreen> {
                 ),
                 body: TabBarView(
                   children: [
-                    callActive
+                    callActive && !callState.isMinimized
                         ? const ActiveCallPanel()
                         : _MeetingLobby(
                             meeting: meeting,
@@ -173,6 +173,7 @@ class _MeetingRoomScreenState extends ConsumerState<MeetingRoomScreen> {
             currentUserId: userId,
             conversationId: widget.meetingId,
             mode: mode,
+            isMeeting: true,
           );
     } catch (error) {
       if (!mounted) return;
@@ -516,6 +517,9 @@ class _MeetingWhiteboard extends ConsumerStatefulWidget {
 
 class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
   final _draft = <WhiteboardPoint>[];
+  var _tool = _WhiteboardTool.pen;
+  var _penSize = 3.0;
+  var _eraserSize = 18.0;
 
   @override
   Widget build(BuildContext context) {
@@ -548,7 +552,10 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
                 painter: _WhiteboardPainter(
                   strokes: items,
                   draft: _draft,
+                  draftColor: _activeStrokeColor(context),
+                  draftWidth: _activeStrokeWidth,
                   colorScheme: Theme.of(context).colorScheme,
+                  brightness: Theme.of(context).brightness,
                 ),
                 child: const SizedBox.expand(),
               ),
@@ -562,22 +569,83 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.draw_outlined),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text('Draw with mouse or touch. Whiteboard clears when the meeting ends.'),
-                ),
-                if (widget.isCreator)
-                  TextButton.icon(
-                    onPressed: () => ref.read(meetingRepositoryProvider).clearWhiteboard(
-                          meetingId: widget.meetingId,
-                          actorId: widget.currentUserId,
+                Row(
+                  children: [
+                    SegmentedButton<_WhiteboardTool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: _WhiteboardTool.pen,
+                          icon: Icon(Icons.edit_outlined),
+                          label: Text('Pen'),
                         ),
-                    icon: const Icon(Icons.delete_sweep_outlined),
-                    label: const Text('Clear'),
+                        ButtonSegment(
+                          value: _WhiteboardTool.eraser,
+                          icon: Icon(Icons.cleaning_services_outlined),
+                          label: Text('Eraser'),
+                        ),
+                      ],
+                      selected: {_tool},
+                      onSelectionChanged: canDraw
+                          ? (selected) => setState(() => _tool = selected.first)
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _tool == _WhiteboardTool.pen
+                            ? 'Pen ${_penSize.round()} px'
+                            : 'Eraser ${_eraserSize.round()} px',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                    ),
+                    if (widget.isCreator)
+                      TextButton.icon(
+                        onPressed: () =>
+                            ref.read(meetingRepositoryProvider).clearWhiteboard(
+                                  meetingId: widget.meetingId,
+                                  actorId: widget.currentUserId,
+                                ),
+                        icon: const Icon(Icons.delete_sweep_outlined),
+                        label: const Text('Clear'),
+                      ),
+                  ],
+                ),
+                Slider(
+                  value: _tool == _WhiteboardTool.pen ? _penSize : _eraserSize,
+                  min: _tool == _WhiteboardTool.pen ? 2 : 8,
+                  max: _tool == _WhiteboardTool.pen ? 14 : 42,
+                  divisions: _tool == _WhiteboardTool.pen ? 12 : 17,
+                  label: _tool == _WhiteboardTool.pen
+                      ? '${_penSize.round()} px'
+                      : '${_eraserSize.round()} px',
+                  onChanged: canDraw
+                      ? (value) {
+                          setState(() {
+                            if (_tool == _WhiteboardTool.pen) {
+                              _penSize = value;
+                            } else {
+                              _eraserSize = value;
+                            }
+                          });
+                        }
+                      : null,
                   ),
+                Row(
+                  children: [
+                    Icon(_tool == _WhiteboardTool.pen
+                        ? Icons.draw_outlined
+                        : Icons.cleaning_services_outlined),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Draw or erase with mouse or touch. Whiteboard clears when the meeting ends.',
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -605,9 +673,20 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
           meetingId: widget.meetingId,
           userId: widget.currentUserId,
           points: points,
-          color: Theme.of(context).colorScheme.primary.value,
-          width: 3,
+          color: _activeStrokeColor(context).value,
+          width: _activeStrokeWidth,
         );
+  }
+
+  double get _activeStrokeWidth =>
+      _tool == _WhiteboardTool.pen ? _penSize : _eraserSize;
+
+  Color _activeStrokeColor(BuildContext context) {
+    if (_tool == _WhiteboardTool.eraser) return const Color(0x00000000);
+    final theme = Theme.of(context);
+    return theme.brightness == Brightness.dark
+        ? Colors.white
+        : theme.colorScheme.primary;
   }
 }
 
@@ -615,21 +694,48 @@ class _WhiteboardPainter extends CustomPainter {
   const _WhiteboardPainter({
     required this.strokes,
     required this.draft,
+    required this.draftColor,
+    required this.draftWidth,
     required this.colorScheme,
+    required this.brightness,
   });
 
   final List<WhiteboardStroke> strokes;
   final List<WhiteboardPoint> draft;
+  final Color draftColor;
+  final double draftWidth;
   final ColorScheme colorScheme;
+  final Brightness brightness;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final background = Paint()..color = colorScheme.surfaceContainerLow;
+    final backgroundColor = brightness == Brightness.dark
+        ? const Color(0xFF101418)
+        : colorScheme.surfaceContainerLow;
+    final gridColor = brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.09)
+        : colorScheme.outlineVariant.withValues(alpha: 0.45);
+    final background = Paint()..color = backgroundColor;
     canvas.drawRect(Offset.zero & size, background);
+    _drawGrid(canvas, size, gridColor);
     for (final stroke in strokes) {
-      _drawStroke(canvas, size, stroke.points, Color(stroke.color), stroke.width);
+      final color = Color(stroke.color);
+      _drawStroke(
+        canvas,
+        size,
+        stroke.points,
+        color.alpha == 0 ? backgroundColor : color,
+        stroke.width,
+      );
     }
-    _drawStroke(canvas, size, draft, colorScheme.primary, 3);
+    _drawStroke(
+      canvas,
+      size,
+      draft,
+      draftColor.alpha == 0 ? backgroundColor : draftColor,
+      draftWidth,
+    );
+    _drawLabel(canvas, size, brightness == Brightness.dark ? Colors.white : colorScheme.onSurfaceVariant);
   }
 
   void _drawStroke(
@@ -653,11 +759,41 @@ class _WhiteboardPainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
+  void _drawGrid(Canvas canvas, Size size, Color color) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    const gap = 32.0;
+    for (double x = gap; x < size.width; x += gap) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    for (double y = gap; y < size.height; y += gap) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  void _drawLabel(Canvas canvas, Size size, Color color) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: 'COMMS whiteboard',
+        style: TextStyle(color: color, fontSize: 13),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size.width);
+    textPainter.paint(canvas, const Offset(14, 12));
+  }
+
   @override
   bool shouldRepaint(covariant _WhiteboardPainter oldDelegate) {
-    return oldDelegate.strokes != strokes || oldDelegate.draft != draft;
+    return oldDelegate.strokes != strokes ||
+        oldDelegate.draft != draft ||
+        oldDelegate.draftColor != draftColor ||
+        oldDelegate.draftWidth != draftWidth ||
+        oldDelegate.brightness != brightness;
   }
 }
+
+enum _WhiteboardTool { pen, eraser }
 
 String _meetingLink(String meetingId) {
   return '${Uri.base.origin}${AppRoutes.meetingRoom.replaceFirst(':meetingId', meetingId)}';

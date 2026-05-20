@@ -86,36 +86,24 @@ class AppShell extends ConsumerWidget {
       return Stack(
         children: [
           child,
-          Positioned(
-            right: 14,
-            top: compact ? 14 : null,
-            bottom: compact ? null : 18,
-            child: Material(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () {
-                  ref.read(callControllerProvider.notifier).setMinimized(false);
-                  context.go(AppRoutes.calls);
-                },
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.call, size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        callState.isGroupCall ? 'Group call' : 'Call',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          _DraggableMiniCallWindow(
+            compact: compact,
+            label: callState.isMeeting
+                ? 'Meeting'
+                : callState.isGroupCall
+                    ? 'Group call'
+                    : 'Call',
+            onOpen: () {
+              ref.read(callControllerProvider.notifier).setMinimized(false);
+              if (callState.isMeeting && callState.conversationId != null) {
+                context.go(AppRoutes.meetingRoom.replaceFirst(
+                  ':meetingId',
+                  callState.conversationId!,
+                ));
+              } else {
+                context.go(AppRoutes.calls);
+              }
+            },
           ),
         ],
       );
@@ -196,6 +184,93 @@ class AppShell extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _DraggableMiniCallWindow extends StatefulWidget {
+  const _DraggableMiniCallWindow({
+    required this.compact,
+    required this.label,
+    required this.onOpen,
+  });
+
+  final bool compact;
+  final String label;
+  final VoidCallback onOpen;
+
+  @override
+  State<_DraggableMiniCallWindow> createState() =>
+      _DraggableMiniCallWindowState();
+}
+
+class _DraggableMiniCallWindowState extends State<_DraggableMiniCallWindow> {
+  Offset? _offset;
+  static const _size = Size(190, 54);
+  static const _margin = 14.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final fallback = Offset(
+          constraints.maxWidth - _size.width - _margin,
+          widget.compact ? _margin : constraints.maxHeight - _size.height - 18,
+        );
+        final current = _clamp(_offset ?? fallback, constraints.biggest);
+        return Positioned(
+          left: current.dx,
+          top: current.dy,
+          child: GestureDetector(
+            onPanUpdate: (details) {
+              setState(() {
+                _offset = _clamp(current + details.delta, constraints.biggest);
+              });
+            },
+            child: Material(
+              elevation: 8,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: widget.onOpen,
+                child: SizedBox(
+                  width: _size.width,
+                  height: _size.height,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.drag_indicator, size: 18),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.call, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            widget.label,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                        ),
+                        const Icon(Icons.open_in_full, size: 16),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Offset _clamp(Offset value, Size bounds) {
+    final maxX = (bounds.width - _size.width - _margin).clamp(_margin, double.infinity);
+    final maxY = (bounds.height - _size.height - _margin).clamp(_margin, double.infinity);
+    return Offset(
+      value.dx.clamp(_margin, maxX).toDouble(),
+      value.dy.clamp(_margin, maxY).toDouble(),
     );
   }
 }
