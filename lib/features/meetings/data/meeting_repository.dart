@@ -169,7 +169,11 @@ class MeetingRepository {
       'joined_at': DateTime.now().toUtc().toIso8601String(),
       'left_at': null,
       'hand_raised': false,
-      'can_draw': true,
+      'can_draw': alreadyJoined
+          ? participants
+              .firstWhere((participant) => participant.userId == userId)
+              .canDraw
+          : true,
     });
     await _supabase.from('meetings').update({
       'status': 'live',
@@ -258,6 +262,35 @@ class MeetingRepository {
     await _supabase
         .from('meeting_participants')
         .update({'can_draw': canDraw})
+        .eq('meeting_id', meetingId)
+        .eq('user_id', userId);
+  }
+
+  Future<void> removeParticipant({
+    required String meetingId,
+    required String actorId,
+    required String userId,
+  }) async {
+    final participants = await fetchParticipants(meetingId);
+    final actor = participants
+        .where((participant) => participant.userId == actorId)
+        .firstOrNull;
+    final target = participants
+        .where((participant) => participant.userId == userId)
+        .firstOrNull;
+    if (actor == null || !actor.isCreator) {
+      throw StateError('Only creators can remove people from a meeting.');
+    }
+    if (target == null) return;
+    if (target.role == 'creator') {
+      throw StateError('The meeting creator cannot be removed.');
+    }
+    await _supabase
+        .from('meeting_participants')
+        .update({
+          'left_at': DateTime.now().toUtc().toIso8601String(),
+          'hand_raised': false,
+        })
         .eq('meeting_id', meetingId)
         .eq('user_id', userId);
   }

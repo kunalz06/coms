@@ -324,7 +324,14 @@ class _GlobalCallBanner extends ConsumerWidget {
             TextButton(
               onPressed: () {
                 ref.read(callControllerProvider.notifier).setMinimized(false);
-                context.go(AppRoutes.calls);
+                if (state.isMeeting && state.conversationId != null) {
+                  context.go(AppRoutes.meetingRoom.replaceFirst(
+                    ':meetingId',
+                    state.conversationId!,
+                  ));
+                } else {
+                  context.go(AppRoutes.calls);
+                }
               },
               child: const Text('Open'),
             ),

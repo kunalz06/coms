@@ -138,7 +138,7 @@ class _MeetingRoomScreenState extends ConsumerState<MeetingRoomScreen> {
                       me: me,
                       isCreator: isCreator,
                     ),
-                    _ParticipantsPanel(
+                    _ParticipantsPanelV2(
                       meetingId: widget.meetingId,
                       currentUserId: user.uid,
                       participants: items,
@@ -405,8 +405,204 @@ class _MeetingChatState extends ConsumerState<_MeetingChat> {
   }
 }
 
-class _ParticipantsPanel extends ConsumerWidget {
-  const _ParticipantsPanel({
+class _ParticipantsPanelV2 extends ConsumerWidget {
+  const _ParticipantsPanelV2({
+    required this.meetingId,
+    required this.currentUserId,
+    required this.participants,
+    required this.isCreator,
+  });
+
+  final String meetingId;
+  final String currentUserId;
+  final List<MeetingParticipant> participants;
+  final bool isCreator;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sortedParticipants = [...participants]
+      ..sort((a, b) {
+        if (a.isActive != b.isActive) return a.isActive ? -1 : 1;
+        if (a.handRaised != b.handRaised) return a.handRaised ? -1 : 1;
+        return (a.displayName ?? a.userId).compareTo(b.displayName ?? b.userId);
+      });
+    final activeCount =
+        participants.where((participant) => participant.isActive).length;
+    final raisedCount =
+        participants.where((participant) => participant.handRaised).length;
+
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: sortedParticipants.length + 1,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                Chip(
+                  avatar: const Icon(Icons.people_outline, size: 18),
+                  label: Text('$activeCount active'),
+                ),
+                Chip(
+                  avatar: const Icon(Icons.back_hand_outlined, size: 18),
+                  label: Text('$raisedCount raised'),
+                ),
+                const Chip(
+                  avatar: Icon(Icons.groups_2_outlined, size: 18),
+                  label: Text('10 people max'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final participant = sortedParticipants[index - 1];
+        final isMe = participant.userId == currentUserId;
+        return ListTile(
+          leading: CircleAvatar(
+            backgroundImage: participant.avatarUrl == null
+                ? null
+                : NetworkImage(participant.avatarUrl!),
+            child: participant.avatarUrl == null
+                ? Text(_initial(participant.displayName))
+                : null,
+          ),
+          title: Text(
+            '${participant.displayName ?? 'COMMS user'}${isMe ? ' (you)' : ''}',
+          ),
+          subtitle: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              _ParticipantBadge(label: _roleLabel(participant.role)),
+              _ParticipantBadge(
+                label: participant.isActive ? 'In meeting' : 'Left',
+                icon: participant.isActive
+                    ? Icons.circle
+                    : Icons.logout_outlined,
+              ),
+              if (participant.handRaised)
+                const _ParticipantBadge(
+                  label: 'Hand raised',
+                  icon: Icons.back_hand_outlined,
+                ),
+              if (!participant.canDraw && !participant.isCreator)
+                const _ParticipantBadge(
+                  label: 'Whiteboard off',
+                  icon: Icons.block_outlined,
+                ),
+            ],
+          ),
+          trailing: Wrap(
+            spacing: 4,
+            children: [
+              if (isMe)
+                IconButton(
+                  tooltip: participant.handRaised ? 'Lower hand' : 'Raise hand',
+                  onPressed: () =>
+                      ref.read(meetingRepositoryProvider).setHandRaised(
+                            meetingId: meetingId,
+                            userId: currentUserId,
+                            raised: !participant.handRaised,
+                          ),
+                  icon: Icon(participant.handRaised
+                      ? Icons.back_hand
+                      : Icons.back_hand_outlined),
+                ),
+              if (isCreator && !isMe)
+                PopupMenuButton<String>(
+                  onSelected: (value) async {
+                    final repo = ref.read(meetingRepositoryProvider);
+                    if (value == 'co') {
+                      await repo.assignCoCreator(
+                        meetingId: meetingId,
+                        actorId: currentUserId,
+                        userId: participant.userId,
+                        enabled: participant.role != 'co_creator',
+                      );
+                    } else if (value == 'draw') {
+                      await repo.setDrawingAllowed(
+                        meetingId: meetingId,
+                        actorId: currentUserId,
+                        userId: participant.userId,
+                        canDraw: !participant.canDraw,
+                      );
+                    } else if (value == 'remove') {
+                      await repo.removeParticipant(
+                        meetingId: meetingId,
+                        actorId: currentUserId,
+                        userId: participant.userId,
+                      );
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'co',
+                      child: Text(participant.role == 'co_creator'
+                          ? 'Remove co-creator'
+                          : 'Make co-creator'),
+                    ),
+                    PopupMenuItem(
+                      value: 'draw',
+                      child: Text(participant.canDraw
+                          ? 'Disable whiteboard'
+                          : 'Allow whiteboard'),
+                    ),
+                    if (participant.isActive && participant.role != 'creator')
+                      const PopupMenuItem(
+                        value: 'remove',
+                        child: Text('Remove from room'),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ParticipantBadge extends StatelessWidget {
+  const _ParticipantBadge({
+    required this.label,
+    this.icon,
+  });
+
+  final String label;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 10, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+            ],
+            Text(label, style: Theme.of(context).textTheme.labelSmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class MeetingParticipantsPanelLegacy extends ConsumerWidget {
+  const MeetingParticipantsPanelLegacy({
     required this.meetingId,
     required this.currentUserId,
     required this.participants,
@@ -803,6 +999,14 @@ String _initial(String? value) {
   final trimmed = value?.trim();
   if (trimmed == null || trimmed.isEmpty) return 'C';
   return trimmed.substring(0, 1).toUpperCase();
+}
+
+String _roleLabel(String role) {
+  return switch (role) {
+    'creator' => 'Creator',
+    'co_creator' => 'Co-creator',
+    _ => 'Participant',
+  };
 }
 
 extension _FirstOrNull<T> on Iterable<T> {
