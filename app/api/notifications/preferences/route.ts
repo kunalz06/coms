@@ -15,7 +15,7 @@ type NotificationPreferencesBody = {
 type NotificationSettingsRow = {
   user_id: string;
   browser_notifications_enabled: boolean;
-  call_ringtone_enabled: boolean;
+  ringtone_enabled: boolean;
   notifications_prompted_at: string | null;
 };
 
@@ -26,7 +26,7 @@ function preferencesFromRow(row: NotificationSettingsRow | null) {
     callsEnabled: enabled,
     missedCallsEnabled: enabled,
     showMessagePreview: true,
-    soundEnabled: row?.call_ringtone_enabled ?? true
+    soundEnabled: row?.ringtone_enabled ?? true
   };
 }
 
@@ -34,7 +34,7 @@ async function loadOrCreateSettings(userId: string) {
   const supabase = createServiceSupabase();
   const { data, error } = await supabase
     .from("notification_settings")
-    .select("user_id,browser_notifications_enabled,call_ringtone_enabled,notifications_prompted_at")
+    .select("user_id,browser_notifications_enabled,ringtone_enabled,notifications_prompted_at")
     .eq("user_id", userId)
     .maybeSingle<NotificationSettingsRow>();
   if (error) throw new Error(error.message);
@@ -45,10 +45,10 @@ async function loadOrCreateSettings(userId: string) {
     .insert({
       user_id: userId,
       browser_notifications_enabled: false,
-      call_ringtone_enabled: true,
+      ringtone_enabled: true,
       notifications_prompted_at: new Date().toISOString()
     })
-    .select("user_id,browser_notifications_enabled,call_ringtone_enabled,notifications_prompted_at")
+    .select("user_id,browser_notifications_enabled,ringtone_enabled,notifications_prompted_at")
     .single<NotificationSettingsRow>();
   if (createError) throw new Error(createError.message);
   return created;
@@ -79,12 +79,12 @@ export async function PATCH(request: Request) {
         {
           user_id: decoded.uid,
           browser_notifications_enabled: enabled,
-          call_ringtone_enabled: body.soundEnabled ?? true,
+          ringtone_enabled: body.soundEnabled ?? true,
           notifications_prompted_at: new Date().toISOString()
         },
         { onConflict: "user_id" }
       )
-      .select("user_id,browser_notifications_enabled,call_ringtone_enabled,notifications_prompted_at")
+      .select("user_id,browser_notifications_enabled,ringtone_enabled,notifications_prompted_at")
       .single<NotificationSettingsRow>();
     if (error) throw new Error(error.message);
     return NextResponse.json(preferencesFromRow(data));
