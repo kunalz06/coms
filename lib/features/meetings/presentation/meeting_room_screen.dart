@@ -104,7 +104,7 @@ class _MeetingRoomScreenState extends ConsumerState<MeetingRoomScreen> {
                     tabs: [
                       Tab(icon: Icon(Icons.video_call_outlined), text: 'Room'),
                       Tab(icon: Icon(Icons.chat_outlined), text: 'Chat'),
-                      Tab(icon: Icon(Icons.draw_outlined), text: 'Whiteboard'),
+                      Tab(icon: Icon(Icons.draw_outlined), text: 'Board'),
                       Tab(icon: Icon(Icons.people_outline), text: 'People'),
                     ],
                   ),
@@ -492,7 +492,7 @@ class _ParticipantsPanelV2 extends ConsumerWidget {
                 ),
               if (!participant.canDraw && !participant.isCreator)
                 const _ParticipantBadge(
-                  label: 'Whiteboard off',
+                  label: 'Board off',
                   icon: Icons.block_outlined,
                 ),
             ],
@@ -549,8 +549,8 @@ class _ParticipantsPanelV2 extends ConsumerWidget {
                     PopupMenuItem(
                       value: 'draw',
                       child: Text(participant.canDraw
-                          ? 'Disable whiteboard'
-                          : 'Allow whiteboard'),
+                          ? 'Disable board'
+                          : 'Allow board'),
                     ),
                     if (participant.isActive && participant.role != 'creator')
                       const PopupMenuItem(
@@ -681,8 +681,8 @@ class MeetingParticipantsPanelLegacy extends ConsumerWidget {
                     PopupMenuItem(
                       value: 'draw',
                       child: Text(participant.canDraw
-                          ? 'Disable whiteboard'
-                          : 'Allow whiteboard'),
+                          ? 'Disable board'
+                          : 'Allow board'),
                     ),
                   ],
                 ),
@@ -725,7 +725,7 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
       children: [
         if (!canDraw)
           const MaterialBanner(
-            content: Text('A creator has disabled whiteboard drawing for you.'),
+            content: Text('A creator has disabled board drawing for you.'),
             actions: [SizedBox.shrink()],
           ),
         Expanded(
@@ -758,7 +758,7 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
             ),
             loading: () => const LoadingState(),
             error: (error, _) =>
-                EmptyState(title: 'Could not load whiteboard', message: '$error'),
+                EmptyState(title: 'Could not load board', message: '$error'),
           ),
         ),
         SafeArea(
@@ -837,7 +837,7 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
                     const SizedBox(width: 8),
                     const Expanded(
                       child: Text(
-                        'Draw or erase with mouse or touch. Whiteboard clears when the meeting ends.',
+                        'Draw or erase with mouse or touch. Board clears when the meeting ends.',
                       ),
                     ),
                   ],
@@ -971,7 +971,7 @@ class _WhiteboardPainter extends CustomPainter {
   void _drawLabel(Canvas canvas, Size size, Color color) {
     final textPainter = TextPainter(
       text: TextSpan(
-        text: 'COMMS whiteboard',
+        text: 'COMMS board',
         style: TextStyle(color: color, fontSize: 13),
       ),
       textDirection: TextDirection.ltr,

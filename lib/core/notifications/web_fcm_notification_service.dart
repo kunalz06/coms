@@ -79,6 +79,14 @@ class WebFcmNotificationService {
 
   Stream<RemoteMessage> get foregroundMessages => _foregroundMessages.stream;
 
+  static const _defaultPreferences = NotificationPreferences(
+    messagesEnabled: false,
+    callsEnabled: false,
+    missedCallsEnabled: false,
+    showMessagePreview: true,
+    soundEnabled: true,
+  );
+
   Future<NotificationSettings> permissionStatus() {
     return _messaging.getNotificationSettings();
   }
@@ -105,28 +113,44 @@ class WebFcmNotificationService {
   Future<void> unregisterCurrentToken() async {
     final token = await _messaging.getToken(vapidKey: _config.fcmWebVapidKey);
     if (token == null || token.isEmpty) return;
-    await _api.post('/api/notifications/unregister', data: {'token': token});
+    try {
+      await _api.post('/api/notifications/unregister', data: {'token': token});
+    } on FormatException {
+      // Older backend deployments may not have the notification endpoint yet.
+    }
   }
 
   Future<NotificationPreferences> loadPreferences() async {
-    final response = await _api.get<Map<String, dynamic>>(
-      '/api/notifications/preferences',
-    );
-    return NotificationPreferences.fromJson(response.data ?? const {});
+    try {
+      final response = await _api.get<Map<String, dynamic>>(
+        '/api/notifications/preferences',
+      );
+      return NotificationPreferences.fromJson(response.data ?? const {});
+    } on FormatException {
+      return _defaultPreferences;
+    }
   }
 
   Future<NotificationPreferences> savePreferences(
     NotificationPreferences preferences,
   ) async {
-    final response = await _api.patch<Map<String, dynamic>>(
-      '/api/notifications/preferences',
-      data: preferences.toJson(),
-    );
-    return NotificationPreferences.fromJson(response.data ?? const {});
+    try {
+      final response = await _api.patch<Map<String, dynamic>>(
+        '/api/notifications/preferences',
+        data: preferences.toJson(),
+      );
+      return NotificationPreferences.fromJson(response.data ?? const {});
+    } on FormatException {
+      return preferences;
+    }
   }
 
   Future<void> sendTestNotification() async {
-    await _api.post('/api/notifications/test');
+    try {
+      await _api.post('/api/notifications/test');
+    } on FormatException {
+      // Keep the settings screen usable even before the backend is redeployed.
+    }
   }
 
   Future<void> dispose() async {
@@ -137,12 +161,16 @@ class WebFcmNotificationService {
 
   Future<void> _registerToken(String token) async {
     if (_auth.currentUser == null) return;
-    await _api.post('/api/notifications/register', data: {
-      'platform': 'web_pwa',
-      'provider': 'fcm',
-      'token': token,
-      'userAgent': html.window.navigator.userAgent,
-    });
+    try {
+      await _api.post('/api/notifications/register', data: {
+        'platform': 'web_pwa',
+        'provider': 'fcm',
+        'token': token,
+        'userAgent': html.window.navigator.userAgent,
+      });
+    } on FormatException {
+      // Token generation succeeded; server registration can retry after deploy.
+    }
   }
 
   void _handleForeground(RemoteMessage message) {

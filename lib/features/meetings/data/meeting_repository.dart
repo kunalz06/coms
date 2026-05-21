@@ -257,7 +257,7 @@ class MeetingRepository {
         .where((participant) => participant.userId == actorId)
         .firstOrNull;
     if (actor == null || !actor.isCreator) {
-      throw StateError('Only creators can manage whiteboard permissions.');
+      throw StateError('Only creators can manage board permissions.');
     }
     await _supabase
         .from('meeting_participants')
@@ -336,7 +336,7 @@ class MeetingRepository {
     final participants = await fetchParticipants(meetingId);
     final me = participants.where((participant) => participant.userId == userId).firstOrNull;
     if (me == null || (!me.canDraw && !me.isCreator)) {
-      throw StateError('Whiteboard drawing is disabled for you.');
+      throw StateError('Board drawing is disabled for you.');
     }
     await _supabase.from('meeting_whiteboard_strokes').insert({
       'meeting_id': meetingId,
@@ -355,7 +355,7 @@ class MeetingRepository {
         .where((participant) => participant.userId == actorId)
         .firstOrNull;
     if (actor == null || !actor.isCreator) {
-      throw StateError('Only creators can clear the whiteboard.');
+      throw StateError('Only creators can clear the board.');
     }
     await _supabase.from('meeting_whiteboard_strokes').delete().eq('meeting_id', meetingId);
   }
