@@ -22,7 +22,7 @@ class ChatRepository {
   final SupabaseClient _supabase;
   final ApiClient _api;
   static const _pollInterval = Duration(seconds: 2);
-  static const _maxPollInterval = Duration(seconds: 2);
+  static const _maxPollInterval = Duration(seconds: 30);
   static const _messageWindowSize = 150;
 
   Stream<List<Conversation>> watchConversations(String userId) {
@@ -767,7 +767,9 @@ class ChatRepository {
     final rows = await _withTransientRetry(
       () => _supabase
           .from('messages')
-          .select()
+          .select(
+            '*,message_attachments(*,message_attachment_chunks(*)),message_reactions(*)',
+          )
           .eq('conversation_id', conversationId)
           .order('created_at', ascending: false)
           .limit(_messageWindowSize),
@@ -777,79 +779,12 @@ class ChatRepository {
     final messageRows = rows
         .map((row) => Map<String, dynamic>.from(row))
         .toList(growable: false);
-    final messageIds = messageRows
-        .map((row) => row['id']?.toString())
-        .whereType<String>()
-        .toList(growable: false);
-
-    final attachmentsRows = await _withTransientRetry(
-      () => _supabase
-          .from('message_attachments')
-          .select()
-          .inFilter('message_id', messageIds)
-          .order('created_at'),
-    );
-    final reactionsRows = await _withTransientRetry(
-      () => _supabase
-          .from('message_reactions')
-          .select()
-          .inFilter('message_id', messageIds)
-          .order('created_at'),
-    );
-
-    final attachmentsByMessage = <String, List<Map<String, dynamic>>>{};
-    final attachmentIds = <String>[];
-    for (final row in attachmentsRows) {
-      final data = Map<String, dynamic>.from(row);
-      final messageId = data['message_id']?.toString();
-      if (messageId == null) continue;
-      final attachmentId = data['id']?.toString();
-      if (attachmentId != null) attachmentIds.add(attachmentId);
-      (attachmentsByMessage[messageId] ??= []).add(data);
-    }
-
-    if (attachmentIds.isNotEmpty) {
-      final chunkRows = await _withTransientRetry(
-        () => _supabase
-            .from('message_attachment_chunks')
-            .select()
-            .inFilter('attachment_id', attachmentIds)
-            .order('chunk_index'),
-      );
-      final chunksByAttachment = <String, List<Map<String, dynamic>>>{};
-      for (final row in chunkRows) {
-        final data = Map<String, dynamic>.from(row);
-        final attachmentId = data['attachment_id']?.toString();
-        if (attachmentId == null) continue;
-        (chunksByAttachment[attachmentId] ??= []).add(data);
-      }
-      for (final attachments in attachmentsByMessage.values) {
-        for (final attachment in attachments) {
-          final attachmentId = attachment['id']?.toString();
-          attachment['message_attachment_chunks'] = attachmentId == null
-              ? const []
-              : (chunksByAttachment[attachmentId] ?? const []);
-        }
-      }
-    }
-
-    final reactionsByMessage = <String, List<Map<String, dynamic>>>{};
-    for (final row in reactionsRows) {
-      final data = Map<String, dynamic>.from(row);
-      final messageId = data['message_id']?.toString();
-      if (messageId == null) continue;
-      (reactionsByMessage[messageId] ??= []).add(data);
-    }
-
     final messages = <Message>[];
     for (final messageRow in messageRows) {
-      final messageId = messageRow['id']?.toString();
-      messageRow['message_attachments'] = messageId == null
-          ? const []
-          : (attachmentsByMessage[messageId] ?? const []);
-      messageRow['message_reactions'] = messageId == null
-          ? const []
-          : (reactionsByMessage[messageId] ?? const []);
+      messageRow['message_attachments'] =
+          messageRow['message_attachments'] ?? const [];
+      messageRow['message_reactions'] =
+          messageRow['message_reactions'] ?? const [];
       messages.add(Message.fromJson(messageRow));
     }
     messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));

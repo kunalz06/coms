@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyFirebaseRequest } from "@/lib/firebase-admin";
-import { sendWebPushToUsers } from "@/lib/push-notifications";
+import { sendFcmDataToUsers } from "@/lib/fcm-notifications";
 import { createServiceSupabase } from "@/lib/supabase";
 import type { Conversation, Message, MessageKind, UserProfile } from "@/types";
 
@@ -13,6 +13,8 @@ type MessagePushBody = {
 type NotificationSettingRow = {
   user_id: string;
   browser_notifications_enabled: boolean;
+  messages_enabled: boolean | null;
+  show_message_preview: boolean | null;
 };
 
 type ConversationMuteRow = {
@@ -69,10 +71,15 @@ export async function POST(request: Request) {
 
     if (!recipientIds.length) return NextResponse.json({ sent: 0 });
 
-    const [{ data: settings, error: settingsError }, { data: mutes, error: mutesError }, { data: sender, error: senderError }] = await Promise.all([
+    const [
+      { data: settings, error: settingsError },
+      { data: mutes, error: mutesError },
+      { data: blocks, error: blocksError },
+      { data: sender, error: senderError }
+    ] = await Promise.all([
       supabase
         .from("notification_settings")
-        .select("user_id,browser_notifications_enabled")
+        .select("user_id,browser_notifications_enabled,messages_enabled,show_message_preview")
         .in("user_id", recipientIds)
         .eq("browser_notifications_enabled", true)
         .returns<NotificationSettingRow[]>(),
@@ -82,28 +89,62 @@ export async function POST(request: Request) {
         .eq("conversation_id", conversation.id)
         .in("user_id", recipientIds)
         .returns<ConversationMuteRow[]>(),
+      supabase
+        .from("blocks")
+        .select("blocker_id")
+        .eq("blocked_id", message.sender_id)
+        .in("blocker_id", recipientIds)
+        .returns<Array<{ blocker_id: string }>>(),
       supabase.from("user_profiles").select("*").eq("id", message.sender_id).single<UserProfile>()
     ]);
     if (settingsError) throw settingsError;
     if (mutesError) throw mutesError;
+    if (blocksError) throw blocksError;
     if (senderError) throw senderError;
 
-    const enabledRecipients = new Set(settings.map((setting) => setting.user_id));
+    const enabledRecipients = new Set(settings.filter((setting) => setting.messages_enabled !== false).map((setting) => setting.user_id));
+    const previewSafeRecipients = new Set(settings.filter((setting) => setting.show_message_preview !== false).map((setting) => setting.user_id));
     const mutedRecipients = new Set((mutes ?? []).filter(isMuted).map((mute) => mute.user_id));
-    const finalRecipients = recipientIds.filter((id) => enabledRecipients.has(id) && !mutedRecipients.has(id));
+    const blockedRecipients = new Set((blocks ?? []).map((block) => block.blocker_id));
+    const finalRecipients = recipientIds.filter((id) => enabledRecipients.has(id) && !mutedRecipients.has(id) && !blockedRecipients.has(id));
     if (!finalRecipients.length) return NextResponse.json({ sent: 0 });
 
     const senderName = sender.full_name || "Someone";
     const title = conversation.type === "group" ? conversation.title ?? "Group message" : senderName;
     const body = messagePreview(message.kind, message.content, senderName);
-    const result = await sendWebPushToUsers(supabase, finalRecipients, {
-      type: "message",
-      title,
-      body,
-      tag: `message:${conversation.id}`,
-      url: `/chats/${conversation.id}`,
-      conversationId: conversation.id
-    });
+    const normalRecipients = finalRecipients.filter((id) => previewSafeRecipients.has(id));
+    const protectedRecipients = finalRecipients.filter((id) => !previewSafeRecipients.has(id));
+    const [normalResult, protectedResult] = await Promise.all([
+      normalRecipients.length
+        ? sendFcmDataToUsers(supabase, normalRecipients, {
+            type: "message",
+            title,
+            body,
+            tag: `chat-${conversation.id}`,
+            targetUrl: `/chats/${conversation.id}?messageId=${message.id}`,
+            conversationId: conversation.id,
+            messageId: message.id,
+            privacy: "normal"
+          })
+        : Promise.resolve({ sent: 0, failed: 0, skipped: 0 }),
+      protectedRecipients.length
+        ? sendFcmDataToUsers(supabase, protectedRecipients, {
+            type: "message",
+            title: "COMMS",
+            body: "New message",
+            tag: "comms-protected-message",
+            targetUrl: "/app",
+            conversationId: conversation.id,
+            messageId: message.id,
+            privacy: "protected"
+          })
+        : Promise.resolve({ sent: 0, failed: 0, skipped: 0 })
+    ]);
+    const result = {
+      sent: normalResult.sent + protectedResult.sent,
+      failed: normalResult.failed + protectedResult.failed,
+      skipped: normalResult.skipped + protectedResult.skipped
+    };
 
     return NextResponse.json(result);
   } catch (error) {

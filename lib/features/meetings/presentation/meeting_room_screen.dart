@@ -875,10 +875,15 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
             color: color,
             width: width,
           );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
+      final reason = error.toString().replaceFirst('PostgrestException(message: ', '').trim();
+      final shortReason =
+          reason.length > 160 ? '${reason.substring(0, 157)}...' : reason;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not save board stroke.')),
+        SnackBar(
+          content: Text('Could not save board stroke: $shortReason'),
+        ),
       );
     }
   }

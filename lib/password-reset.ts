@@ -236,7 +236,7 @@ function otpEmailContent(label: string, otp: string) {
 }
 
 async function queueOtpEmail(email: string, subject: string, label: string, otp: string) {
-  await deliverOtpEmail(email, subject, label, otp);
+  void deliverOtpEmail(email, subject, label, otp).catch(() => undefined);
 }
 
 async function deliverOtpEmail(email: string, subject: string, label: string, otp: string) {
@@ -256,7 +256,6 @@ async function deliverOtpEmail(email: string, subject: string, label: string, ot
       provider: process.env.OTP_EMAIL_WEBHOOK_URL ? "vercel-email-webhook" : "gmail-smtp",
       message
     });
-    throw new Error("Could not send OTP email. Check the configured OTP email delivery service.");
   }
 }
 

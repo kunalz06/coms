@@ -707,7 +707,7 @@ export async function runRetentionCleanup(supabase: any) {
     .select("id")
     .lt("retention_expires_at", now)
     .is("content_redacted_at", null)
-    .in("archive_status", ["archived", "redacted"])
+    .in("archive_status", ["pending", "partial", "archived", "skipped"])
     .limit(2000);
   if (error) throw new Error(error.message);
   const ids = (candidates ?? []).map((row: { id: string }) => row.id);

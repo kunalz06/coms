@@ -4,20 +4,24 @@ import { createServiceSupabase } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
+type UnregisterBody = {
+  token?: string;
+};
+
 export async function POST(request: Request) {
   try {
     const decoded = await verifyFirebaseRequest(request);
+    const body = (await request.json().catch(() => ({}))) as UnregisterBody;
     const supabase = createServiceSupabase();
-    const { error } = await supabase
-      .from("notification_settings")
-      .upsert(
-        {
-          user_id: decoded.uid,
-          browser_notifications_enabled: false,
-          notifications_prompted_at: new Date().toISOString()
-        },
-        { onConflict: "user_id" }
-      );
+    const query = supabase
+      .from("notification_devices")
+      .update({ enabled: false, updated_at: new Date().toISOString() })
+      .eq("user_id", decoded.uid)
+      .eq("provider", "fcm")
+      .eq("platform", "web_pwa");
+    const { error } = body.token?.trim()
+      ? await query.eq("token", body.token.trim())
+      : await query;
     if (error) throw new Error(error.message);
     return NextResponse.json({ unregistered: true });
   } catch (error) {

@@ -23,11 +23,31 @@ export async function POST(request: Request) {
     }
 
     const supabase = createServiceSupabase();
+    const now = new Date().toISOString();
+    const { error: deviceError } = await supabase.from("notification_devices").upsert(
+      {
+        user_id: decoded.uid,
+        platform: "web_pwa",
+        provider: "fcm",
+        token: body.token.trim(),
+        enabled: true,
+        user_agent: body.userAgent?.slice(0, 500) ?? request.headers.get("user-agent"),
+        last_seen_at: now,
+        updated_at: now
+      },
+      { onConflict: "provider,token" }
+    );
+    if (deviceError) throw new Error(deviceError.message);
+
     const { error } = await supabase.from("notification_settings").upsert(
       {
         user_id: decoded.uid,
         browser_notifications_enabled: true,
-        notifications_prompted_at: new Date().toISOString()
+        messages_enabled: true,
+        calls_enabled: true,
+        missed_calls_enabled: true,
+        notifications_prompted_at: now,
+        updated_at: now
       },
       { onConflict: "user_id" }
     );

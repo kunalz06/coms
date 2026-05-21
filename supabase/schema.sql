@@ -49,10 +49,21 @@ create table if not exists notification_settings (
   user_id text primary key references user_profiles(id) on delete cascade,
   browser_notifications_enabled boolean not null default false,
   ringtone_enabled boolean not null default true,
+  messages_enabled boolean not null default false,
+  calls_enabled boolean not null default false,
+  missed_calls_enabled boolean not null default false,
+  show_message_preview boolean not null default true,
+  sound_enabled boolean not null default true,
   notifications_prompted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table notification_settings add column if not exists messages_enabled boolean not null default false;
+alter table notification_settings add column if not exists calls_enabled boolean not null default false;
+alter table notification_settings add column if not exists missed_calls_enabled boolean not null default false;
+alter table notification_settings add column if not exists show_message_preview boolean not null default true;
+alter table notification_settings add column if not exists sound_enabled boolean not null default true;
 
 create table if not exists push_subscriptions (
   id uuid primary key default gen_random_uuid(),
@@ -63,6 +74,31 @@ create table if not exists push_subscriptions (
   user_agent text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists notification_devices (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references user_profiles(id) on delete cascade,
+  platform text not null default 'web_pwa' check (platform in ('web_pwa')),
+  provider text not null default 'fcm' check (provider in ('fcm')),
+  token text not null,
+  enabled boolean not null default true,
+  user_agent text,
+  device_label text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  unique (provider, token)
+);
+
+create table if not exists notification_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references user_profiles(id) on delete cascade,
+  notification_type text not null,
+  target_id text,
+  status text not null check (status in ('queued', 'sent', 'failed', 'skipped')),
+  reason text,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists password_reset_otps (
@@ -131,6 +167,16 @@ create table if not exists conversation_mutes (
   muted_until timestamptz,
   created_at timestamptz not null default now(),
   unique (conversation_id, user_id)
+);
+
+create table if not exists conversation_notification_settings (
+  user_id text not null references user_profiles(id) on delete cascade,
+  conversation_id uuid not null references conversations(id) on delete cascade,
+  muted boolean not null default false,
+  muted_until timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, conversation_id)
 );
 
 create table if not exists conversation_pins (
@@ -369,6 +415,9 @@ create index if not exists archive_batches_conversation_idx on archive_batches(c
 create index if not exists message_archives_user_message_idx on message_archives(user_id, message_id);
 create index if not exists message_archives_batch_idx on message_archives(archive_batch_id);
 create index if not exists push_subscriptions_user_idx on push_subscriptions(user_id);
+create index if not exists notification_devices_user_idx on notification_devices(user_id);
+create index if not exists notification_events_user_created_idx on notification_events(user_id, created_at desc);
+create index if not exists conversation_notification_settings_conversation_idx on conversation_notification_settings(conversation_id);
 create index if not exists conversations_user_one_idx on conversations(user_one_id);
 create index if not exists conversations_user_two_idx on conversations(user_two_id);
 create index if not exists conversations_type_idx on conversations(type);
@@ -524,6 +573,14 @@ for each row execute function touch_updated_at();
 
 drop trigger if exists push_subscriptions_touch_updated_at on push_subscriptions;
 create trigger push_subscriptions_touch_updated_at before update on push_subscriptions
+for each row execute function touch_updated_at();
+
+drop trigger if exists notification_devices_touch_updated_at on notification_devices;
+create trigger notification_devices_touch_updated_at before update on notification_devices
+for each row execute function touch_updated_at();
+
+drop trigger if exists conversation_notification_settings_touch_updated_at on conversation_notification_settings;
+create trigger conversation_notification_settings_touch_updated_at before update on conversation_notification_settings
 for each row execute function touch_updated_at();
 
 drop trigger if exists meeting_participants_guard_update on meeting_participants;
@@ -968,6 +1025,8 @@ grant execute on function clear_group_messages_for_everyone(uuid, timestamptz, t
 alter table user_profiles enable row level security;
 alter table notification_settings enable row level security;
 alter table push_subscriptions enable row level security;
+alter table notification_devices enable row level security;
+alter table notification_events enable row level security;
 alter table backup_preferences enable row level security;
 alter table archive_batches enable row level security;
 alter table message_archives enable row level security;
@@ -976,6 +1035,7 @@ alter table blocks enable row level security;
 alter table conversations enable row level security;
 alter table conversation_members enable row level security;
 alter table conversation_mutes enable row level security;
+alter table conversation_notification_settings enable row level security;
 alter table conversation_pins enable row level security;
 alter table messages enable row level security;
 alter table message_deletions enable row level security;
@@ -1035,6 +1095,27 @@ with check (user_id = app_user_id());
 drop policy if exists "push subscriptions removed by owner" on push_subscriptions;
 create policy "push subscriptions removed by owner" on push_subscriptions
 for delete using (user_id = app_user_id());
+
+drop policy if exists "notification devices visible to owner" on notification_devices;
+create policy "notification devices visible to owner" on notification_devices
+for select using (user_id = app_user_id());
+
+drop policy if exists "notification devices created by owner" on notification_devices;
+create policy "notification devices created by owner" on notification_devices
+for insert with check (user_id = app_user_id());
+
+drop policy if exists "notification devices updated by owner" on notification_devices;
+create policy "notification devices updated by owner" on notification_devices
+for update using (user_id = app_user_id())
+with check (user_id = app_user_id());
+
+drop policy if exists "notification devices removed by owner" on notification_devices;
+create policy "notification devices removed by owner" on notification_devices
+for delete using (user_id = app_user_id());
+
+drop policy if exists "notification events visible to owner" on notification_events;
+create policy "notification events visible to owner" on notification_events
+for select using (user_id = app_user_id());
 
 drop policy if exists "backup preferences visible to owner" on backup_preferences;
 create policy "backup preferences visible to owner" on backup_preferences
@@ -1163,6 +1244,23 @@ with check (user_id = app_user_id() and user_is_conversation_participant(convers
 
 drop policy if exists "conversation mutes removed by owner" on conversation_mutes;
 create policy "conversation mutes removed by owner" on conversation_mutes
+for delete using (user_id = app_user_id());
+
+drop policy if exists "conversation notification settings visible to owner" on conversation_notification_settings;
+create policy "conversation notification settings visible to owner" on conversation_notification_settings
+for select using (user_id = app_user_id());
+
+drop policy if exists "conversation notification settings created by owner" on conversation_notification_settings;
+create policy "conversation notification settings created by owner" on conversation_notification_settings
+for insert with check (user_id = app_user_id() and user_is_conversation_participant(conversation_id, app_user_id()));
+
+drop policy if exists "conversation notification settings updated by owner" on conversation_notification_settings;
+create policy "conversation notification settings updated by owner" on conversation_notification_settings
+for update using (user_id = app_user_id())
+with check (user_id = app_user_id() and user_is_conversation_participant(conversation_id, app_user_id()));
+
+drop policy if exists "conversation notification settings removed by owner" on conversation_notification_settings;
+create policy "conversation notification settings removed by owner" on conversation_notification_settings
 for delete using (user_id = app_user_id());
 
 drop policy if exists "conversation pins visible to owner" on conversation_pins;
@@ -1481,6 +1579,41 @@ drop policy if exists "presence written by self" on presence_events;
 create policy "presence written by self" on presence_events
 for insert with check (user_id = app_user_id());
 
+create or replace function close_expired_empty_meetings()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  closed_count integer := 0;
+begin
+  with ended as (
+    update meetings
+    set status = 'ended',
+        ended_at = now(),
+        updated_at = now()
+    where status = 'live'
+      and empty_since is not null
+      and empty_since < now() - interval '2 minutes'
+    returning id
+  ),
+  deleted_chat as (
+    delete from meeting_chat_messages
+    where meeting_id in (select id from ended)
+  ),
+  deleted_board as (
+    delete from meeting_whiteboard_strokes
+    where meeting_id in (select id from ended)
+  )
+  select count(*) into closed_count from ended;
+
+  return closed_count;
+end;
+$$;
+
+grant execute on function close_expired_empty_meetings() to anon, authenticated;
+
 do $$
 declare
   table_name text;
@@ -1489,6 +1622,9 @@ begin
     'user_profiles',
     'notification_settings',
     'push_subscriptions',
+    'notification_devices',
+    'notification_events',
+    'conversation_notification_settings',
     'backup_preferences',
     'archive_batches',
     'message_archives',
@@ -1505,7 +1641,12 @@ begin
     'message_reactions',
     'call_sessions',
     'group_call_sessions',
-    'group_call_participants'
+    'group_call_participants',
+    'meetings',
+    'meeting_participants',
+    'meeting_chat_messages',
+    'meeting_whiteboard_strokes',
+    'presence_events'
   ]
   loop
     if not exists (

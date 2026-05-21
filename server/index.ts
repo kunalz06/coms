@@ -1,7 +1,9 @@
 import { createServer, type ServerResponse } from "node:http";
 import next from "next";
+import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getMessaging } from "firebase-admin/messaging";
 import { createClient } from "@supabase/supabase-js";
-import webpush from "web-push";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { GroupCallInviteManager, isGroupCallMessage } from "./group-call-invites";
 
@@ -42,18 +44,15 @@ type DirectConversationRow = {
   user_one_id: string | null;
   user_two_id: string | null;
 };
-type PushSubscriptionRow = {
-  endpoint: string;
-  p256dh: string;
-  auth: string;
-};
 type PushPayload = {
   type: string;
   title: string;
   body: string;
   tag?: string;
   url?: string;
+  targetUrl?: string;
   conversationId?: string;
+  callId?: string;
 };
 
 type ClientSocket = WebSocket & {
@@ -76,6 +75,7 @@ const DIRECT_CALL_RING_MS = 45_000;
 const MAX_PENDING_SIGNALS_PER_CALL = 80;
 const MAX_SIGNALING_BYTES = 96 * 1024;
 const SELF_PING_INTERVAL_MS = 5 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
 function writeCorsHeaders(response: ServerResponse, origin?: string) {
   const configured = process.env.ALLOWED_ORIGIN?.trim();
@@ -95,6 +95,40 @@ function serviceSupabase() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
   return createClient(url, key, { auth: { persistSession: false } });
+}
+
+function firebasePrivateKey() {
+  return process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n") ?? null;
+}
+
+function ensureFirebaseAdmin() {
+  if (getApps().length) return;
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = firebasePrivateKey();
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error("Firebase Admin credentials are not configured.");
+  }
+  initializeApp({
+    credential: cert({ projectId, clientEmail, privateKey })
+  });
+}
+
+async function verifyFirebaseIdToken(token: string) {
+  ensureFirebaseAdmin();
+  const decoded = await getAuth().verifyIdToken(token, true);
+  return decoded.uid;
+}
+
+function fcmData(payload: PushPayload) {
+  return Object.fromEntries(
+    Object.entries({
+      ...payload,
+      targetUrl: payload.targetUrl ?? payload.url ?? "/calls"
+    })
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => [key, String(value)])
+  );
 }
 
 function allowedOrigin(origin: string | undefined) {
@@ -147,6 +181,27 @@ function startSelfPing() {
   }, SELF_PING_INTERVAL_MS);
   timer.unref?.();
   void ping();
+  return timer;
+}
+
+async function runBackendCleanup() {
+  const supabase = serviceSupabase();
+  if (!supabase) return;
+  const { error } = await supabase.rpc("close_expired_empty_meetings");
+  if (error) {
+    console.warn("Meeting cleanup failed", { message: error.message });
+  }
+}
+
+function startBackendCleanup() {
+  const cleanup = () => void runBackendCleanup().catch((error) => {
+    console.warn("Backend cleanup failed", {
+      message: error instanceof Error ? error.message : String(error)
+    });
+  });
+  const timer = setInterval(cleanup, CLEANUP_INTERVAL_MS);
+  timer.unref?.();
+  cleanup();
   return timer;
 }
 
@@ -506,60 +561,67 @@ function expirePendingDirectCalls() {
   }
 }
 
-let vapidConfigured = false;
-
-function configureVapid() {
-  if (vapidConfigured) return true;
-  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
-  const privateKey = process.env.VAPID_PRIVATE_KEY?.trim();
-  if (!publicKey || !privateKey) return false;
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT ?? "mailto:admin@comms.local", publicKey, privateKey);
-  vapidConfigured = true;
-  return true;
-}
-
 async function sendPushToUser(userId: string, payload?: PushPayload) {
   const supabase = serviceSupabase();
-  if (!supabase || !configureVapid()) return false;
+  if (!supabase) return false;
 
   const { data: setting, error: settingError } = await supabase
     .from("notification_settings")
-    .select("browser_notifications_enabled")
+    .select("browser_notifications_enabled,calls_enabled,missed_calls_enabled")
     .eq("user_id", userId)
-    .maybeSingle<{ browser_notifications_enabled: boolean }>();
+    .maybeSingle<{ browser_notifications_enabled: boolean; calls_enabled?: boolean | null; missed_calls_enabled?: boolean | null }>();
   if (settingError || setting?.browser_notifications_enabled !== true) return false;
+  if (payload?.type === "call" && setting.calls_enabled === false) return false;
+  if (payload?.type === "missed_call" && setting.missed_calls_enabled === false) return false;
 
-  const { data, error } = await supabase.from("push_subscriptions").select("endpoint,p256dh,auth").eq("user_id", userId).returns<PushSubscriptionRow[]>();
+  const { data, error } = await supabase
+    .from("notification_devices")
+    .select("id,token")
+    .eq("user_id", userId)
+    .eq("provider", "fcm")
+    .eq("platform", "web_pwa")
+    .eq("enabled", true)
+    .returns<Array<{ id: string; token: string }>>();
   if (error || !data?.length) return false;
 
-  const body = JSON.stringify(
+  ensureFirebaseAdmin();
+  const messaging = getMessaging();
+  const dataPayload = fcmData(
     payload ?? {
       type: "call",
       title: "Incoming COMMS call",
       body: "Open COMMS to answer.",
       tag: `call:${userId}`,
-      url: "/calls"
+      targetUrl: "/calls"
     }
   );
   const results = await Promise.all(
-    data.map(async (subscription) => {
+    data.map(async (device) => {
       try {
-        await webpush.sendNotification(
-          {
-            endpoint: subscription.endpoint,
-            keys: {
-              p256dh: subscription.p256dh,
-              auth: subscription.auth
-            }
-          },
-          body,
-          { TTL: 60, urgency: "high" }
-        );
+        await messaging.send({
+          token: device.token,
+          data: dataPayload,
+          webpush: { fcmOptions: { link: dataPayload.targetUrl ?? "/calls" } }
+        });
+        await supabase.from("notification_events").insert({
+          user_id: userId,
+          notification_type: dataPayload.type ?? "call",
+          target_id: dataPayload.callId ?? dataPayload.conversationId ?? null,
+          status: "sent"
+        });
         return true;
       } catch (error: any) {
-        if (error?.statusCode === 404 || error?.statusCode === 410) {
-          await supabase.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
+        const code = String(error?.code ?? "");
+        if (code.includes("registration-token-not-registered") || code.includes("invalid-registration-token") || code.includes("invalid-argument")) {
+          await supabase.from("notification_devices").update({ enabled: false, updated_at: new Date().toISOString() }).eq("id", device.id);
         }
+        await supabase.from("notification_events").insert({
+          user_id: userId,
+          notification_type: dataPayload.type ?? "call",
+          target_id: dataPayload.callId ?? dataPayload.conversationId ?? null,
+          status: "failed",
+          reason: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)
+        });
         return false;
       }
     })
@@ -621,9 +683,19 @@ void app.prepare().then(() => {
       rejectUpgrade(socket, 403, "Forbidden");
       return;
     }
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
-    });
+    const token = url.searchParams.get("token")?.trim();
+    if (!token) {
+      rejectUpgrade(socket, 401, "Unauthorized");
+      return;
+    }
+    void verifyFirebaseIdToken(token)
+      .then((userId) => {
+        wss.handleUpgrade(request, socket, head, (ws: ClientSocket) => {
+          ws.userId = userId;
+          wss.emit("connection", ws, request);
+        });
+      })
+      .catch(() => rejectUpgrade(socket, 401, "Unauthorized"));
   });
 
   wss.on("connection", (socket: ClientSocket) => {
@@ -646,23 +718,27 @@ void app.prepare().then(() => {
         }
 
         if (message.type === "register") {
-          socket.userId = message.userId;
-          addClient(message.userId, socket);
-          console.log("Signaling client registered", { userId: message.userId, sockets: clients.get(message.userId)?.size ?? 0 });
-          groupCalls.notifyAvailableCallsForUser(message.userId);
-          for (const session of directCallsForUser(message.userId)) {
-            if (activeCallsByUser.get(message.userId) === session.callId) continue;
-            const peerId = session.from === message.userId ? session.to : session.from;
+          const authenticatedUserId = socket.userId;
+          if (!authenticatedUserId || message.userId !== authenticatedUserId) {
+            send(socket, { type: "error", message: "Signaling identity mismatch." });
+            return;
+          }
+          addClient(authenticatedUserId, socket);
+          console.log("Signaling client registered", { userId: authenticatedUserId, sockets: clients.get(authenticatedUserId)?.size ?? 0 });
+          groupCalls.notifyAvailableCallsForUser(authenticatedUserId);
+          for (const session of directCallsForUser(authenticatedUserId)) {
+            if (activeCallsByUser.get(authenticatedUserId) === session.callId) continue;
+            const peerId = session.from === authenticatedUserId ? session.to : session.from;
             send(socket, {
               type: "call-available",
               callId: session.callId,
               from: peerId,
-              to: message.userId,
+              to: authenticatedUserId,
               mode: session.mode,
               conversationId: session.conversationId
             });
           }
-          flushPendingDirectCallsForUser(message.userId);
+          flushPendingDirectCallsForUser(authenticatedUserId);
           return;
         }
 
@@ -712,8 +788,9 @@ void app.prepare().then(() => {
               type: "call",
               title: directMessage.mode === "video" ? "Incoming video call" : "Incoming audio call",
               body: "Open COMMS to answer.",
-              tag: `call:${directMessage.callId}`,
-              url: "/calls",
+              tag: `call-${directMessage.callId}`,
+              targetUrl: `/calls/${directMessage.callId}`,
+              callId: directMessage.callId,
               conversationId: directMessage.conversationId
             });
             if (!pushSent) {
@@ -824,10 +901,12 @@ void app.prepare().then(() => {
     });
   }, 30_000);
   const selfPing = startSelfPing();
+  const backendCleanup = startBackendCleanup();
 
   wss.on("close", () => {
     clearInterval(heartbeat);
     clearInterval(selfPing);
+    clearInterval(backendCleanup);
   });
 
   server.listen(port, hostname, () => {

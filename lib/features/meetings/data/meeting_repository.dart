@@ -103,12 +103,30 @@ class MeetingRepository {
   }
 
   Stream<List<WhiteboardStroke>> watchStrokes(String meetingId) {
-    return _supabase
-        .from('meeting_whiteboard_strokes')
-        .stream(primaryKey: ['id'])
-        .eq('meeting_id', meetingId)
-        .order('created_at')
-        .asyncMap((_) => fetchStrokes(meetingId));
+    StreamSubscription<List<Map<String, dynamic>>>? subscription;
+    final controller = StreamController<List<WhiteboardStroke>>();
+    controller.onListen = () async {
+      try {
+        controller.add(await fetchStrokes(meetingId));
+      } catch (error, stackTrace) {
+        controller.addError(error, stackTrace);
+      }
+      subscription = _supabase
+          .from('meeting_whiteboard_strokes')
+          .stream(primaryKey: ['id'])
+          .eq('meeting_id', meetingId)
+          .order('created_at')
+          .listen(
+            (rows) {
+              controller.add(rows
+                  .map((row) => WhiteboardStroke.fromJson(Map<String, dynamic>.from(row)))
+                  .toList(growable: false));
+            },
+            onError: controller.addError,
+          );
+    };
+    controller.onCancel = () => subscription?.cancel();
+    return controller.stream;
   }
 
   Future<List<WhiteboardStroke>> fetchStrokes(String meetingId) async {

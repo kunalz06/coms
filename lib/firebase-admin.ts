@@ -1,5 +1,6 @@
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import { getMessaging } from "firebase-admin/messaging";
 
 type FirebaseDecoded = {
   uid: string;
@@ -32,6 +33,11 @@ function ensureFirebaseAdmin() {
 export function firebaseAdminAuth() {
   ensureFirebaseAdmin();
   return getAuth();
+}
+
+export function firebaseAdminMessaging() {
+  ensureFirebaseAdmin();
+  return getMessaging();
 }
 
 function bearerToken(request: Request) {

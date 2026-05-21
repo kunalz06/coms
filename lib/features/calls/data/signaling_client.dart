@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -8,13 +9,14 @@ import '../../../core/config/app_config.dart';
 import '../domain/call_signal.dart';
 
 final signalingClientProvider = Provider<SignalingClient>((ref) {
-  return SignalingClient(ref.watch(appConfigProvider));
+  return SignalingClient(ref.watch(appConfigProvider), FirebaseAuth.instance);
 });
 
 class SignalingClient {
-  SignalingClient(this._config);
+  SignalingClient(this._config, this._auth);
 
   final AppConfig _config;
+  final FirebaseAuth _auth;
   WebSocketChannel? _channel;
   Future<void>? _connecting;
   DateTime? _retryAfter;
@@ -60,7 +62,18 @@ class SignalingClient {
   Future<void> _connect(String userId) async {
     WebSocketChannel? channel;
     try {
-      channel = WebSocketChannel.connect(Uri.parse(_config.signalingUrl));
+      final token = await _auth.currentUser?.getIdToken();
+      if (token == null || token.isEmpty) {
+        throw StateError('Signaling requires a signed-in user.');
+      }
+      final baseUri = Uri.parse(_config.signalingUrl);
+      final uri = baseUri.replace(
+        queryParameters: {
+          ...baseUri.queryParameters,
+          'token': token,
+        },
+      );
+      channel = WebSocketChannel.connect(uri);
       _channel = channel;
 
       channel.stream.listen(
