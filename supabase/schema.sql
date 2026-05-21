@@ -418,7 +418,7 @@ create table if not exists meeting_whiteboard_strokes (
   meeting_id uuid not null references meetings(id) on delete cascade,
   user_id text not null references user_profiles(id) on delete cascade,
   points jsonb not null default '[]'::jsonb,
-  color integer not null default 4282020808,
+  color bigint not null default 4282020808,
   width numeric not null default 3,
   created_at timestamptz not null default now()
 );

@@ -864,14 +864,23 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
 
   Future<void> _commitStroke() async {
     final points = List<WhiteboardPoint>.from(_draft);
+    final color = _activeStrokeColor(context).value;
+    final width = _activeStrokeWidth;
     setState(_draft.clear);
-    await ref.read(meetingRepositoryProvider).addStroke(
-          meetingId: widget.meetingId,
-          userId: widget.currentUserId,
-          points: points,
-          color: _activeStrokeColor(context).value,
-          width: _activeStrokeWidth,
-        );
+    try {
+      await ref.read(meetingRepositoryProvider).addStroke(
+            meetingId: widget.meetingId,
+            userId: widget.currentUserId,
+            points: points,
+            color: color,
+            width: width,
+          );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save board stroke.')),
+      );
+    }
   }
 
   double get _activeStrokeWidth =>

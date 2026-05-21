@@ -149,7 +149,7 @@ class WhiteboardStroke {
       meetingId: json['meeting_id'] as String,
       userId: json['user_id'] as String,
       points: pointList,
-      color: json['color'] as int? ?? 0xFF1A73E8,
+      color: _int(json['color'], 0xFF1A73E8),
       width: (json['width'] as num?)?.toDouble() ?? 3,
       createdAt:
           _date(json['created_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
@@ -176,4 +176,10 @@ class WhiteboardPoint {
 DateTime? _date(Object? value) {
   if (value == null) return null;
   return DateTime.tryParse(value.toString());
+}
+
+int _int(Object? value, int fallback) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? fallback;
 }
