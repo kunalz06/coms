@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -17,11 +15,26 @@ class MeetingRepository {
 
   Stream<List<Meeting>> watchMeetings(String userId) {
     return _supabase
+        .from('meetings')
+        .stream(primaryKey: ['id'])
+        .inFilter('id', _getMeetingIdsStream(userId))
+        .order('updated_at', ascending: false)
+        .map((rows) => rows
+            .map((row) => Meeting.fromJson(Map<String, dynamic>.from(row)))
+            .toList(growable: false))
+        .handleError((_) {});
+  }
+
+  Stream<List<String>> _getMeetingIdsStream(String userId) {
+    return _supabase
         .from('meeting_participants')
         .stream(primaryKey: ['meeting_id', 'user_id'])
         .eq('user_id', userId)
-        .asyncMap((_) => fetchMeetings(userId))
-        .handleError((_) {});
+        .map((rows) => rows
+            .map((row) => row['meeting_id']?.toString())
+            .whereType<String>()
+            .toSet()
+            .toList(growable: false));
   }
 
   Future<List<Meeting>> fetchMeetings(String userId) async {
@@ -68,7 +81,10 @@ class MeetingRepository {
         .from('meeting_participants')
         .stream(primaryKey: ['meeting_id', 'user_id'])
         .eq('meeting_id', meetingId)
-        .asyncMap((_) => fetchParticipants(meetingId));
+        .map((rows) => rows
+            .map((row) => MeetingParticipant.fromJson(Map<String, dynamic>.from(row)))
+            .toList(growable: false))
+        .handleError((_) {});
   }
 
   Future<List<MeetingParticipant>> fetchParticipants(String meetingId) async {
@@ -88,7 +104,10 @@ class MeetingRepository {
         .stream(primaryKey: ['id'])
         .eq('meeting_id', meetingId)
         .order('created_at')
-        .asyncMap((_) => fetchChat(meetingId));
+        .map((rows) => rows
+            .map((row) => MeetingChatMessage.fromJson(Map<String, dynamic>.from(row)))
+            .toList(growable: false))
+        .handleError((_) {});
   }
 
   Future<List<MeetingChatMessage>> fetchChat(String meetingId) async {
@@ -103,30 +122,15 @@ class MeetingRepository {
   }
 
   Stream<List<WhiteboardStroke>> watchStrokes(String meetingId) {
-    StreamSubscription<List<Map<String, dynamic>>>? subscription;
-    final controller = StreamController<List<WhiteboardStroke>>();
-    controller.onListen = () async {
-      try {
-        controller.add(await fetchStrokes(meetingId));
-      } catch (error, stackTrace) {
-        controller.addError(error, stackTrace);
-      }
-      subscription = _supabase
-          .from('meeting_whiteboard_strokes')
-          .stream(primaryKey: ['id'])
-          .eq('meeting_id', meetingId)
-          .order('created_at')
-          .listen(
-            (rows) {
-              controller.add(rows
-                  .map((row) => WhiteboardStroke.fromJson(Map<String, dynamic>.from(row)))
-                  .toList(growable: false));
-            },
-            onError: controller.addError,
-          );
-    };
-    controller.onCancel = () => subscription?.cancel();
-    return controller.stream;
+    return _supabase
+        .from('meeting_whiteboard_strokes')
+        .stream(primaryKey: ['id'])
+        .eq('meeting_id', meetingId)
+        .order('created_at')
+        .map((rows) => rows
+            .map((row) => WhiteboardStroke.fromJson(Map<String, dynamic>.from(row)))
+            .toList(growable: false))
+        .handleError((_) {});
   }
 
   Future<List<WhiteboardStroke>> fetchStrokes(String meetingId) async {

@@ -14,8 +14,21 @@ final _meetingsProvider = StreamProvider.family((ref, String userId) {
   return ref.watch(meetingRepositoryProvider).watchMeetings(userId);
 });
 
-class MeetingsScreen extends ConsumerWidget {
+class MeetingsScreen extends ConsumerStatefulWidget {
   const MeetingsScreen({super.key});
+
+  @override
+  ConsumerState<MeetingsScreen> createState() => _MeetingsScreenState();
+}
+
+class _MeetingsScreenState extends ConsumerState<MeetingsScreen> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -48,23 +61,55 @@ class MeetingsScreen extends ConsumerWidget {
           }
           final live = items.where((meeting) => !meeting.isEnded).toList();
           final past = items.where((meeting) => meeting.isEnded).toList();
-          return ListView(
+          return ListView.builder(
+            controller: _scrollController,
             padding: const EdgeInsets.all(16),
-            children: [
-              if (live.isNotEmpty) ...[
-                Text('Live and upcoming',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                ...live.map((meeting) => _MeetingTile(meeting: meeting)),
-                const SizedBox(height: 20),
-              ],
-              if (past.isNotEmpty) ...[
-                Text('Past meetings',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                ...past.map((meeting) => _MeetingTile(meeting: meeting)),
-              ],
-            ],
+            itemCount: (live.isNotEmpty ? 1 : 0) +
+                live.length +
+                (live.isNotEmpty && past.isNotEmpty ? 1 : 0) +
+                (past.isNotEmpty ? 1 : 0) +
+                past.length,
+            itemBuilder: (context, index) {
+              var offset = 0;
+              if (live.isNotEmpty) {
+                if (index == 0) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8, top: 4),
+                    child: Text('Live and upcoming',
+                        style: Theme.of(context).textTheme.titleMedium),
+                );
+                }
+                offset++;
+                if (index < offset + live.length) {
+                  return _MeetingTile(key: ValueKey(live[index - offset].id), meeting: live[index - offset]);
+                }
+                offset += live.length;
+                if (past.isNotEmpty) {
+                  if (index == offset) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8, top: 16),
+                      child: Text('Past meetings',
+                          style: Theme.of(context).textTheme.titleMedium),
+                    );
+                  }
+                  offset++;
+                }
+              }
+              if (past.isNotEmpty) {
+                if (index == offset) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8, top: 4),
+                    child: Text('Past meetings',
+                        style: Theme.of(context).textTheme.titleMedium),
+                  );
+                }
+                offset++;
+                if (index < offset + past.length) {
+                  return _MeetingTile(key: ValueKey(past[index - offset].id), meeting: past[index - offset]);
+                }
+              }
+              return const SizedBox.shrink();
+            },
           );
         },
         loading: () => const LoadingState(),
@@ -78,7 +123,7 @@ class MeetingsScreen extends ConsumerWidget {
 }
 
 class _MeetingTile extends StatelessWidget {
-  const _MeetingTile({required this.meeting});
+  const _MeetingTile({required this.meeting, super.key});
 
   final Meeting meeting;
 

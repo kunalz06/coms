@@ -132,6 +132,9 @@ class CallsScreen extends ConsumerWidget {
                       return ListView.separated(
                         padding: const EdgeInsets.all(16),
                         itemCount: items.length,
+                        addAutomaticKeepAlives: false,
+                        addRepaintBoundaries: false,
+                        cacheExtent: 300,
                         separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final call = items[index];

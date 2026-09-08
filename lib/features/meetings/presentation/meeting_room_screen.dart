@@ -188,10 +188,15 @@ class _MeetingRoomScreenState extends ConsumerState<MeetingRoomScreen> {
             currentUserId: userId,
             endForEveryone: true,
           );
+      // End meeting triggers cleanup of chat and whiteboard in repository
       await ref.read(meetingRepositoryProvider).endMeeting(
             meetingId: widget.meetingId,
             userId: userId,
           );
+      // Navigate away after ending
+      if (mounted) {
+        context.go(AppRoutes.meetings);
+      }
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -307,10 +312,12 @@ class _MeetingChat extends ConsumerStatefulWidget {
 
 class _MeetingChatState extends ConsumerState<_MeetingChat> {
   final _controller = TextEditingController();
+  final _scrollController = ScrollController();
 
   @override
   void dispose() {
     _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -328,7 +335,17 @@ class _MeetingChatState extends ConsumerState<_MeetingChat> {
                   message: 'Messages disappear when the meeting ends.',
                 );
               }
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_scrollController.hasClients) {
+                  _scrollController.animateTo(
+                    _scrollController.position.maxScrollExtent,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                  );
+                }
+              });
               return ListView.builder(
+                controller: _scrollController,
                 padding: const EdgeInsets.all(16),
                 itemCount: items.length,
                 itemBuilder: (context, index) {
@@ -431,10 +448,9 @@ class _ParticipantsPanelV2 extends ConsumerWidget {
     final raisedCount =
         participants.where((participant) => participant.handRaised).length;
 
-    return ListView.separated(
+    return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: sortedParticipants.length + 1,
-      separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, index) {
         if (index == 0) {
           return Padding(
@@ -463,6 +479,7 @@ class _ParticipantsPanelV2 extends ConsumerWidget {
         final participant = sortedParticipants[index - 1];
         final isMe = participant.userId == currentUserId;
         return ListTile(
+          key: ValueKey(participant.userId),
           leading: CircleAvatar(
             backgroundImage: participant.avatarUrl == null
                 ? null
@@ -716,6 +733,8 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
   var _tool = _WhiteboardTool.pen;
   var _penSize = 3.0;
   var _eraserSize = 18.0;
+  Size? _lastSize;
+  bool _isDrawing = false;
 
   @override
   Widget build(BuildContext context) {
@@ -729,36 +748,58 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
             actions: [SizedBox.shrink()],
           ),
         Expanded(
-          child: strokes.when(
-            data: (items) => GestureDetector(
-              onPanStart: canDraw
-                  ? (details) => setState(() {
-                        _draft
-                          ..clear()
-                          ..add(_pointFromLocal(context, details.localPosition));
-                      })
-                  : null,
-              onPanUpdate: canDraw
-                  ? (details) => setState(() {
-                        _draft.add(_pointFromLocal(context, details.localPosition));
-                      })
-                  : null,
-              onPanEnd: canDraw ? (_) => _commitStroke() : null,
-              child: CustomPaint(
-                painter: _WhiteboardPainter(
-                  strokes: items,
-                  draft: _draft,
-                  draftColor: _activeStrokeColor(context),
-                  draftWidth: _activeStrokeWidth,
-                  colorScheme: Theme.of(context).colorScheme,
-                  brightness: Theme.of(context).brightness,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final size = Size(constraints.maxWidth, constraints.maxHeight);
+              return strokes.when(
+                data: (items) => GestureDetector(
+                  onPanStart: canDraw && !_isDrawing
+                      ? (details) {
+                          setState(() {
+                            _lastSize = size;
+                            _draft.clear();
+                            _draft.add(_pointFromOffset(details.localPosition, size));
+                            _isDrawing = true;
+                          });
+                        }
+                      : null,
+                  onPanUpdate: canDraw && _isDrawing
+                      ? (details) {
+                          setState(() {
+                            _draft.add(_pointFromOffset(details.localPosition, size));
+                          });
+                        }
+                      : null,
+                  onPanEnd: canDraw && _isDrawing
+                      ? (_) {
+                          _commitStroke();
+                        }
+                      : null,
+                  onPanCancel: canDraw && _isDrawing
+                      ? () {
+                          setState(() {
+                            _draft.clear();
+                            _isDrawing = false;
+                          });
+                        }
+                      : null,
+                  child: CustomPaint(
+                    painter: _WhiteboardPainter(
+                      strokes: items,
+                      draft: _draft,
+                      draftColor: _activeStrokeColor(context),
+                      draftWidth: _activeStrokeWidth,
+                      colorScheme: Theme.of(context).colorScheme,
+                      brightness: Theme.of(context).brightness,
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
                 ),
-                child: const SizedBox.expand(),
-              ),
-            ),
-            loading: () => const LoadingState(),
-            error: (error, _) =>
-                EmptyState(title: 'Could not load board', message: '$error'),
+                loading: () => const LoadingState(),
+                error: (error, _) =>
+                    EmptyState(title: 'Could not load board', message: '$error'),
+              );
+            },
           ),
         ),
         SafeArea(
@@ -850,8 +891,7 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
     );
   }
 
-  WhiteboardPoint _pointFromLocal(BuildContext context, Offset offset) {
-    final size = context.size ?? Size.zero;
+  WhiteboardPoint _pointFromOffset(Offset offset, Size size) {
     return WhiteboardPoint(
       size.width <= 0
           ? 0
@@ -862,11 +902,25 @@ class _MeetingWhiteboardState extends ConsumerState<_MeetingWhiteboard> {
     );
   }
 
+  @override
+  void dispose() {
+    _draft.clear();
+    _isDrawing = false;
+    super.dispose();
+  }
+
   Future<void> _commitStroke() async {
+    if (_draft.isEmpty) {
+      setState(() => _isDrawing = false);
+      return;
+    }
     final points = List<WhiteboardPoint>.from(_draft);
     final color = _activeStrokeColor(context).value;
     final width = _activeStrokeWidth;
-    setState(_draft.clear);
+    setState(() {
+      _draft.clear();
+      _isDrawing = false;
+    });
     try {
       await ref.read(meetingRepositoryProvider).addStroke(
             meetingId: widget.meetingId,
