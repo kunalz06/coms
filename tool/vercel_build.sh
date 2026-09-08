@@ -90,4 +90,4 @@ for (const [key, value] of Object.entries(replacements)) {
 fs.writeFileSync(swPath, sw);
 NODE
 
-flutter build web --release --pwa-strategy=none --dart-define-from-file="$BUILD_ENV_FILE"
+flutter build web --release --pwa-strategy=none --dart-define-from-file="$BUILD_ENV_FILE" --wasm

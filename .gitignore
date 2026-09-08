@@ -1,33 +1,32 @@
-node_modules
-.next
-.next/
-.next/cache/
-out
-dist
-dist-server
+```
+# Dependency directories
+.pub-cache/
+.build/
+.dart_tool/
+.ios/
+.android/
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+macos/flutter/ephemeral/
+
+# Environment variables
 .env
 .env.local
-.env.*.local
-.env.example
-env/local.json
-.vercel.flutter.env.json
-build/
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.packages
-android/.gradle/
-android/local.properties
-android/key.properties
-ios/Pods/
-ios/.symlinks/
-ios/Flutter/Flutter.framework
-ios/Flutter/Flutter.podspec
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-dev-server*.log
-.next-dev*.log
-*.tsbuildinfo
+.env.*
+
+# Logs
+*.log
+**/logs
+
+# Coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# OS generated files
 .DS_Store
+Thumbs.db
+```

@@ -1485,6 +1485,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       ),
                       reverse: false,
                       itemCount: items.length + 1,
+                      addAutomaticKeepAlives: false,
+                      addRepaintBoundaries: false,
+                      cacheExtent: 500,
                       itemBuilder: (context, index) {
                     if (index == 0) {
                       if (redacted == 0 && _archiveRestoreError == null) {

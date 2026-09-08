@@ -108,6 +108,9 @@ class ChatsScreen extends ConsumerWidget {
                     }
                     return ListView.separated(
                       itemCount: visible.length,
+                      addAutomaticKeepAlives: false,
+                      addRepaintBoundaries: false,
+                      cacheExtent: 300,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final conversation = visible[index];
@@ -473,6 +476,9 @@ Future<void> _openGlobalSearch(BuildContext context, WidgetRef ref) async {
                             )
                           : ListView.builder(
                               itemCount: results.length,
+                              addAutomaticKeepAlives: false,
+                              addRepaintBoundaries: false,
+                              cacheExtent: 300,
                               itemBuilder: (context, index) {
                                 final result = results[index];
                                 return ListTile(
