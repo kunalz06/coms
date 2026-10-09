@@ -1,0 +1,50 @@
+name: Publish COMMS Android Preview
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/publish-android-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish verified APKs to GitHub Releases
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_RUN: '37913852801'
+      RELEASE_TAG: 'v0.1.0-android-preview'
+    steps:
+      - name: Confirm successful source build
+        shell: bash
+        run: |
+          set -euo pipefail
+          conclusion="$(gh api "repos/${GH_REPO}/actions/runs/${SOURCE_RUN}" --jq '.conclusion')"
+          test "${conclusion}" = 'success' || { echo "Source build was not successful: ${conclusion}"; exit 1; }
+          head_sha="$(gh api "repos/${GH_REPO}/actions/runs/${SOURCE_RUN}" --jq '.head_sha')"
+          test "${head_sha}" = '71fb15a5adddd90a7893567589f2188f6a2b1482' || { echo "Unexpected source commit: ${head_sha}"; exit 1; }
+      - name: Download verified Android APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh run download "${SOURCE_RUN}" --name comms-android-apks --dir release-assets
+          compgen -G 'release-assets/*-release.apk' >/dev/null
+      - name: Publish Android preview release
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd release-assets && sha256sum *-release.apk > SHA256SUMS.txt)
+          gh release create "${RELEASE_TAG}" \
+            release-assets/*-release.apk release-assets/SHA256SUMS.txt \
+            --target "${GITHUB_SHA}" \
+            --title 'COMMS Android Preview v0.1.0' \
+            --notes 'Pre-release Android APKs for installation and on-device testing. These files were produced by the successful Android CI run #37913852801 from commit 71fb15a5adddd90a7893567589f2188f6a2b1482, incorporated in merged PR #3. The CI-generated Android signing key is not persistent, so these builds are not suitable for in-place updates or Google Play production publication. Modern Android phones typically use the arm64-v8a APK.' \
+            --prerelease
