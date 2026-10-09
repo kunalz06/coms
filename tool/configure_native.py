@@ -47,13 +47,13 @@ def configure_android() -> None:
         raise FileNotFoundError(f"Flutter Android Gradle scaffold missing: {gradle_file}")
     gradle = gradle_file.read_text()
     gradle, ndk_count = re.subn(
-        r"(?m)^(\\s*)ndkVersion\\s*=\\s*flutter\\.ndkVersion\\s*$",
-        r'\\g<1>ndkVersion = "27.0.12077973"',
+        r"(?m)^(\s*)ndkVersion\s*=\s*flutter\.ndkVersion\s*$",
+        r'\g<1>ndkVersion = "27.0.12077973"',
         gradle,
     )
     gradle, sdk_count = re.subn(
-        r"(?m)^(\\s*)minSdk\\s*=\\s*flutter\\.minSdkVersion\\s*$",
-        r"\\g<1>minSdk = 23",
+        r"(?m)^(\s*)minSdk\s*=\s*flutter\.minSdkVersion\s*$",
+        r"\g<1>minSdk = 23",
         gradle,
     )
     if ndk_count != 1 or sdk_count != 1:
