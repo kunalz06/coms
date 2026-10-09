@@ -21,8 +21,8 @@ class ChatRepository {
 
   final SupabaseClient _supabase;
   final ApiClient _api;
-  static const _pollInterval = Duration(seconds: 2);
-  static const _maxPollInterval = Duration(seconds: 30);
+  static const _pollInterval = Duration(seconds: 5);
+  static const _maxPollInterval = Duration(seconds: 45);
   static const _messageWindowSize = 150;
 
   Stream<List<Conversation>> watchConversations(String userId) {
@@ -804,13 +804,20 @@ class ChatRepository {
     Duration activePollInterval = _pollInterval;
     var realtimeHealthy = false;
     var initialValueEmitted = false;
+    var pollInFlight = false;
 
     Future<void> emitPolled() async {
-      final next = await _withTransientRetry(poll);
-      if (equals(lastValue, next)) return;
-      lastValue = next;
-      if (!controller.isClosed) controller.add(next);
-      initialValueEmitted = true;
+      if (pollInFlight || controller.isClosed) return;
+      pollInFlight = true;
+      try {
+        final next = await _withTransientRetry(poll);
+        if (equals(lastValue, next)) return;
+        lastValue = next;
+        if (!controller.isClosed) controller.add(next);
+        initialValueEmitted = true;
+      } finally {
+        pollInFlight = false;
+      }
     }
 
     Future<void> startPolling({bool immediate = false}) async {
