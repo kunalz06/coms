@@ -33,6 +33,17 @@ The IPA is compiled on GitHub's macOS/Xcode runner at no CI-minute charge on
 standard public-repository runners. **Free compilation does not bypass
 Apple's code-signing requirements.**
 
+## Native FCM rollout order
+
+The database currently restricts `notification_devices.platform` to
+`web_pwa`. Before deploying the native API and enabling mobile push,
+apply `supabase/native_fcm_devices.sql` to the connected COMMS project in
+a reviewed maintenance window. This SQL is **not** applied automatically.
+The native code uses `firebase_messaging` token registration without a
+browser VAPID key; the API accepts `android` and `ios` device types.
+APNs setup, Android FCM notifications, foreground/background lifecycle and
+real-device push delivery still require dedicated end-to-end testing.
+
 ## Services and environment
 
 Flutter mobile loads the public client configuration from
