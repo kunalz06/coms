@@ -672,14 +672,6 @@ final _conversationListProvider = StreamProvider.family((ref, String userId) {
   return ref.watch(chatRepositoryProvider).watchConversations(userId);
 });
 
-final _unreadCountProvider =
-    FutureProvider.family<int, _UnreadArgs>((ref, args) {
-  return ref.watch(chatRepositoryProvider).unreadCount(
-        conversationId: args.conversationId,
-        userId: args.userId,
-      );
-});
-
 final _pinnedIdsProvider = StreamProvider.family((ref, String userId) {
   return ref.watch(chatRepositoryProvider).watchPinnedConversationIds(userId);
 });
@@ -691,23 +683,6 @@ final _mutedIdsProvider = StreamProvider.family((ref, String userId) {
 final _unreadIdsProvider = StreamProvider.family((ref, String userId) {
   return ref.watch(chatRepositoryProvider).watchUnreadConversationIds(userId);
 });
-
-class _UnreadArgs {
-  const _UnreadArgs(this.conversationId, this.userId);
-
-  final String conversationId;
-  final String userId;
-
-  @override
-  bool operator ==(Object other) {
-    return other is _UnreadArgs &&
-        other.conversationId == conversationId &&
-        other.userId == userId;
-  }
-
-  @override
-  int get hashCode => Object.hash(conversationId, userId);
-}
 
 class _MenuItemLabel extends StatelessWidget {
   const _MenuItemLabel({
