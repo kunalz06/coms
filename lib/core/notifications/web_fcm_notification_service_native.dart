@@ -102,6 +102,9 @@ class WebFcmNotificationService {
   }
 
   Future<void> registerCurrentToken() async {
+    if (_config.firebaseProjectId.isEmpty) {
+      throw const FormatException('Firebase project configuration is missing.');
+    }
     final token = await _messaging.getToken();
     if (token == null || token.isEmpty) {
       throw const FormatException('Could not register this device for notifications.');
