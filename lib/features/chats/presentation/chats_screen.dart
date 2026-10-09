@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../core/responsive/breakpoints.dart';
 import '../../../shared/widgets/comms_avatar.dart';
+import '../../../shared/widgets/comms_feature_banner.dart';
 import '../../../shared/widgets/state_views.dart';
 import '../../contacts/presentation/add_contact_sheet.dart';
 import '../../contacts/data/contact_repository.dart';
@@ -43,7 +44,15 @@ class ChatsScreen extends ConsumerWidget {
               width: wide ? 380 : constraints.maxWidth,
               child: Scaffold(
                 appBar: AppBar(
-                  title: const Text('Chats'),
+                  title: const Text('Messages'),
+                  bottom: const PreferredSize(
+                    preferredSize: Size.fromHeight(114),
+                    child: CommsFeatureBanner(
+                      title: 'Stay in the loop',
+                      subtitle: 'Your people, all in one place',
+                      icon: Icons.forum_rounded,
+                    ),
+                  ),
                   actions: [
                     IconButton(
                         onPressed: () => _openGlobalSearch(context, ref),
@@ -107,18 +116,24 @@ class ChatsScreen extends ConsumerWidget {
                               'Search by email or start a group when contacts are ready.');
                     }
                     return ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
                       itemCount: visible.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, __) => const SizedBox(height: 6),
                       itemBuilder: (context, index) {
                         final conversation = visible[index];
                         final locked = privacy.lockedConversationIds
                             .contains(conversation.id);
                         final muted = mutedIds.contains(conversation.id);
-                        final unread = ref.watch(_unreadCountProvider(
-                          _UnreadArgs(conversation.id, user.uid),
-                        ));
+                        // The bulk unread stream avoids two SQL requests per tile.
                         final hasUnread = unreadIds.contains(conversation.id);
                         return ListTile(
+                          tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            side: BorderSide(
+                              color: Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
                           leading: CommsAvatar(
                             name: conversation.title ??
                                 (conversation.isGroup
@@ -144,17 +159,11 @@ class ChatsScreen extends ConsumerWidget {
                                   child:
                                       Icon(Icons.volume_off_outlined, size: 18),
                                 ),
-                              unread.when(
-                                data: (count) => count > 0 || hasUnread
-                                    ? Badge(
-                                        label: Text(
-                                          count > 0 ? '$count' : '•',
-                                        ),
-                                      )
-                                    : const SizedBox.shrink(),
-                                loading: () => const SizedBox.shrink(),
-                                error: (_, __) => const SizedBox.shrink(),
-                              ),
+                              if (hasUnread)
+                                const Badge(
+                                  smallSize: 10,
+                                  child: SizedBox(width: 10, height: 10),
+                                ),
                               const SizedBox(width: 8),
                               PopupMenuButton<String>(
                                 icon: const Icon(Icons.more_vert),
