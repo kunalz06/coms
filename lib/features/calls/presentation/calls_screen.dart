@@ -7,6 +7,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/models/conversation.dart';
 import '../../chats/data/chat_repository.dart';
 import '../../../shared/widgets/state_views.dart';
+import '../../../shared/widgets/comms_feature_banner.dart';
 import '../data/call_controller.dart';
 import '../data/call_repository.dart';
 import '../domain/call_models.dart';
@@ -39,7 +40,7 @@ class CallsScreen extends ConsumerWidget {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Calls'),
+          title: const Text('Calls & video'),
           bottom: const TabBar(
             tabs: [
               Tab(text: 'Make Call'),
@@ -49,6 +50,11 @@ class CallsScreen extends ConsumerWidget {
         ),
         body: Column(
           children: [
+            const CommsFeatureBanner(
+              title: 'Closer, wherever you are',
+              subtitle: 'Crystal-clear voice and video calls',
+              icon: Icons.wifi_calling_3_rounded,
+            ),
             if (callActive && controller.isMinimized)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -132,10 +138,15 @@ class CallsScreen extends ConsumerWidget {
                       return ListView.separated(
                         padding: const EdgeInsets.all(16),
                         itemCount: items.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (_, __) => const SizedBox(height: 6),
                         itemBuilder: (context, index) {
                           final call = items[index];
                           return ListTile(
+                            tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                            ),
                             leading: Icon(
                               call.mode.name == 'video'
                                   ? Icons.videocam_outlined
@@ -211,6 +222,11 @@ class _MakeCallTab extends ConsumerWidget {
                 ? (conversation.title ?? 'Group call')
                 : (conversation.title ?? 'Direct call');
             return ListTile(
+              tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+                side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+              ),
               leading: CircleAvatar(
                 child: Icon(
                   conversation.isGroup ? Icons.groups : Icons.person,

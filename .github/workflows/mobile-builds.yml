@@ -1,0 +1,107 @@
+name: Mobile APK and unsigned IPA
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'pubspec.*'
+      - 'tool/configure_native.py'
+      - '.github/workflows/mobile-builds.yml'
+      - 'env/flutter.web.vercel.json'
+  push:
+    branches: [master]
+    paths:
+      - 'lib/**'
+      - 'pubspec.*'
+      - 'tool/configure_native.py'
+      - '.github/workflows/mobile-builds.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-typecheck:
+    name: API TypeScript typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked API dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check API types
+        run: npm run typecheck
+
+  android:
+    name: Android APKs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.2'
+          channel: stable
+      - name: Generate Android runner
+        run: flutter create --platforms=android --project-name=comms_flutter --org=com.example .
+      - name: Configure Android permissions
+        run: python3 tool/configure_native.py android
+      - name: Resolve Flutter packages
+        run: flutter pub get
+      - name: Flutter analyzer
+        run: flutter analyze --no-fatal-infos
+      - name: Run Dart tests
+        run: flutter test
+      - name: Build release APKs per ABI
+        run: flutter build apk --release --split-per-abi --dart-define-from-file=env/flutter.web.vercel.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: comms-android-apks
+          path: build/app/outputs/flutter-apk/*-release.apk
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  ios:
+    name: iOS unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.2'
+          channel: stable
+      - name: Generate iOS runner
+        run: flutter create --platforms=ios --project-name=comms_flutter --org=com.example .
+      - name: Configure iOS usage descriptions
+        run: python3 tool/configure_native.py ios
+      - name: Resolve Flutter packages
+        run: flutter pub get
+      - name: Build unsigned iPhone app
+        run: flutter build ios --release --no-codesign --dart-define-from-file=env/flutter.web.vercel.json
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d build/ios/iphoneos/Runner.app
+          mkdir -p "${RUNNER_TEMP}/comms-ipa/Payload"
+          ditto build/ios/iphoneos/Runner.app "${RUNNER_TEMP}/comms-ipa/Payload/Runner.app"
+          (cd "${RUNNER_TEMP}/comms-ipa" && zip -qry "${GITHUB_WORKSPACE}/Comms-unsigned.ipa" Payload)
+          unzip -t Comms-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: comms-ios-unsigned-ipa
+          path: Comms-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

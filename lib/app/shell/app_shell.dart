@@ -11,7 +11,7 @@ import '../../shared/widgets/comms_page_background.dart';
 import '../../shared/widgets/comms_logo.dart';
 import '../router/app_routes.dart';
 
-class AppShell extends ConsumerWidget {
+class AppShell extends ConsumerStatefulWidget {
   const AppShell({
     required this.location,
     required this.child,
@@ -21,10 +21,17 @@ class AppShell extends ConsumerWidget {
   final String location;
   final Widget child;
 
+  @override
+  ConsumerState<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends ConsumerState<AppShell> {
+  String? _connectedUserId;
+
   int get _index {
-    if (location.startsWith('/calls')) return 1;
-    if (location.startsWith('/meetings')) return 2;
-    if (location.startsWith('/settings')) return 3;
+    if (widget.location.startsWith('/calls')) return 1;
+    if (widget.location.startsWith('/meetings')) return 2;
+    if (widget.location.startsWith('/settings')) return 3;
     return 0;
   }
 
@@ -46,12 +53,20 @@ class AppShell extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final callState = ref.watch(callControllerProvider);
-    if (user != null) {
+    // Connect only when the authenticated user changes, not on every
+    // high-frequency WebRTC/call-state rebuild.
+    if (user == null) {
+      _connectedUserId = null;
+    } else if (_connectedUserId != user.uid) {
+      _connectedUserId = user.uid;
+      final id = user.uid;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(callControllerProvider.notifier).connect(user.uid);
+        if (mounted && FirebaseAuth.instance.currentUser?.uid == id) {
+          ref.read(callControllerProvider.notifier).connect(id);
+        }
       });
     }
 
@@ -68,7 +83,7 @@ class AppShell extends ConsumerWidget {
             onTap: kIsWeb
                 ? null
                 : () => FocusManager.instance.primaryFocus?.unfocus(),
-            child: child,
+            child: widget.child,
           ),
         ),
       ],
@@ -148,12 +163,13 @@ class AppShell extends ConsumerWidget {
               child: Row(
                 children: [
                   NavigationRail(
+                    groupAlignment: -0.7,
                     selectedIndex: _index,
                     onDestinationSelected: (index) => _go(context, index),
                     labelType: NavigationRailLabelType.all,
                     leading: const Padding(
                       padding: EdgeInsets.only(bottom: 18),
-                      child: CommsLogo(size: 34),
+                      child: CommsLogo(size: 42),
                     ),
                     destinations: const [
                       NavigationRailDestination(

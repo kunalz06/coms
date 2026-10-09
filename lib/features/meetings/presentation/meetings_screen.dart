@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../shared/widgets/state_views.dart';
+import '../../../shared/widgets/comms_feature_banner.dart';
 import '../data/meeting_models.dart';
 import '../data/meeting_repository.dart';
 
@@ -25,6 +26,14 @@ class MeetingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Meetings'),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(114),
+          child: CommsFeatureBanner(
+            title: 'Make space for ideas',
+            subtitle: 'Meet, share and create together',
+            icon: Icons.video_camera_front_rounded,
+          ),
+        ),
         actions: [
           IconButton(
             tooltip: 'Create meeting link',
@@ -49,7 +58,7 @@ class MeetingsScreen extends ConsumerWidget {
           final live = items.where((meeting) => !meeting.isEnded).toList();
           final past = items.where((meeting) => meeting.isEnded).toList();
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
             children: [
               if (live.isNotEmpty) ...[
                 Text('Live and upcoming',

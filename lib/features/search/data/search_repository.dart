@@ -31,7 +31,7 @@ class SearchRepository {
     if (trimmed.length < 2) return const [];
     final rows = await _supabase
         .from('messages')
-        .select()
+        .select('id,conversation_id,sender_id,kind,content,created_at')
         .ilike('content', '%$trimmed%')
         .isFilter('deleted_for_everyone_at', null)
         .order('created_at', ascending: false)
@@ -52,14 +52,19 @@ class SearchRepository {
         .toSet()
         .toList(growable: false);
 
-    final conversationRows = await _supabase
-        .from('conversations')
-        .select('id,type,title,user_one_id,user_two_id')
-        .inFilter('id', conversationIds);
-    final profileRows = await _supabase
-        .from('user_profiles')
-        .select('id,full_name,email')
-        .inFilter('id', senderIds);
+    // Resolve independent search metadata requests concurrently.
+    final metadata = await Future.wait([
+      _supabase
+          .from('conversations')
+          .select('id,type,title,user_one_id,user_two_id')
+          .inFilter('id', conversationIds),
+      _supabase
+          .from('user_profiles')
+          .select('id,full_name,email')
+          .inFilter('id', senderIds),
+    ]);
+    final conversationRows = metadata[0];
+    final profileRows = metadata[1];
 
     final profileById = <String, String>{};
     for (final row in profileRows) {

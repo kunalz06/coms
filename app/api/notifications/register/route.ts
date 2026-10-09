@@ -15,7 +15,8 @@ export async function POST(request: Request) {
   try {
     const decoded = await verifyFirebaseRequest(request);
     const body = (await request.json()) as RegisterBody;
-    if (body.platform !== "web_pwa" || body.provider !== "fcm") {
+    const platform = body.platform;
+    if (!["web_pwa", "android", "ios"].includes(platform ?? "") || body.provider !== "fcm") {
       return NextResponse.json({ message: "Unsupported notification device." }, { status: 400 });
     }
     if (!body.token?.trim()) {
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     const { error: deviceError } = await supabase.from("notification_devices").upsert(
       {
         user_id: decoded.uid,
-        platform: "web_pwa",
+        platform,
         provider: "fcm",
         token: body.token.trim(),
         enabled: true,

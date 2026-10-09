@@ -96,7 +96,9 @@ class CloudinaryUploadService {
     );
     if (!decision.allowed) throw FormatException(decision.message);
 
-    var uploadBytesData = Uint8List.fromList(bytes);
+    // PlatformFile may already supply typed bytes: do not duplicate large
+    // photo/video buffers before upload.
+    var uploadBytesData = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
     var uploadMimeType = mimeType;
     var uploadFileName = fileName;
 
@@ -142,13 +144,23 @@ class CloudinaryUploadService {
       'folder': signed.folder,
     });
 
+    var lastProgress = -1;
+    void reportProgress(int sent, int total) {
+      if (total <= 0) return;
+      final progress = ((sent / total) * 100).round();
+      if (progress != lastProgress) {
+        lastProgress = progress;
+        onProgress(progress);
+      }
+    }
+
     Response<Map<String, dynamic>> response;
     try {
       response = await _dio.post<Map<String, dynamic>>(
         'https://api.cloudinary.com/v1_1/${_config.cloudinaryCloudName}/$resource/upload',
         data: form,
         onSendProgress: (sent, total) {
-          if (total > 0) onProgress(((sent / total) * 100).round());
+          reportProgress(sent, total);
         },
       );
     } on DioException catch (error) {
@@ -160,7 +172,7 @@ class CloudinaryUploadService {
             'https://api.cloudinary.com/v1_1/${_config.cloudinaryCloudName}/auto/upload',
             data: form,
             onSendProgress: (sent, total) {
-              if (total > 0) onProgress(((sent / total) * 100).round());
+              reportProgress(sent, total);
             },
           );
         } on DioException catch (retryError) {
@@ -176,7 +188,7 @@ class CloudinaryUploadService {
       throw const FormatException('Cloudinary did not return an upload URL.');
     }
 
-    onProgress(100);
+    if (lastProgress != 100) onProgress(100);
     return AttachmentDraft(
       url: data['secure_url'] as String,
       publicId: data['public_id'] as String? ?? '',
