@@ -16,7 +16,8 @@ class WebRtcCallService {
   MediaStream? _localStream;
   MediaStream? _screenStream;
   MediaStream? _previewStream;
-  CallVideoQuality _videoQuality = CallVideoQuality.p720;
+  // Start at a battery- and bandwidth-friendly tier; users can select 720p.
+  CallVideoQuality _videoQuality = CallVideoQuality.p480;
 
   MediaStream? get localStream => _localStream;
   MediaStream? get previewStream =>
@@ -253,7 +254,7 @@ class WebRtcCallService {
     }
     return {
       'iceServers': iceServers,
-      'iceCandidatePoolSize': 4,
+      'iceCandidatePoolSize': 2,
     };
   }
 
