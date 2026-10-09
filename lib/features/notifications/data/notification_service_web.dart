@@ -79,7 +79,7 @@ class NotificationService {
     final p256dh = subscription.getKey('p256dh');
     final auth = subscription.getKey('auth');
     final endpoint = subscription.endpoint;
-    if (endpoint == null || p256dh == null || auth == null) {
+    if (endpoint.isEmpty || p256dh == null || auth == null) {
       throw const FormatException('Browser did not provide push keys.');
     }
 
