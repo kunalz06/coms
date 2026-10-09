@@ -10,6 +10,7 @@ type DeviceRow = {
   id: string;
   user_id: string;
   token: string;
+  platform: "web_pwa" | "android" | "ios";
 };
 
 function stringData(payload: FcmPayload) {
@@ -48,10 +49,10 @@ export async function sendFcmDataToUsers(
 
   const { data: devices, error } = await supabase
     .from("notification_devices")
-    .select("id,user_id,token")
+    .select("id,user_id,token,platform")
     .in("user_id", uniqueUserIds)
     .eq("provider", "fcm")
-    .eq("platform", "web_pwa")
+    .in("platform", ["web_pwa", "android", "ios"])
     .eq("enabled", true);
   if (error) throw new Error(error.message);
   const deviceRows = (devices ?? []) as DeviceRow[];
@@ -83,11 +84,26 @@ export async function sendFcmDataToUsers(
         await messaging.send({
           token: device.token,
           data,
-          webpush: {
-            fcmOptions: {
-              link: String(payload.targetUrl ?? payload.url ?? "/app")
-            }
-          }
+          ...(device.platform === "web_pwa"
+            ? {
+                webpush: {
+                  fcmOptions: {
+                    link: String(payload.targetUrl ?? payload.url ?? "/app")
+                  }
+                }
+              }
+            : {}),
+          ...(device.platform === "android"
+            ? { android: { priority: "high" as const } }
+            : {}),
+          ...(device.platform === "ios"
+            ? {
+                apns: {
+                  headers: { "apns-priority": "5" },
+                  payload: { aps: { contentAvailable: true } }
+                }
+              }
+            : {})
         });
         sent += 1;
         await logNotificationEvent(supabase, {
