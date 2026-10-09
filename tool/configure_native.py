@@ -40,6 +40,26 @@ def configure_android() -> None:
     application.set(f"{{{ANDROID_NS}}}label", "COMMS")
     tree.write(manifest, encoding="utf-8", xml_declaration=True)
 
+    # Flutter generates Kotlin Gradle files dynamically in CI. Align their
+    # minimum SDK and NDK with the plugins for voice recording and WebRTC.
+    gradle_file = ROOT / "android/app/build.gradle.kts"
+    if not gradle_file.is_file():
+        raise FileNotFoundError(f"Flutter Android Gradle scaffold missing: {gradle_file}")
+    gradle = gradle_file.read_text()
+    gradle, ndk_count = re.subn(
+        r"(?m)^(\\s*)ndkVersion\\s*=\\s*flutter\\.ndkVersion\\s*$",
+        r'\\g<1>ndkVersion = "27.0.12077973"',
+        gradle,
+    )
+    gradle, sdk_count = re.subn(
+        r"(?m)^(\\s*)minSdk\\s*=\\s*flutter\\.minSdkVersion\\s*$",
+        r"\\g<1>minSdk = 23",
+        gradle,
+    )
+    if ndk_count != 1 or sdk_count != 1:
+        raise ValueError(f"Unexpected Android Gradle layout: ndk={ndk_count}, minSdk={sdk_count}")
+    gradle_file.write_text(gradle)
+
 
 def configure_ios() -> None:
     info_path = ROOT / "ios/Runner/Info.plist"
