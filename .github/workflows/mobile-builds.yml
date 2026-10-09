@@ -26,6 +26,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  api-typecheck:
+    name: API TypeScript typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked API dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check API types
+        run: npm run typecheck
+
   android:
     name: Android APKs
     runs-on: ubuntu-24.04
