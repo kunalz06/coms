@@ -18,7 +18,8 @@ class GroupWebRtcCallService {
   MediaStream? _localStream;
   MediaStream? _screenStream;
   MediaStream? _previewStream;
-  CallVideoQuality _videoQuality = CallVideoQuality.p720;
+  // Start at a battery- and bandwidth-friendly tier; users can select 720p.
+  CallVideoQuality _videoQuality = CallVideoQuality.p480;
 
   MediaStream? get localStream => _localStream;
   MediaStream? get previewStream =>
@@ -268,7 +269,7 @@ class GroupWebRtcCallService {
           'credential': _config.turnCredential,
       });
     }
-    return {'iceServers': iceServers, 'iceCandidatePoolSize': 4};
+    return {'iceServers': iceServers, 'iceCandidatePoolSize': 2};
   }
 
   Map<String, dynamic> _mediaConstraints(
