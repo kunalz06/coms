@@ -70,6 +70,7 @@ class NotificationService {
       throw const FormatException('Browser push notifications are not supported.');
     }
     final existing = await pushManager.getSubscription();
+    // ignore: dead_null_aware_expression
     final subscription = existing ??
         await pushManager.subscribe({
           'userVisibleOnly': true,
@@ -79,7 +80,7 @@ class NotificationService {
     final p256dh = subscription.getKey('p256dh');
     final auth = subscription.getKey('auth');
     final endpoint = subscription.endpoint;
-    if (endpoint.isEmpty || p256dh == null || auth == null) {
+    if (endpoint == null || p256dh == null || auth == null) {
       throw const FormatException('Browser did not provide push keys.');
     }
 
