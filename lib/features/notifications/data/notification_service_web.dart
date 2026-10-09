@@ -69,10 +69,12 @@ class NotificationService {
     if (pushManager == null) {
       throw const FormatException('Browser push notifications are not supported.');
     }
-    final existing = await pushManager.getSubscription();
-    // ignore: dead_null_aware_expression
-    final subscription = existing ??
-        await pushManager.subscribe({
+    // The legacy dart:html signature is non-nullable even though the browser
+    // can return null when no subscription exists yet.
+    final Object? existing = await pushManager.getSubscription();
+    final subscription = existing is html.PushSubscription
+        ? existing
+        : await pushManager.subscribe({
           'userVisibleOnly': true,
           'applicationServerKey': publicKey,
         });
