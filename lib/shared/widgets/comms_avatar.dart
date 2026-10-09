@@ -16,12 +16,26 @@ class CommsAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final initial =
         name.trim().isEmpty ? 'C' : name.trim().characters.first.toUpperCase();
+    final url = imageUrl;
+    final pixelSize = (radius * 2 * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(32, 256);
+    final provider = url == null || url.isEmpty
+        ? null
+        : ResizeImage(
+            NetworkImage(url),
+            width: pixelSize,
+            height: pixelSize,
+          );
+    final scheme = Theme.of(context).colorScheme;
     return CircleAvatar(
       radius: radius,
-      backgroundImage: imageUrl == null || imageUrl!.isEmpty
-          ? null
-          : NetworkImage(imageUrl!),
-      child: imageUrl == null || imageUrl!.isEmpty ? Text(initial) : null,
+      backgroundColor: scheme.primaryContainer,
+      foregroundColor: scheme.onPrimaryContainer,
+      backgroundImage: provider,
+      child: provider == null
+          ? Text(initial, style: const TextStyle(fontWeight: FontWeight.w800))
+          : null,
     );
   }
 }
