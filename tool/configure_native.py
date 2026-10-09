@@ -61,14 +61,13 @@ def configure_ios() -> None:
     if podfile.exists():
         contents = podfile.read_text()
         contents = re.sub(
-            r"^#?\\s*platform :ios, ['\\\"]\\d+(?:\\.\\d+)*['\\\"]",
+            r"(?m)^#?\s*platform :ios, ['\"][^'\"]+['\"]",
             "platform :ios, '14.0'",
             contents,
             count=1,
-            flags=re.MULTILINE,
         )
         if "platform :ios, '14.0'" not in contents:
-            contents = "platform :ios, '14.0'\\n" + contents
+            contents = "platform :ios, '14.0'\n" + contents
         podfile.write_text(contents)
 
 
